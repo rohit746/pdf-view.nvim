@@ -1,3 +1,5 @@
 *.png
+# ... except the README screenshots
+!assets/*.png
 .DS_Store
 doc/tags

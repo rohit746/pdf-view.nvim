@@ -1,16 +1,38 @@
+<div align="center">
+
 # pdf-view.nvim
 
-Read PDFs inside Neovim, like [tdf](https://github.com/itsjunetime/tdf) but as a normal buffer: `nvim paper.pdf`,
-`:edit paper.pdf` or `:PdfView paper.pdf` show the page as a sharp image that is fitted to the window, and
-`j`/`k` turn the pages. `+` and `-` zoom, after which the same keys scroll the page; `w` fits the page to the window's
-width. `/` searches the whole document and highlights every match, `gO` jumps to a bookmark. When the file changes on
-disk (a LaTeX or Typst build, say) the page refreshes by itself.
+_Read PDFs inside Neovim as normal buffers — sharp, scrollable, searchable._
+
+[![CI](https://github.com/rohit746/pdf-view.nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/rohit746/pdf-view.nvim/actions/workflows/ci.yml)
+[![Neovim](https://img.shields.io/badge/Neovim-%3E%3D0.11-green?logo=neovim&logoColor=white)](https://neovim.io)
+[![MuPDF](https://img.shields.io/badge/MuPDF-mutool-blue)](https://mupdf.com)
+[![License](https://img.shields.io/github/license/rohit746/pdf-view.nvim)](LICENSE)
+
+`nvim paper.pdf` · `:edit paper.pdf` · `:PdfView paper.pdf`
+
+</div>
+
+---
+
+Open a PDF as a regular buffer — like [tdf](https://github.com/itsjunetime/tdf), but as a normal buffer:
+the page is shown as a sharp image fitted to the
+window, and `j`/`k` turn the pages. `+` and `-` zoom (then the same keys scroll
+the page), `w` fits the width, `/` searches the whole document with every match
+highlighted, `gO` jumps to a bookmark. When the file changes on disk — a LaTeX
+or Typst build, say — the page refreshes by itself.
 
 - Pages are rendered by [MuPDF](https://mupdf.com)'s `mutool` and drawn with the
   [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) using Unicode placeholders, so the
   image behaves like text: it follows splits, tabs, resizes and works inside tmux.
 - No dependency on other plugins, ImageMagick or Ghostscript.
 - Opening a PDF never reads its bytes into a buffer, and `:w` can never overwrite it.
+
+<div align="center">
+
+<img src="assets/screenshot-ghostty.png" width="800" alt="pdf-view.nvim rendering a PDF in Ghostty">
+
+</div>
 
 ## Requirements
 
@@ -23,7 +45,8 @@ disk (a LaTeX or Typst build, say) the page refreshes by itself.
 - Inside tmux (3.3a or newer): nothing to configure, the plugin runs `tmux set -p allow-passthrough on` for its own
   pane. To manage it yourself, set `tmux_passthrough = false` and add `set -g allow-passthrough on` to `tmux.conf`.
 
-Run `:checkhealth pdf-view` to verify all of this.
+> [!TIP]
+> Run `:checkhealth pdf-view` to verify all of this.
 
 ## Installation
 
@@ -102,7 +125,8 @@ All are buffer-local, normal mode, and take a count.
 | `q`                          | close the viewer (never quits Neovim)                                           |
 | `g?`                         | show this list                                                                  |
 
-`<Space>` is deliberately unbound so `<leader>` mappings keep working.
+> [!NOTE]
+> `<Space>` is deliberately unbound so `<leader>` mappings keep working.
 
 ### Zoom
 
@@ -138,6 +162,7 @@ a translucent fill instead, which dulls the text under a match a little). The co
 
 `gO` lists the document's bookmarks, indented by depth, through `vim.ui.select` (a picker such as snacks.nvim's if you
 use one) and jumps to the chosen page. Documents without bookmarks say so.
+
 ## Configuration
 
 `setup()` is optional. These are the defaults:
