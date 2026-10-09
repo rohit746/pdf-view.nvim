@@ -1,0 +1,133 @@
+*pdf-view.txt*  Read PDFs inside Neovim
+
+==============================================================================
+INTRODUCTION                                                     *pdf-view*
+
+pdf-view.nvim shows PDF pages as images inside a normal buffer. Pages are
+rendered with MuPDF's `mutool` and drawn with the Kitty graphics protocol
+(Unicode placeholders), so the page follows splits, tabs and resizes.
+
+Requirements: Neovim 0.11+, 'termguicolors', `mutool` (with JavaScript), and
+kitty or Ghostty (optionally inside tmux). Run `:checkhealth pdf-view`.
+
+==============================================================================
+USAGE                                                      *pdf-view-usage*
+
+                                                                  *:PdfView*
+:PdfView {file}         Open the PDF {file} in the current window. Without an
+                        argument the current buffer is used if it is a PDF.
+
+With |pdf-view-config| `auto_open` (the default) every `*.pdf` that is read
+(`:edit`, `nvim file.pdf`, |:split|, ...) becomes a viewer.
+
+The viewer is a buffer named after the file with 'buftype' `nofile` and
+'filetype' `pdf-view`. Its winbar shows "<file>  <page> / <pages>".
+
+                                                              *pdf-view-keys*
+All keys are buffer-local, normal mode, and accept a count.
+
+  j <Down>                scroll down; at the bottom edge, or when not zoomed,
+                          next page ({count} times)
+  k <Up>                  scroll up; at the top edge, or when not zoomed,
+                          previous page
+  l <Right>               scroll right; at the right edge, or when not
+                          zoomed, next page
+  h <Left>                scroll left; at the left edge, or when not zoomed,
+                          previous page
+  <PageDown> <C-f>        next page, always ({count} pages ahead)
+  <PageUp> <BS> <C-b>     previous page, always
+  gg <Home>               first page, or page {count}
+  G <End>                 last page, or page {count}
+  + =                     zoom in ({count} steps)
+  -                       zoom out; from a width/height fit, to the whole page
+  0                       fit the whole page to the window
+  w                       fit the page's width to the window
+  W                       fit the page's height to the window
+  /                       search forward (prompts for text)
+  ?                       search backward
+  n N                     next / previous match ({count} matches)
+  <Esc>                   remove the search highlights
+  gO                      pick a bookmark and go to its page
+  r                       re-render the current page
+  q                       close the viewer
+  g?                      show the keys
+
+                                                              *pdf-view-zoom*
+Zoom 1 is the whole page fitted to the window; each `+` (see |pdf-view-keys|)
+makes it `zoom_step` times larger, up to `max_zoom`. Zooming keeps the middle of the
+window in the middle. Once the page is larger than the window a movement key
+scrolls it if it can and turns the page if it cannot: scrolling down past the
+bottom lands at the top of the next page, scrolling up past the top lands at
+the bottom of the previous one. The zoom stays when pages turn or the file
+reloads, and the winbar shows it.
+
+                                                                *pdf-view-fit*
+`w` fits the page's width to the window (starting at the top of the page) and
+`W` fits its height. Each page is fitted by its own size, and the mode
+survives resizes and page turns. Zoom multiplies the fitted size: `-` steps
+back to the fitted size and then to the whole page, `0` goes there directly.
+
+                                                              *pdf-view-search*
+`/` and `?` prompt (via |vim.ui.input()|) for text and search the whole
+document, ignoring case. Every match on the page is highlighted, the current
+one in another colour (see `highlight`), and the winbar shows "/text 3/17".
+`n` and `N` step between matches across pages, wrapping around; a zoomed or
+fitted view scrolls only when the match is not already on screen. `<Esc>`
+clears the highlights. At most `search_limit` matches are collected. The
+search repeats itself when the file changes.
+
+                                                            *pdf-view-outline*
+`gO` lists the document's bookmarks through |vim.ui.select()|, indented by
+depth, and goes to the chosen page.
+
+==============================================================================
+LUA API                                                      *pdf-view-api*
+
+require("pdf-view").setup({opts})                    *pdf-view.setup()*
+    Configure the plugin; optional. See |pdf-view-config|.
+
+require("pdf-view").open({path})                     *pdf-view.open()*
+    Open {path} in the current window. Errors if it is not a readable file.
+
+require("pdf-view").reload({buf})                    *pdf-view.reload()*
+    Re-render the page shown in {buf} (default: current buffer).
+
+require("pdf-view").status({buf})                    *pdf-view.status()*
+    Returns "page / pages" for a viewer buffer ("page / pages width x1.25"
+    while fitted to the width and zoomed), "" otherwise. Handy in a
+    statusline: `%{v:lua.require'pdf-view'.status()}`.
+
+==============================================================================
+CONFIGURATION                                              *pdf-view-config*
+
+>lua
+    require("pdf-view").setup({
+      auto_open = true,        -- take over *.pdf buffers
+      live_reload = true,      -- re-render when the file changes on disk
+      reload_delay = 200,      -- ms the file must stay quiet before reloading
+      winbar = true,           -- page indicator in the winbar
+      mutool = "mutool",
+      transmission = "auto",   -- "auto" | "file" | "direct"
+      tmux_passthrough = true, -- tmux set -p allow-passthrough on
+      force = false,           -- skip terminal detection
+      max_pixels = 4096,       -- cap for either side of a fitted page
+      zoom_step = 1.25,        -- factor of one zoom step
+      max_zoom = 8,            -- largest zoom, relative to the fitted page
+      pan_step = 0.2,          -- one scroll key moves this fraction of the window
+      search_limit = 5000,     -- stop collecting matches after this many
+      highlight = { match = "#ffe14d", current = "#ff8c1a" },
+      cell_size = nil,         -- { width, height } px if undetectable
+      keymaps = { ... },       -- see README; `false` disables all
+    })
+<
+
+Unknown or mistyped options raise an error.
+
+==============================================================================
+SNACKS.NVIM                                              *pdf-view-snacks*
+
+snacks.nvim's image module also claims `*.pdf` buffers. Remove "pdf" from
+`image.formats` in the snacks options so only one handler draws the page.
+`:checkhealth pdf-view` reports a conflict.
+
+vim:tw=78:ts=8:ft=help:norl:
