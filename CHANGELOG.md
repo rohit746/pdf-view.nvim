@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-10
+
 ### Fixed
 
 - Zoom, fit width/height and search highlights drew a blank page on MuPDF 1.23 (the package in Ubuntu 24.04), where
@@ -46,5 +48,6 @@ First release.
   colour setup.
 - Configuration with validation: unknown or mistyped options raise immediately.
 
-[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rohit746/pdf-view.nvim/releases/tag/v0.1.0
