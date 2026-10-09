@@ -83,15 +83,17 @@ local function check_mutool()
   )
   os.remove(png)
 
-  report(
-    "zoomed rendering with highlights",
-    await(function(cb)
-      local clip =
-        { scale_x = 2, scale_y = 2, x = 10, y = 10, width = 80, height = 80, highlights = "5,5,40,40,ffe14d" }
-      mupdf.render_clip(file, 1, clip, png, cb)
-    end),
-    "zoomed rendering and search highlights work"
-  )
+  local clipped = await(function(cb)
+    local clip = { scale_x = 2, scale_y = 2, x = 10, y = 10, width = 80, height = 80, highlights = "5,5,40,40,ffe14d" }
+    mupdf.render_clip(file, 1, clip, png, cb)
+  end)
+  report("zoomed rendering with highlights", clipped, "zoomed rendering and search highlights work")
+  if clipped and not clipped[1] and (clipped[2] or ""):find("translucent", 1, true) then
+    vim.health.warn("this MuPDF cannot multiply highlights onto the page (that needs MuPDF 1.27 or newer)", {
+      "Search matches are drawn as a translucent fill instead, so text under a match is a little duller.",
+      "Everything else is unaffected.",
+    })
+  end
   os.remove(png)
 
   report(

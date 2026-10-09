@@ -17,6 +17,7 @@ local function await(start)
 end
 
 local png_size = fixture.png_size
+local unpack = table.unpack or unpack
 
 if vim.fn.executable("mutool") ~= 1 then
   io.stdout:write("  skip  mupdf (mutool not installed)\n")
@@ -143,17 +144,20 @@ describe("mupdf", function()
       clip(red, 1, 40, 10000, 20000, 800, 600)
     end)
 
-    it("multiplies highlights onto the page", function()
+    it("draws highlights onto the page, multiplied where MuPDF can", function()
       -- scale 1: a yellow box over blank page, in page points from the top-left corner
       local out = clip(white, 1, 1, 0, 0, 300, 300, "100.00,100.00,200.00,150.00,ffe14d")
-      eq(
-        { { 255, 225, 77 }, { 255, 255, 255 }, { 255, 255, 255 } },
-        fixture.pixels(out, { { 150, 125 }, { 50, 50 }, { 250, 125 } })
-      )
+      local inside, above, right = unpack(fixture.pixels(out, { { 150, 125 }, { 50, 50 }, { 250, 125 } }))
+      eq("yellow", fixture.classify(inside))
+      eq({ 255, 255, 255 }, above, "outside the box")
+      eq({ 255, 255, 255 }, right, "outside the box")
+      if fixture.highlight_mode() == "multiply" then
+        eq({ 255, 225, 77 }, inside, "white multiplied by the highlight colour is that colour")
+      end
     end)
 
     it("keeps text readable under a highlight", function()
-      -- the label is drawn near x=30, y=396 (792 / 2) from the bottom: cover it and look for ink and for tint
+      -- the label is drawn near x=30, y=396 (792 / 2) from the bottom: cover it and compare ink with background
       local points = {}
       for gx = 30, 130, 4 do
         for gy = 365, 400, 2 do
@@ -161,17 +165,40 @@ describe("mupdf", function()
         end
       end
       local out = clip(white, 1, 1, 0, 0, 300, 500, "20.00,360.00,140.00,405.00,ffe14d")
-      local ink, tint = false, false
+      local darkest, brightest = math.huge, 0
       for _, rgb in ipairs(fixture.pixels(out, points)) do
-        ink = ink or (rgb[1] + rgb[2] + rgb[3] < 150)
-        tint = tint or (rgb[1] == 255 and rgb[2] == 225 and rgb[3] == 77)
+        local sum = rgb[1] + rgb[2] + rgb[3]
+        darkest, brightest = math.min(darkest, sum), math.max(brightest, sum)
       end
-      eq({ true, true }, { ink, tint }, "dark text and yellow background are both present")
+      truthy(brightest < 765, "the background under the highlight is tinted")
+      truthy(
+        darkest < 0.6 * brightest,
+        ("text stays much darker than the tinted background (%d vs %d)"):format(darkest, brightest)
+      )
     end)
 
     it("draws each highlight in its own colour", function()
       local out = clip(white, 1, 1, 0, 0, 300, 300, "10.00,10.00,60.00,60.00,ffe14d;100.00,10.00,150.00,60.00,ff8c1a")
-      eq({ { 255, 225, 77 }, { 255, 140, 26 } }, fixture.pixels(out, { { 30, 30 }, { 120, 30 } }))
+      local first, second = unpack(fixture.pixels(out, { { 30, 30 }, { 120, 30 } }))
+      eq({ "yellow", "orange" }, { fixture.classify(first), fixture.classify(second) })
+      if fixture.highlight_mode() == "multiply" then
+        eq({ { 255, 225, 77 }, { 255, 140, 26 } }, { first, second })
+      end
+    end)
+
+    it("says how it drew the highlights", function()
+      local _, notes = await(function(cb)
+        mupdf.render_clip(
+          white,
+          1,
+          { scale_x = 1, scale_y = 1, x = 0, y = 0, width = 50, height = 50, highlights = "0,0,10,10,ffe14d" },
+          dir .. "/notes.png",
+          function(err, text)
+            cb(err, text)
+          end
+        )
+      end)
+      truthy(notes == "highlights: multiply" or notes == "highlights: translucent", tostring(notes))
     end)
 
     it("reports a page that does not exist", function()

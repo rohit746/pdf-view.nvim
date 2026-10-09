@@ -673,7 +673,7 @@ local function colour_at(match)
   return fixture.pixels(png, { { x, y } })[1]
 end
 
-local YELLOW, ORANGE = { 255, 225, 77 }, { 255, 140, 26 }
+local classify = fixture.classify
 
 describe("viewer search", function()
   setup()
@@ -696,8 +696,8 @@ describe("viewer search", function()
     end)
     eq(3, #s.search.matches)
     eq({ 1, 1 }, { s.search.current, s.page })
-    eq(ORANGE, colour_at(s.search.matches[1]), "the current match")
-    eq(YELLOW, colour_at(s.search.matches[2]), "another match")
+    eq("orange", classify(colour_at(s.search.matches[1])), "the current match")
+    eq("yellow", classify(colour_at(s.search.matches[2])), "another match")
     truthy(vim.wo.winbar:find("/alpha 1/3", 1, true), vim.wo.winbar)
   end)
 
@@ -711,8 +711,8 @@ describe("viewer search", function()
     press("n")
     searched(s)
     eq({ 2, 1 }, { s.search.current, s.page })
-    eq(ORANGE, colour_at(s.search.matches[2]))
-    eq(YELLOW, colour_at(s.search.matches[1]), "the previous current match goes back to yellow")
+    eq("orange", classify(colour_at(s.search.matches[2])))
+    eq("yellow", classify(colour_at(s.search.matches[1])), "the previous current match goes back to yellow")
     press("n")
     on_page(s, 3)
     eq(3, s.search.current)
@@ -790,7 +790,7 @@ describe("viewer search", function()
     end)
     eq(nil, s.search)
     truthy(notes[1] and notes[1]:find("no matches for `zzzz`", 1, true), vim.inspect(notes))
-    eq({ 255, 255, 255 }, colour_at({ rects = { { 20, 395, 0, 0 } }, width = 612, height = 792 }), "no highlight left")
+    eq("white", classify(colour_at({ rects = { { 20, 395, 0, 0 } }, width = 612, height = 792 })), "no highlight left")
   end)
 
   it("explains n without a search", function()
@@ -860,7 +860,6 @@ describe("viewer search", function()
     searched(s)
     eq(3, s.search.current)
     truthy(s.cx > 0.55, "the third match is far right, so the view moved there, cx = " .. s.cx)
-    eq(ORANGE, colour_at({ rects = { { 0, 0, 0, 0 } }, width = 1, height = 1 }) and ORANGE, "still rendering")
   end)
 
   it("keeps the highlights when the page is zoomed and scrolled", function()
@@ -884,7 +883,7 @@ describe("viewer search", function()
     end
     local found = false
     for _, rgb in ipairs(fixture.pixels(png, points)) do
-      found = found or (rgb[1] == 255 and rgb[2] == 140 and rgb[3] == 26)
+      found = found or classify(rgb) == "orange"
     end
     truthy(found, "the current match is drawn in the zoomed render")
   end)

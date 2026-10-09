@@ -149,6 +149,41 @@ function M.pixels(path, points)
   return colours
 end
 
+--- Name the colour of a pixel drawn by a search highlight, whichever way MuPDF drew it: multiplied onto a white page
+--- (MuPDF 1.27+: yellow is 255,225,77) or laid over it translucently (older: 255,241,175).
+---@param rgb integer[]
+---@return "white"|"yellow"|"orange"
+function M.classify(rgb)
+  if rgb[1] >= 250 and rgb[2] >= 250 and rgb[3] >= 250 then
+    return "white"
+  end
+  return rgb[2] <= 215 and "orange" or "yellow"
+end
+
+--- Whether the installed mutool multiplies highlights ("multiply") or lays them on translucently ("translucent").
+---@return "multiply"|"translucent"
+function M.highlight_mode()
+  if M._highlight_mode then
+    return M._highlight_mode
+  end
+  local file = vim.fn.tempname() .. ".pdf"
+  M.write(file, { { w = 100, h = 100, color = { 1, 1, 1 } } })
+  local notes
+  local clip = { scale_x = 1, scale_y = 1, x = 0, y = 0, width = 20, height = 20, highlights = "0,0,10,10,ffe14d" }
+  require("pdf-view.mupdf").render_clip(file, 1, clip, vim.fn.tempname() .. ".png", function(_, text)
+    notes = text or ""
+  end)
+  vim.wait(10000, function()
+    return notes ~= nil
+  end, 10)
+  assert(
+    notes and notes:find("highlights: ", 1, true),
+    "render-clip.js did not report a highlight mode: " .. tostring(notes)
+  )
+  M._highlight_mode = notes:find("multiply", 1, true) and "multiply" or "translucent"
+  return M._highlight_mode
+end
+
 --- A fresh directory for one test.
 ---@return string
 function M.tmpdir()

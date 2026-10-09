@@ -3,6 +3,24 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [semantic versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+
+- Zoom, fit width/height and search highlights drew a blank page on MuPDF 1.23 (the package in Ubuntu 24.04), where
+  running a page straight into a draw device silently draws nothing. Pages are now rendered from their display list,
+  which works on every version.
+- Search found nothing on MuPDF 1.27.0 and 1.28.0, where `Page.search()` returns no hits at all. It now searches the
+  page's structured text, which gives the same results on every version.
+- MuPDF before 1.27 ignores JavaScript blend groups, so multiplied highlights vanished there. The script now tests for
+  that and draws a translucent highlight instead; `:checkhealth pdf-view` says which one applies.
+
+### Changed
+
+- `:checkhealth pdf-view` warns when highlights fall back to the translucent style.
+- The test suite accepts either highlight style, and has been run against MuPDF 1.23.10, 1.24.0, 1.25.0, 1.26.0, 1.27.0,
+  1.28.0 and 1.28.5.
+
 ## [0.1.0] - 2026-10-10
 
 First release.
@@ -28,4 +46,5 @@ First release.
   colour setup.
 - Configuration with validation: unknown or mistyped options raise immediately.
 
+[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/rohit746/pdf-view.nvim/releases/tag/v0.1.0

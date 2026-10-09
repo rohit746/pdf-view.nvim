@@ -130,7 +130,8 @@ matches across pages, wrapping around the document; zoomed or width-fitted views
 already on screen. `?` searches backward, and `n` then keeps going backward. `<Esc>` removes the highlights. The search
 runs again by itself when the file changes.
 
-Highlights are drawn into the page image, multiplied onto it so text stays readable. The colours are configurable
+Highlights are drawn into the page image, multiplied onto it so text stays readable (on MuPDF older than 1.27 they are
+a translucent fill instead, which dulls the text under a match a little). The colours are configurable
 (`highlight`), and at most `search_limit` matches are collected (the winbar shows `17/5000+` when that cuts the list).
 
 ### Outline
@@ -236,8 +237,9 @@ scroll positions are cached.
 
 ## Compatibility
 
-Developed against Neovim 0.12, MuPDF 1.28 and tmux 3.7. CI runs the test suite on Neovim 0.11.0 and stable, on Linux
-and macOS. `:checkhealth pdf-view` tells you whether your `mutool` supports everything the plugin needs.
+Developed against Neovim 0.12, MuPDF 1.28 and tmux 3.7. The test suite passes on Neovim 0.11.0 and 0.12 and on MuPDF
+1.23.10, 1.24, 1.25, 1.26, 1.27 and 1.28 (older MuPDF is untested), and CI runs it on Linux and macOS.
+`:checkhealth pdf-view` tells you whether your `mutool` supports everything the plugin needs.
 
 ## Development
 

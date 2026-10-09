@@ -35,7 +35,9 @@ if (needle) {
   for (var i = 0; i < count && total < limit; i++) {
     var page = doc.loadPage(i);
     var bounds = page.getBounds();
-    var hits = page.search(needle);
+    // Not page.search(needle): it returns nothing at all in MuPDF 1.27.0 and 1.28.0. Searching the page's structured
+    // text gives the same hits on every version.
+    var hits = page.toStructuredText().search(needle);
     for (var h = 0; h < hits.length && total < limit; h++) {
       var rects = hits[h].map(function (quad) {
         return rect(quad, bounds);

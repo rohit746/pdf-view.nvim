@@ -50,7 +50,7 @@ end
 
 --- Completion handler shared by the renderers: an error, or success once the PNG exists.
 ---@param out string
----@param cb fun(err?: string)
+---@param cb fun(err?: string, notes?: string) `notes` is what the script printed, e.g. "highlights: multiply"
 ---@return fun(result: vim.SystemCompleted)
 local function rendered(out, cb)
   return function(result)
@@ -60,7 +60,7 @@ local function rendered(out, cb)
     if not vim.uv.fs_stat(out) then
       return cb("mutool did not produce an image")
     end
-    cb(nil)
+    cb(nil, vim.trim(result.stdout or ""))
   end
 end
 
@@ -125,7 +125,7 @@ end
 ---@param page integer
 ---@param clip PdfView.Clip
 ---@param out string destination PNG
----@param cb fun(err?: string)
+---@param cb fun(err?: string, notes?: string) `notes` says how highlights were drawn: "highlights: multiply" or "highlights: translucent"
 ---@return PdfView.Job
 function M.render_clip(path, page, clip, out, cb)
   local cmd = {
