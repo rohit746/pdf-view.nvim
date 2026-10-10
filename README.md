@@ -173,6 +173,7 @@ require("pdf-view").setup({
   live_reload = true,      -- re-render when the file changes on disk
   reload_delay = 200,      -- ms the file must stay quiet before reloading
   winbar = true,           -- "<file>   <page> / <pages>" in the window's winbar
+  hide_cursor = true,      -- hide the cursor while a viewer is focused (it would sit on top of the page)
   mutool = "mutool",       -- executable
   transmission = "auto",   -- "file": the terminal reads the PNG itself; "direct": send the bytes (SSH). auto = SSH-aware
   tmux_passthrough = true, -- run `tmux set -p allow-passthrough on` for this pane
@@ -276,6 +277,7 @@ lua/pdf-view/
   session.lua     per-buffer state and the helpers that touch windows, the winbar and the render cache
   render.lua      showing a page: mutool -> PNG -> terminal -> placeholder cells, latest request wins
   actions.lua     what the keys do: page turns, scrolling, zoom, fit modes, search, outline
+  cursor.lua      hiding the cursor while a viewer is focused
   layout.lua      fitting a page into whole terminal cells; zoomed viewports (pure)
   search.lua      search results: parsing, stepping, highlight strings (pure)
   mupdf.lua       async wrapper around mutool

@@ -992,3 +992,86 @@ describe("viewer outline", function()
     eq(1, s.page)
   end)
 end)
+
+describe("viewer cursor", function()
+  setup()
+
+  local function hidden()
+    return vim.o.guicursor:find("PdfViewCursor", 1, true) ~= nil
+  end
+
+  it("hides the cursor while a viewer is focused, in normal and visual mode only", function()
+    reset()
+    local original = vim.o.guicursor
+    open(make("cursor-hide", pages(1)))
+    truthy(hidden(), vim.o.guicursor)
+    eq(
+      original .. ",n-v-o:PdfViewCursor",
+      vim.o.guicursor,
+      "appended, so command-line and other modes keep their cursor"
+    )
+    local hl = vim.api.nvim_get_hl(0, { name = "PdfViewCursor" })
+    eq(100, hl.blend)
+    truthy(hl.fg and hl.bg, "a blend alone is ignored by the TUI: the group needs colours")
+  end)
+
+  it("brings the cursor back when another buffer is entered, and hides it again on return", function()
+    reset()
+    local original = vim.o.guicursor
+    local s = open(make("cursor-leave", pages(1)))
+    vim.cmd.enew()
+    eq(original, vim.o.guicursor)
+    vim.api.nvim_set_current_buf(s.buf)
+    truthy(hidden())
+  end)
+
+  it("brings the cursor back when the viewer is closed", function()
+    reset()
+    local original = vim.o.guicursor
+    open(make("cursor-close", pages(1)))
+    press("q")
+    eq(original, vim.o.guicursor)
+  end)
+
+  it("shows the cursor in a floating window opened over the viewer", function()
+    reset()
+    local original = vim.o.guicursor
+    open(make("cursor-float", pages(1)))
+    local scratch = vim.api.nvim_create_buf(false, true)
+    local float =
+      vim.api.nvim_open_win(scratch, true, { relative = "editor", row = 1, col = 1, width = 20, height = 1 })
+    eq(original, vim.o.guicursor, "the prompt needs its cursor")
+    vim.api.nvim_win_close(float, true)
+    truthy(hidden(), "hidden again once the float is gone")
+  end)
+
+  it("keeps the cursor hidden when a different viewer is closed in the background", function()
+    reset()
+    local original = vim.o.guicursor
+    local first = open(make("cursor-a", pages(1)))
+    open(make("cursor-b", pages(1)))
+    truthy(hidden())
+    vim.api.nvim_buf_delete(first.buf, { force = true })
+    truthy(hidden(), "the focused viewer still owns the hidden cursor")
+    vim.cmd("silent! %bwipeout!")
+    eq(original, vim.o.guicursor)
+  end)
+
+  it("restores the highlight after a colorscheme clears it", function()
+    reset()
+    open(make("cursor-colors", pages(1)))
+    vim.cmd("highlight clear PdfViewCursor")
+    eq(nil, vim.api.nvim_get_hl(0, { name = "PdfViewCursor" }).blend)
+    vim.api.nvim_exec_autocmds("ColorScheme", {})
+    eq(100, vim.api.nvim_get_hl(0, { name = "PdfViewCursor" }).blend)
+  end)
+
+  it("leaves the cursor alone when hide_cursor is off", function()
+    reset()
+    setup({ hide_cursor = false })
+    local original = vim.o.guicursor
+    open(make("cursor-off", pages(1)))
+    eq(original, vim.o.guicursor)
+    setup()
+  end)
+end)

@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The cursor is hidden while a viewer is focused, so it no longer sits on top of the page. It stays visible on the
+  command line and in prompts, and comes back when you leave the viewer. Turn it off with `hide_cursor = false`.
+
 ## [0.1.1] - 2026-10-10
 
 ### Fixed

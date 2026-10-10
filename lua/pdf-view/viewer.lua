@@ -3,6 +3,7 @@
 --- Rendering is in `render`, the keys are in `actions`, the state is in `session`.
 local actions = require("pdf-view.actions")
 local config = require("pdf-view.config")
+local cursor = require("pdf-view.cursor")
 local render = require("pdf-view.render")
 local session = require("pdf-view.session")
 local watch = require("pdf-view.watch")
@@ -50,6 +51,7 @@ local function set_global_autocmds()
     group = augroup,
     desc = "Restore PDF image highlights",
     callback = function()
+      cursor.define()
       for _, s in pairs(sessions) do
         for _, id in ipairs(s.ids) do
           define_highlight(id)
@@ -112,6 +114,22 @@ function M.attach(buf)
       relayout(s)
     end,
   })
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group = augroup,
+    buffer = buf,
+    desc = "Hide the cursor over the PDF page",
+    callback = function()
+      cursor.hide(buf)
+    end,
+  })
+  vim.api.nvim_create_autocmd("BufLeave", {
+    group = augroup,
+    buffer = buf,
+    desc = "Bring the cursor back outside the PDF viewer",
+    callback = function()
+      cursor.show(buf)
+    end,
+  })
   vim.api.nvim_create_autocmd({ "BufUnload", "BufWipeout" }, {
     group = augroup,
     buffer = buf,
@@ -129,6 +147,9 @@ function M.attach(buf)
     end)
   end
 
+  if vim.api.nvim_get_current_buf() == buf then
+    cursor.hide(buf) -- BufEnter may already have fired for this buffer
+  end
   vim.schedule(function()
     relayout(s)
   end)

@@ -1,6 +1,7 @@
 --- Viewer state: one session per PDF buffer, and the helpers that read and write it (windows, the winbar, the
 --- render cache, image ids). Nothing here renders a page.
 local config = require("pdf-view.config")
+local cursor = require("pdf-view.cursor")
 local kitty = require("pdf-view.kitty")
 local search = require("pdf-view.search")
 
@@ -251,6 +252,7 @@ local function destroy(s)
     end
   end
   purge_cache(s)
+  cursor.show(s.buf)
   sessions[s.buf] = nil
   -- a later :edit! attaches a fresh session to the same buffer; don't leave this one's autocmds behind
   pcall(vim.api.nvim_clear_autocmds, { group = augroup, buffer = s.buf })

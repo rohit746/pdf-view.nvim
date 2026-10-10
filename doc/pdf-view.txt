@@ -106,6 +106,7 @@ CONFIGURATION                                              *pdf-view-config*
       live_reload = true,      -- re-render when the file changes on disk
       reload_delay = 200,      -- ms the file must stay quiet before reloading
       winbar = true,           -- page indicator in the winbar
+      hide_cursor = true,      -- hide the cursor while a viewer is focused
       mutool = "mutool",
       transmission = "auto",   -- "auto" | "file" | "direct"
       tmux_passthrough = true, -- tmux set -p allow-passthrough on

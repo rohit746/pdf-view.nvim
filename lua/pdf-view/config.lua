@@ -29,6 +29,7 @@ local M = {}
 ---@field live_reload boolean re-render when the PDF changes on disk
 ---@field reload_delay integer ms to wait after the last file event before reloading
 ---@field winbar boolean show "<file> <page> / <pages>" in the window's winbar
+---@field hide_cursor boolean hide the cursor while a viewer is focused (it would sit on top of the page)
 ---@field mutool string mutool executable
 ---@field transmission "auto"|"file"|"direct" how images reach the terminal ("auto" is "direct" over SSH)
 ---@field tmux_passthrough boolean let the plugin run `tmux set -p allow-passthrough on` for its pane
@@ -48,6 +49,7 @@ local defaults = {
   live_reload = true,
   reload_delay = 200,
   winbar = true,
+  hide_cursor = true,
   mutool = "mutool",
   transmission = "auto",
   tmux_passthrough = true,
@@ -136,7 +138,7 @@ local function validate(opts)
       error(("pdf-view: unknown option `%s`"):format(key), 3)
     end
   end
-  for _, key in ipairs({ "auto_open", "live_reload", "winbar", "tmux_passthrough", "force" }) do
+  for _, key in ipairs({ "auto_open", "live_reload", "winbar", "hide_cursor", "tmux_passthrough", "force" }) do
     if opts[key] ~= nil and type(opts[key]) ~= "boolean" then
       fail(key, "a boolean", opts[key])
     end
