@@ -15,12 +15,10 @@ _Read PDFs inside Neovim as normal buffers — sharp, scrollable, searchable._
 
 ---
 
-Open a PDF as a regular buffer — like [tdf](https://github.com/itsjunetime/tdf), but as a normal buffer:
-the page is shown as a sharp image fitted to the
-window, and `j`/`k` turn the pages. `+` and `-` zoom (then the same keys scroll
-the page), `w` fits the width, `/` searches the whole document with every match
-highlighted, `gO` jumps to a bookmark. When the file changes on disk — a LaTeX
-or Typst build, say — the page refreshes by itself.
+Like [tdf](https://github.com/itsjunetime/tdf), but as a normal buffer: the page is shown as a sharp image fitted to the
+window, and `j`/`k` turn the pages. `+` and `-` zoom (then the same keys scroll the page), `w` fits the width, `/`
+searches the whole document with every match highlighted, `gO` jumps to a bookmark. When the file changes on disk — a
+LaTeX or Typst build, say — the page refreshes by itself.
 
 - Pages are rendered by [MuPDF](https://mupdf.com)'s `mutool` and drawn with the
   [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) using Unicode placeholders, so the
@@ -95,7 +93,8 @@ require("pdf-view").open("paper.pdf")
 ```
 
 The viewer is a regular buffer named after the file, so buffer lists, `:bdelete`, session plugins and statuslines work
-as usual. Its winbar shows `paper.pdf   3 / 11`; for a statusline use `require("pdf-view").status()` (`3 / 11`, with `width` and `x1.25` added while fitted to the width or zoomed).
+as usual. Its winbar shows `paper.pdf   3 / 11`; for a statusline use `require("pdf-view").status()` (`3 / 11`, with
+`width` and `x1.25` added while fitted to the width or zoomed).
 
 ### Keys
 
