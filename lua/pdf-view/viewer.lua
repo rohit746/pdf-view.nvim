@@ -20,6 +20,11 @@ local reset_view = session.reset_view
 
 local RELOAD_RETRIES = 8
 
+--- Where the viewer of a buffer was when the buffer was unloaded. `:edit` unloads a buffer and reads it again, and
+--- this is what brings it back to the same page instead of the first one.
+---@type table<integer, { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }>
+local resume = {}
+
 M.sessions = sessions
 M.reload = actions.reload
 
@@ -59,6 +64,13 @@ local function set_global_autocmds()
       end
     end,
   })
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    group = augroup,
+    desc = "Forget where a wiped PDF viewer was",
+    callback = function(args)
+      resume[args.buf] = nil
+    end,
+  })
   vim.api.nvim_create_autocmd("ColorScheme", {
     group = augroup,
     desc = "Restore PDF image highlights",
@@ -90,15 +102,18 @@ function M.attach(buf)
     return sessions[buf]
   end
 
+  local last = resume[buf] or {}
+  resume[buf] = nil
+
   ---@type PdfView.Session
   local s = {
     buf = buf,
     path = vim.api.nvim_buf_get_name(buf),
-    page = 1,
-    mode = "page",
-    zoom = 1,
-    cx = 0.5,
-    cy = 0.5,
+    page = last.page or 1,
+    mode = last.mode or "page",
+    zoom = last.zoom or 1,
+    cx = last.cx or 0.5,
+    cy = last.cy or 0.5,
     gen = 0,
     ids = allocate_ids(),
     slot = 0,
@@ -146,7 +161,10 @@ function M.attach(buf)
     group = augroup,
     buffer = buf,
     desc = "Release a PDF viewer",
-    callback = function()
+    callback = function(args)
+      if args.event == "BufUnload" and not s.closed then
+        resume[buf] = { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+      end
       destroy(s)
     end,
   })

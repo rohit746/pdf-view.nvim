@@ -220,7 +220,7 @@ With `auto_open = false` only `:PdfView` and `require("pdf-view").open()` open P
 The directory of every open PDF is watched. Once the file has been quiet for `reload_delay` ms it is re-read and the
 current page is re-rendered, staying on the same page number. A file that is mid-write (a compiler still emitting it)
 is retried for a few seconds while the previous page stays on screen. A PDF opened through a symbolic link is followed
-to the file the link points to.
+to the file the link points to. `:edit` re-reads the file by hand and stays on the same page too.
 
 ## How it works
 

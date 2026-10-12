@@ -1311,6 +1311,22 @@ describe("viewer robustness", function()
     end
   end)
 
+  it("comes back to the same page and fit after :edit", function()
+    reset()
+    local s = open(make("re-edit", pages(4)))
+    press("w")
+    settle(s)
+    press("3G")
+    on_page(s, 3)
+    vim.cmd("edit")
+    local again = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(again and again ~= s, "a fresh session")
+    wait_for(function()
+      return again.slot ~= 0 and again.job == nil
+    end, "the render after :edit")
+    eq({ 3, "width", 4 }, { again.page, again.mode, again.count })
+  end)
+
   it("reads a page's geometry once, until the file changes", function()
     reset()
     local path = make("geometry-once", pages(3))

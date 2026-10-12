@@ -14,6 +14,7 @@ All notable changes to this project are documented here. The format follows
 
 - A page's size is read from the file once instead of before every render, so turning back to a page, zooming and
   scrolling start one `mutool` process less.
+- `:edit` on a viewer comes back to the page, fit and zoom it had instead of the first page.
 
 ### Fixed
 
