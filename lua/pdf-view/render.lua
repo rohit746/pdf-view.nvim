@@ -20,6 +20,7 @@ local stamp_of = session.stamp_of
 local layout_key = session.layout_key
 local write_buffer = session.write_buffer
 local remember = session.remember
+local known_info, remember_info = session.known_info, session.remember_info
 local window_for = session.window_for
 local text_area = session.text_area
 local uses_viewport = session.uses_viewport
@@ -157,7 +158,9 @@ local function show(s, page, opts)
   local stamp = stamp_of(stat)
   s.requested_key, s.requested_stamp = key, stamp
 
-  s.job = mupdf.info(s.path, page or s.target or s.page, function(err, info)
+  ---@param err? string
+  ---@param info? PdfView.PageInfo
+  local function on_info(err, info)
     if gen ~= s.gen then
       return
     end
@@ -165,6 +168,7 @@ local function show(s, page, opts)
     if err or not info then
       return fail(err or "mutool returned no page information")
     end
+    remember_info(s, stamp, info)
 
     local highlights, highlights_key = nil, ""
     if s.search then
@@ -238,7 +242,15 @@ local function show(s, page, opts)
       remember(s, cache_key, out)
       present(s, win, out, info, fit, rows)
     end)
-  end)
+  end
+
+  -- a page's geometry only changes with the file, so mutool is asked for it once
+  local wanted = page or s.target or s.page
+  local known = known_info(s, stamp, wanted)
+  if known then
+    return on_info(nil, known)
+  end
+  s.job = mupdf.info(s.path, wanted, on_info)
 end
 
 --- Show the page again if the window changed size or the file changed on disk since it was last rendered.

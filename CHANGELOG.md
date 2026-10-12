@@ -10,6 +10,11 @@ All notable changes to this project are documented here. The format follows
 - The cursor is hidden while a viewer is focused, so it no longer sits on top of the page. It stays visible on the
   command line and in prompts, and comes back when you leave the viewer. Turn it off with `hide_cursor = false`.
 
+### Changed
+
+- A page's size is read from the file once instead of before every render, so turning back to a page, zooming and
+  scrolling start one `mutool` process less.
+
 ### Fixed
 
 - Nothing was drawn on Neovim 0.11: images were sent with `nvim_ui_send()`, which only exists from Neovim 0.12, so

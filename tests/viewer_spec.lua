@@ -1310,4 +1310,32 @@ describe("viewer robustness", function()
       vim.cmd("silent! %bwipeout!")
     end
   end)
+
+  it("reads a page's geometry once, until the file changes", function()
+    reset()
+    local path = make("geometry-once", pages(3))
+    local s = open(path)
+    local asked = {}
+    local info = mupdf.info
+    with_stub(mupdf, "info", function(file, page, cb)
+      asked[#asked + 1] = page
+      return info(file, page, cb)
+    end, function()
+      press("j")
+      on_page(s, 2)
+      press("k")
+      on_page(s, 1)
+      press("+")
+      settle(s)
+      press("j") -- scrolls the zoomed page
+      settle(s)
+      eq({ 2 }, asked, "only the page that had not been shown yet")
+
+      fixture.write(path, pages(5))
+      wait_for(function()
+        return s.count == 5 and s.job == nil
+      end, "live reload", 8000)
+      truthy(#asked > 1, "asked again for the new file")
+    end)
+  end)
 end)

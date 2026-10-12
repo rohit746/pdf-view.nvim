@@ -59,6 +59,7 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field win? integer window the layout was computed for
 ---@field cache table<string, string> render cache: key -> PNG path
 ---@field cache_order string[]
+---@field info? { stamp: string, count: integer, pages: table<integer, PdfView.PageInfo> } page geometry read from the file as of `stamp`
 ---@field requested_key? string layout key of the latest render request
 ---@field requested_stamp? string file stamp of the latest render request
 ---@field grid_key? string
@@ -145,6 +146,29 @@ local function purge_cache(s)
     os.remove(path)
   end
   s.cache, s.cache_order = {}, {}
+  s.info = nil
+end
+
+--- The geometry of `page`, if it was already read from the file as of `stamp`.
+---@param s PdfView.Session
+---@param stamp string
+---@param page integer may lie outside the document, as for `mupdf.info()`
+---@return PdfView.PageInfo?
+local function known_info(s, stamp, page)
+  local known = s.info
+  if known and known.stamp == stamp then
+    return known.pages[math.max(1, math.min(page, known.count))]
+  end
+end
+
+---@param s PdfView.Session
+---@param stamp string
+---@param info PdfView.PageInfo
+local function remember_info(s, stamp, info)
+  if not (s.info and s.info.stamp == stamp) then
+    s.info = { stamp = stamp, count = info.count, pages = {} }
+  end
+  s.info.pages[info.page] = info
 end
 
 ---@param s PdfView.Session
@@ -337,6 +361,8 @@ M.layout_key = layout_key
 M.write_buffer = write_buffer
 M.remember = remember
 M.purge_cache = purge_cache
+M.known_info = known_info
+M.remember_info = remember_info
 M.window_for = window_for
 M.text_area = text_area
 M.uses_viewport = uses_viewport
