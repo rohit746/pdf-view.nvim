@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-12
+
 ### Added
 
 - The cursor is hidden while a viewer is focused, so it no longer sits on top of the page. It stays visible on the
@@ -78,6 +80,7 @@ First release.
   colour setup.
 - Configuration with validation: unknown or mistyped options raise immediately.
 
-[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rohit746/pdf-view.nvim/releases/tag/v0.1.0
