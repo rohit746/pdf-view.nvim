@@ -1192,3 +1192,122 @@ describe("viewer cursor", function()
     setup()
   end)
 end)
+
+describe("viewer robustness", function()
+  setup()
+
+  it("wraps an error message to the window instead of cutting it off", function()
+    reset()
+    setup({ force = false })
+    vim.cmd("vsplit | vertical resize 40")
+    with_stub(terminal, "detect", function()
+      return { term = "xterm-256color" }
+    end, function()
+      open(make("narrow", pages(1)))
+    end)
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    truthy(#lines > 1, "more than one line")
+    for _, line in ipairs(lines) do
+      truthy(vim.fn.strdisplaywidth(line) <= vim.api.nvim_win_get_width(0), "too wide: " .. line)
+    end
+    local text = table.concat(lines, " ")
+    truthy(text:find("Set `force = true` in setup() to try anyway.", 1, true), text)
+    setup()
+  end)
+
+  it("is not folded away by an indent 'foldmethod'", function()
+    reset()
+    vim.o.foldmethod = "indent"
+    local s = open(make("folds", pages(1)))
+    truthy(s.grid.col > 0, "the page is indented to centre it")
+    eq(-1, vim.fn.foldclosed(s.grid.row + 1))
+    vim.o.foldmethod = "manual"
+  end)
+
+  it("keeps search highlighting off the page, and the window's own 'winhighlight'", function()
+    reset()
+    local search = vim.api.nvim_get_hl(0, { name = "Search" })
+    vim.api.nvim_set_hl(0, "Search", { fg = "#112233", bg = "#445566" })
+    vim.wo.winhighlight = "Normal:NormalFloat"
+    local s = open(make("hlsearch", pages(1)))
+    eq("Normal:NormalFloat,Search:PdfViewNone,CurSearch:PdfViewNone,IncSearch:PdfViewNone", vim.wo.winhighlight)
+
+    vim.fn.setreg("/", ".") -- matches every placeholder cell
+    vim.o.hlsearch = true
+    vim.cmd("redraw!")
+    local at = vim.fn.screenpos(0, s.grid.row + 1, s.grid.col + 1)
+    local cell = vim.api.nvim__inspect_cell(1, at.row - 1, at.col - 1)
+    eq(s.ids[s.slot], cell[2].foreground, "the cell still carries the image id")
+
+    vim.cmd.enew()
+    eq("Normal:NormalFloat", vim.wo.winhighlight, "other buffers keep their own")
+    vim.o.hlsearch = false
+    vim.wo.winhighlight = ""
+    vim.api.nvim_set_hl(0, "Search", search)
+  end)
+
+  it("does not let the page be scrolled out of its window", function()
+    reset()
+    open(make("pinned", pages(1)))
+    press(vim.api.nvim_replace_termcodes("<C-e><C-e><C-e>", true, false, true))
+    eq(4, vim.fn.winsaveview().topline, "the keys scroll the buffer")
+    vim.api.nvim_exec_autocmds("WinScrolled", {}) -- Neovim fires it from its main loop, which a test never reaches
+    eq(1, vim.fn.winsaveview().topline)
+  end)
+
+  it("asks Neovim for its temp dir every time, in case it was cleaned away", function()
+    reset()
+    local s = open(make("temp-dir", pages(2)))
+    local elsewhere = fixture.tmpdir()
+    with_stub(vim.fn, "tempname", function()
+      return elsewhere .. "/0"
+    end, function()
+      press("j")
+      on_page(s, 2)
+    end)
+    local paths = transmitted()
+    eq(elsewhere, vim.fs.dirname(paths[#paths]))
+  end)
+
+  it("follows a PDF that was opened through a symbolic link", function()
+    reset()
+    local real_dir = dir .. "/linked"
+    vim.fn.mkdir(real_dir, "p")
+    local first, second, link = real_dir .. "/first.pdf", real_dir .. "/second.pdf", dir .. "/link.pdf"
+    fixture.write(first, pages(2))
+    assert(vim.uv.fs_symlink(first, link))
+    local s = open(link)
+    eq(2, s.count)
+
+    fixture.write(first, pages(4))
+    wait_for(function()
+      return s.count == 4 and s.job == nil
+    end, "a reload after the file behind the link changed", 8000)
+
+    fixture.write(second, pages(3))
+    os.remove(link)
+    assert(vim.uv.fs_symlink(second, link))
+    wait_for(function()
+      return s.count == 3 and s.job == nil
+    end, "a reload after the link was pointed at another file", 8000)
+
+    fixture.write(second, pages(5))
+    wait_for(function()
+      return s.count == 5 and s.job == nil
+    end, "a reload after the new file behind the link changed", 8000)
+  end)
+
+  it("opens files whose names have characters that expand() would rewrite", function()
+    reset()
+    for _, name in ipairs({ "a{b,c}", "price $HOME", "tick`x`", "notes [draft]" }) do
+      local path = make(name, pages(1))
+      local buf = pdf_view.open(path)
+      eq(vim.uv.fs_realpath(path), vim.uv.fs_realpath(vim.api.nvim_buf_get_name(buf)), "open()")
+      vim.cmd("silent! %bwipeout!")
+      vim.cmd("PdfView " .. vim.fn.fnameescape(path))
+      eq(vim.uv.fs_realpath(path), vim.uv.fs_realpath(vim.api.nvim_buf_get_name(0)), ":PdfView")
+      truthy(viewer.sessions[vim.api.nvim_get_current_buf()], "a viewer for " .. name)
+      vim.cmd("silent! %bwipeout!")
+    end
+  end)
+end)

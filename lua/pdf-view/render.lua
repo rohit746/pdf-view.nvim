@@ -30,12 +30,12 @@ local display_message = session.display_message
 local RELOAD_RETRY_DELAY = 300
 local RESIZE_DELAY = 60
 local png_counter = 0
-local tmpdir
 
+--- Neovim's own temp dir, which it removes on exit. Asked for every time: when a cleaner has deleted the directory
+--- under a long-running Neovim, `tempname()` makes a new one.
 ---@return string
 local function temp_dir()
-  tmpdir = tmpdir or vim.fs.dirname(vim.fn.tempname()) -- Neovim removes its temp dir on exit
-  return tmpdir
+  return vim.fs.dirname(vim.fn.tempname())
 end
 
 ---@param s PdfView.Session

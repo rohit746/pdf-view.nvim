@@ -16,6 +16,7 @@ local set_keymaps, rescan = actions.set_keymaps, actions.rescan
 local augroup, sessions = session.augroup, session.sessions
 local define_highlight, stamp_of, apply_window_options, allocate_ids, destroy =
   session.define_highlight, session.stamp_of, session.apply_window_options, session.allocate_ids, session.destroy
+local reset_view = session.reset_view
 
 local RELOAD_RETRIES = 8
 
@@ -46,6 +47,17 @@ local function set_global_autocmds()
     group = augroup,
     desc = "Re-fit PDF pages to their window",
     callback = schedule_relayout,
+  })
+  vim.api.nvim_create_autocmd("WinScrolled", {
+    group = augroup,
+    desc = "Keep PDF pages from being scrolled out of their window",
+    callback = function()
+      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        if sessions[vim.api.nvim_win_get_buf(win)] then
+          reset_view(win)
+        end
+      end
+    end,
   })
   vim.api.nvim_create_autocmd("ColorScheme", {
     group = augroup,
@@ -174,7 +186,8 @@ end
 ---@param path string
 ---@return integer buf
 function M.open(path)
-  path = vim.fn.fnamemodify(vim.fn.expand(path), ":p")
+  -- not expand(): it would rewrite a name with `{`, `$` or a backtick in it (":PdfView" has expanded its argument)
+  path = vim.fn.fnamemodify(path, ":p")
   local stat = uv.fs_stat(path)
   if not stat or stat.type ~= "file" then
     error(("pdf-view: cannot read `%s`"):format(path), 0)

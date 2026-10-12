@@ -98,7 +98,7 @@ as usual. Its winbar shows `paper.pdf   3 / 11`; for a statusline use `require("
 
 ### Keys
 
-All are buffer-local, normal mode, and take a count.
+All are buffer-local and normal mode. The keys that move, zoom or step between matches take a count.
 
 | Keys                         | Action                                                                          |
 | ---------------------------- | ------------------------------------------------------------------------------- |
@@ -219,7 +219,8 @@ With `auto_open = false` only `:PdfView` and `require("pdf-view").open()` open P
 
 The directory of every open PDF is watched. Once the file has been quiet for `reload_delay` ms it is re-read and the
 current page is re-rendered, staying on the same page number. A file that is mid-write (a compiler still emitting it)
-is retried for a few seconds while the previous page stays on screen.
+is retried for a few seconds while the previous page stays on screen. A PDF opened through a symbolic link is followed
+to the file the link points to.
 
 ## How it works
 

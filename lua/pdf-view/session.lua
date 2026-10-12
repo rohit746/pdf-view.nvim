@@ -19,6 +19,7 @@ local WINDOW_OPTIONS = {
   relativenumber = false,
   signcolumn = "no",
   foldcolumn = "0",
+  foldenable = false, -- 'foldmethod' "indent" would fold the page away: it is indented to centre it
   statuscolumn = "",
   list = false,
   wrap = false,
@@ -29,6 +30,12 @@ local WINDOW_OPTIONS = {
   scrolloff = 0,
   sidescrolloff = 0,
 }
+
+-- Highlights that Neovim lays over buffer text. A colour of theirs would replace the image id in the foreground of
+-- the cells it covers, so in a viewer's window they are mapped to a group without colours ('winhighlight' creates
+-- the group, empty, by naming it).
+local MUTED_HIGHLIGHTS = { "Search", "CurSearch", "IncSearch" }
+local NO_HIGHLIGHT = "PdfViewNone"
 
 ---@class PdfView.Session
 ---@field buf integer
@@ -57,6 +64,7 @@ local WINDOW_OPTIONS = {
 ---@field grid_key? string
 ---@field grid? PdfView.Placeholders
 ---@field watcher? PdfView.Watcher
+---@field waiting_for_ui? boolean the first render is waiting for a UI to attach
 ---@field closed boolean
 
 ---@type table<integer, PdfView.Session>
@@ -211,6 +219,23 @@ local function update_winbar(s, win)
   vim.api.nvim_set_option_value("winbar", text, { scope = "local", win = win })
 end
 
+--- 'winhighlight' for a viewer's window: `current` (what the window has, e.g. from another plugin) with the
+--- highlights that would paint over the page muted.
+---@param current string
+---@return string
+local function muted_winhighlight(current)
+  local parts = {}
+  for _, part in ipairs(vim.split(current, ",", { plain = true, trimempty = true })) do
+    if not vim.tbl_contains(MUTED_HIGHLIGHTS, (part:match("^[^:]*"))) then
+      parts[#parts + 1] = part
+    end
+  end
+  for _, group in ipairs(MUTED_HIGHLIGHTS) do
+    parts[#parts + 1] = group .. ":" .. NO_HIGHLIGHT
+  end
+  return table.concat(parts, ",")
+end
+
 --- Window-local (`:setlocal`) values: Neovim restores the previous ones when the window shows another buffer.
 ---@param s PdfView.Session
 ---@param win integer
@@ -218,7 +243,49 @@ local function apply_window_options(s, win)
   for name, value in pairs(WINDOW_OPTIONS) do
     vim.api.nvim_set_option_value(name, value, { scope = "local", win = win })
   end
+  local winhighlight = vim.api.nvim_get_option_value("winhighlight", { win = win })
+  local muted = muted_winhighlight(winhighlight)
+  if muted ~= winhighlight then
+    vim.api.nvim_set_option_value("winhighlight", muted, { scope = "local", win = win })
+  end
   update_winbar(s, win)
+end
+
+--- Scroll `win` back to the top-left corner of its buffer. A viewer's buffer is exactly as tall as its window, so
+--- anything that scrolls it (<C-e>, the mouse wheel) only pushes the page out of the window.
+---@param win integer
+local function reset_view(win)
+  vim.api.nvim_win_call(win, function()
+    local view = vim.fn.winsaveview()
+    if view.topline ~= 1 or view.leftcol ~= 0 then
+      vim.fn.winrestview({ topline = 1, leftcol = 0, lnum = 1, col = 0 })
+    end
+  end)
+end
+
+--- Break `text` into lines of at most `cols` cells, at spaces where it can.
+---@param text string
+---@param cols integer
+---@return string[]
+local function wrap_text(text, cols)
+  local width = vim.fn.strdisplaywidth
+  local lines = {}
+  for _, paragraph in ipairs(vim.split(text, "\n", { plain = true })) do
+    local line = ""
+    for word in paragraph:gmatch("%S+") do
+      if line ~= "" and width(line .. " " .. word) > cols then
+        lines[#lines + 1] = line
+        line = ""
+      end
+      line = line == "" and word or (line .. " " .. word)
+      while width(line) > cols do -- one word wider than the window, such as a long path
+        lines[#lines + 1] = vim.fn.strcharpart(line, 0, cols)
+        line = vim.fn.strcharpart(line, cols)
+      end
+    end
+    lines[#lines + 1] = line
+  end
+  return lines
 end
 
 ---@param s PdfView.Session
@@ -227,7 +294,9 @@ end
 local function display_message(s, win, text)
   vim.api.nvim_buf_clear_namespace(s.buf, ns, 0, -1)
   s.grid_key, s.grid = nil, nil
-  write_buffer(s, vim.split(text, "\n", { plain = true }))
+  -- the window does not wrap its lines (that would tear a page apart), so the message is wrapped here
+  local cols = vim.api.nvim_win_is_valid(win) and text_area(win) or 80
+  write_buffer(s, wrap_text(text, cols))
   pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
 end
 
@@ -273,6 +342,8 @@ M.text_area = text_area
 M.uses_viewport = uses_viewport
 M.update_winbar = update_winbar
 M.apply_window_options = apply_window_options
+M.reset_view = reset_view
+M.wrap_text = wrap_text
 M.display_message = display_message
 M.allocate_ids = allocate_ids
 M.destroy = destroy

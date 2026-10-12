@@ -18,6 +18,16 @@ All notable changes to this project are documented here. The format follows
   no matches. A search that was stopped or replaced no longer reports anything.
 - When the PDF changed twice in quick succession, the active search could end up with no matches until the next
   change. A search that is still running when the file changes now starts over on the new file.
+- An error shown in the buffer (an unsupported terminal, a missing `mutool`) was cut off at the window's edge. It is
+  now wrapped to the window.
+- With `foldmethod=indent` a page centred in its window was folded away. Folding is off in viewer windows.
+- Live reload did not notice changes to a PDF opened through a symbolic link. The file the link points to is watched
+  as well, and followed when the link is pointed somewhere else.
+- `:PdfView` and `open()` could not open files with `{`, `$` or a backtick in their name.
+- `<C-e>` and the mouse wheel scrolled the page partly out of its window. The window now stays on the page.
+- When Neovim's temp directory was removed under a long-running session, every render failed until a restart.
+- 'hlsearch' with a pattern that matched the page's placeholder cells (`/.`, for one) recoloured them, and a cell in
+  another colour no longer belongs to the page image. Search highlighting is off in viewer windows.
 
 ## [0.1.1] - 2026-10-10
 

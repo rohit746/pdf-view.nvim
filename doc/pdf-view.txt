@@ -24,7 +24,8 @@ The viewer is a buffer named after the file with 'buftype' `nofile` and
 'filetype' `pdf-view`. Its winbar shows "<file>  <page> / <pages>".
 
                                                               *pdf-view-keys*
-All keys are buffer-local, normal mode, and accept a count.
+All keys are buffer-local and normal mode. The keys that move, zoom or step
+between matches accept a count.
 
   j <Down>                scroll down; at the bottom edge, or when not zoomed,
                           next page ({count} times)
