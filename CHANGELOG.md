@@ -10,6 +10,11 @@ All notable changes to this project are documented here. The format follows
 - The cursor is hidden while a viewer is focused, so it no longer sits on top of the page. It stays visible on the
   command line and in prompts, and comes back when you leave the viewer. Turn it off with `hide_cursor = false`.
 
+### Fixed
+
+- Nothing was drawn on Neovim 0.11: images were sent with `nvim_ui_send()`, which only exists from Neovim 0.12, so
+  every render ended in an error. On 0.11 they are now written to the terminal through Neovim's stderr channel.
+
 ## [0.1.1] - 2026-10-10
 
 ### Fixed

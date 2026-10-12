@@ -68,4 +68,26 @@ describe("kitty", function()
     kitty.write = original
     eq({ "a", "b", "c" }, written)
   end)
+
+  it("writes to the terminal with whichever API this Neovim has", function()
+    local api = vim.api
+    local original = { uis = api.nvim_list_uis, ui_send = api.nvim_ui_send, chan_send = api.nvim_chan_send }
+    local written = {}
+    api.nvim_list_uis = function()
+      return { {} }
+    end
+    if original.ui_send then
+      api.nvim_ui_send = function(data)
+        written[#written + 1] = { "ui", data }
+      end
+    end
+    api.nvim_chan_send = function(channel, data)
+      written[#written + 1] = { channel, data }
+    end
+    local ok, err = pcall(kitty.write, "data")
+    api.nvim_list_uis, api.nvim_ui_send, api.nvim_chan_send = original.uis, original.ui_send, original.chan_send
+    eq(true, ok, tostring(err))
+    -- nvim_ui_send() arrived in Neovim 0.12; before that the terminal is reached through stderr
+    eq({ { original.ui_send and "ui" or vim.v.stderr, "data" } }, written)
+  end)
 end)

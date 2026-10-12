@@ -86,7 +86,12 @@ function M.write(data)
   if #vim.api.nvim_list_uis() == 0 then
     return
   end
-  vim.api.nvim_ui_send(data)
+  if vim.api.nvim_ui_send then
+    vim.api.nvim_ui_send(data)
+  else
+    -- Neovim 0.11 has no nvim_ui_send(); its stderr is still the terminal the TUI draws on
+    vim.api.nvim_chan_send(vim.v.stderr, data)
+  end
 end
 
 --- Send commands to the terminal, one passthrough-wrapped write per command.
