@@ -40,6 +40,7 @@ local WINDOW_OPTIONS = {
 ---@field zoom number multiplies the fitted size: 1 is as fitted, 2 is twice that
 ---@field search? PdfView.Search the active search, whose matches are highlighted
 ---@field search_job? PdfView.Job in-flight search
+---@field search_again? fun() starts the in-flight search over, for when the file changes under it
 ---@field outline? { stamp: string, entries: PdfView.OutlineEntry[] } bookmarks of the file as of `stamp`
 ---@field cx number centre of the viewport as a fraction of the page width (only matters while zoomed)
 ---@field cy number centre of the viewport as a fraction of the page height

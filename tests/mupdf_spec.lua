@@ -278,6 +278,19 @@ describe("mupdf", function()
       end)
       eq("string", type(err))
     end)
+
+    it("reports a search that was killed as failed, not as one without matches", function()
+      local done, err, matches = false, nil, nil
+      local job = mupdf.search(path, "alpha", 100, function(e, m)
+        done, err, matches = true, e, m
+      end)
+      job:kill(15)
+      wait_for(function()
+        return done
+      end, "the killed search")
+      truthy(tostring(err):find("killed", 1, true), tostring(err))
+      eq(nil, matches)
+    end)
   end)
 
   describe("outline", function()

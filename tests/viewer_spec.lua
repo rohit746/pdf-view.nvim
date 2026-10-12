@@ -2,6 +2,7 @@ local harness = require("tests.harness")
 local eq, truthy, wait_for = harness.eq, harness.truthy, harness.wait_for
 local fixture = require("tests.fixture")
 local kitty = require("pdf-view.kitty")
+local mupdf = require("pdf-view.mupdf")
 local placeholder = require("pdf-view.placeholder")
 local terminal = require("pdf-view.terminal")
 local viewer = require("pdf-view.viewer")
@@ -663,6 +664,33 @@ local function searched(s)
   end, "the search and its render")
 end
 
+--- Run `body` while searches only finish when the test says so: `calls` lists them in order, each with the `needle`,
+--- whether it was `killed`, and `finish(err, matches, truncated)` to deliver its result.
+local function holding_searches(body)
+  local calls = {}
+  with_stub(mupdf, "search", function(_, needle, _, cb)
+    local call = { needle = needle, killed = false, finish = cb }
+    calls[#calls + 1] = call
+    return {
+      kill = function()
+        call.killed = true
+      end,
+    }
+  end, function()
+    body(calls)
+  end)
+end
+
+--- A search result as `mupdf.search` reports it: one match per page given.
+local function matches_on(...)
+  local matches = {}
+  for _, page in ipairs({ ... }) do
+    matches[#matches + 1] =
+      { page = page, width = 612, height = 792, rects = { { 30, 370, 130, 400 } }, cx = 0.13, cy = 0.49 }
+  end
+  return matches
+end
+
 --- Colour of the latest rendered PNG just inside the top-left corner of a match rectangle.
 local function colour_at(match)
   local paths = transmitted()
@@ -830,6 +858,95 @@ describe("viewer search", function()
     end)
     eq(nil, s.search)
     eq(nil, s.search_job)
+  end)
+
+  it("says nothing about a search that <Esc> stopped", function()
+    reset()
+    local s = open(search_doc("stopped"))
+    local notes = {}
+    with_stub(vim, "notify", function(message)
+      notes[#notes + 1] = message
+    end, function()
+      holding_searches(function(calls)
+        answering("alpha", function()
+          press("/")
+        end)
+        eq(1, #calls)
+        press(vim.api.nvim_replace_termcodes("<Esc>", true, false, true))
+        eq(true, calls[1].killed)
+        eq(nil, s.search_job)
+        calls[1].finish(nil, {}, false) -- whatever a stopped search still reports is ignored
+      end)
+    end)
+    eq({}, notes)
+    eq(nil, s.search)
+  end)
+
+  it("lets a new search replace one that is still running", function()
+    reset()
+    local s = open(search_doc("replaced"))
+    local notes = {}
+    with_stub(vim, "notify", function(message)
+      notes[#notes + 1] = message
+    end, function()
+      holding_searches(function(calls)
+        answering("alpha", function()
+          press("/")
+        end)
+        answering("beta", function()
+          press("/")
+        end)
+        eq({ "alpha", "beta" }, { calls[1].needle, calls[2].needle })
+        eq({ true, false }, { calls[1].killed, calls[2].killed })
+        local running = s.search_job
+        calls[1].finish(nil, {}, false)
+        eq(running, s.search_job, "the new search can still be stopped")
+        calls[2].finish(nil, matches_on(1), false)
+      end)
+    end)
+    searched(s)
+    eq({}, notes)
+    eq({ "beta", 1 }, { s.search.needle, #s.search.matches })
+  end)
+
+  it("keeps the matches when the file changes again before the search has been repeated", function()
+    reset()
+    local s = open(search_doc("repeated-twice"))
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    holding_searches(function(calls)
+      pdf_view.reload()
+      pdf_view.reload()
+      eq({ "alpha", "alpha" }, { calls[1].needle, calls[2].needle })
+      eq({ true, false }, { calls[1].killed, calls[2].killed })
+      calls[1].finish(nil, {}, false)
+      calls[2].finish(nil, matches_on(1, 3), false)
+    end)
+    searched(s)
+    eq(2, #s.search.matches)
+  end)
+
+  it("starts a running search over when the file changes under it", function()
+    reset()
+    local s = open(search_doc("restarted"))
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    holding_searches(function(calls)
+      answering("beta", function()
+        press("/")
+      end)
+      pdf_view.reload()
+      eq({ "beta", "beta" }, { calls[1].needle, calls[2].needle }, "the search being waited for, not the old one")
+      eq({ true, false }, { calls[1].killed, calls[2].killed })
+      calls[1].finish(nil, {}, false)
+      calls[2].finish(nil, matches_on(1), false)
+    end)
+    searched(s)
+    eq({ "beta", 1 }, { s.search.needle, #s.search.matches })
   end)
 
   it("scrolls a zoomed page to a match that is out of view and leaves visible ones alone", function()

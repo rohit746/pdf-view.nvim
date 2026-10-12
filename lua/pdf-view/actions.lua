@@ -15,18 +15,47 @@ local show = render.show
 local stamp_of, purge_cache, window_for, text_area, uses_viewport =
   session.stamp_of, session.purge_cache, session.window_for, session.text_area, session.uses_viewport
 
+--- Stop the search that is running, if any. It reports nothing.
+---@param s PdfView.Session
+local function cancel_search(s)
+  if s.search_job then
+    s.search_job:kill(15)
+  end
+  s.search_job, s.search_again = nil, nil
+end
+
+--- Search the document for `needle`, in place of a search that is still running. `done` is only called for a search
+--- that is still the session's own when it finishes: one that was cancelled or replaced reports nothing.
+---@param s PdfView.Session
+---@param needle string
+---@param done fun(err?: string, matches?: PdfView.Match[], truncated?: boolean)
+local function start_search(s, needle, done)
+  cancel_search(s)
+  local job
+  job = mupdf.search(s.path, needle, config.options.search_limit, function(...)
+    if s.search_job ~= job then
+      return
+    end
+    s.search_job, s.search_again = nil, nil
+    done(...)
+  end)
+  s.search_job = job
+  s.search_again = function()
+    start_search(s, needle, done)
+  end
+end
+
 --- Search the document again for the active search, after the file changed: pages, text and positions may differ.
 ---@param s PdfView.Session
 local function rescan(s)
+  if s.search_again then
+    return s.search_again() -- a search is still running: it read the old file, so it starts over
+  end
   local old = s.search
   if not old then
     return
   end
-  if s.search_job then
-    s.search_job:kill(15)
-  end
-  s.search_job = mupdf.search(s.path, old.needle, config.options.search_limit, function(err, matches, truncated)
-    s.search_job = nil
+  start_search(s, old.needle, function(err, matches, truncated)
     if s.closed or s.search ~= old or err then
       return -- the next change of the file tries again
     end
@@ -211,11 +240,7 @@ end
 ---@param needle string
 ---@param dir 1|-1
 local function run_search(s, needle, dir)
-  if s.search_job then
-    s.search_job:kill(15)
-  end
-  s.search_job = mupdf.search(s.path, needle, config.options.search_limit, function(err, matches, truncated)
-    s.search_job = nil
+  start_search(s, needle, function(err, matches, truncated)
     if s.closed then
       return
     end
@@ -283,10 +308,7 @@ end
 
 ---@param s PdfView.Session
 local function clear_search(s)
-  if s.search_job then
-    s.search_job:kill(15)
-    s.search_job = nil
-  end
+  cancel_search(s)
   if s.search then
     s.search = nil
     show(s)

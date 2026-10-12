@@ -33,6 +33,19 @@ local function reason(stderr)
   return message
 end
 
+--- Why a finished process counts as failed, or nil when it succeeded. A killed process is a failure too:
+--- `vim.system` reports it with exit code 0, and whatever it printed up to then is incomplete.
+---@param result vim.SystemCompleted
+---@return string?
+local function failure(result)
+  if result.code ~= 0 then
+    return reason(result.stderr)
+  end
+  if result.signal ~= 0 then
+    return ("mutool was killed (signal %d)"):format(result.signal)
+  end
+end
+
 --- Run a command asynchronously. Calls `cb` on the main loop, even when the process cannot be started.
 ---@param cmd string[]
 ---@param cb fun(result: vim.SystemCompleted)
@@ -54,8 +67,9 @@ end
 ---@return fun(result: vim.SystemCompleted)
 local function rendered(out, cb)
   return function(result)
-    if result.code ~= 0 then
-      return cb(reason(result.stderr))
+    local err = failure(result)
+    if err then
+      return cb(err)
     end
     if not vim.uv.fs_stat(out) then
       return cb("mutool did not produce an image")
@@ -72,8 +86,9 @@ end
 function M.info(path, page, cb)
   local cmd = { config.options.mutool, "run", PAGE_INFO, path, ("%d"):format(math.min(math.max(page, 1), MAX_PAGE)) }
   return run(cmd, function(result)
-    if result.code ~= 0 then
-      return cb(reason(result.stderr))
+    local err = failure(result)
+    if err then
+      return cb(err)
     end
     local count, resolved, width, height = (result.stdout or ""):match("^(%d+) (%d+) ([%d%.]+) ([%d%.]+)")
     count, resolved, width, height = tonumber(count), tonumber(resolved), tonumber(width), tonumber(height)
@@ -157,8 +172,9 @@ end
 function M.search(path, needle, limit, cb)
   local cmd = { config.options.mutool, "run", SEARCH, path, needle, ("%d"):format(limit) }
   return run(cmd, function(result)
-    if result.code ~= 0 then
-      return cb(reason(result.stderr))
+    local err = failure(result)
+    if err then
+      return cb(err)
     end
     local matches, truncated = require("pdf-view.search").parse(result.stdout)
     cb(nil, matches, truncated)
@@ -190,8 +206,9 @@ end
 ---@return PdfView.Job
 function M.outline(path, cb)
   return run({ config.options.mutool, "run", OUTLINE, path }, function(result)
-    if result.code ~= 0 then
-      return cb(reason(result.stderr))
+    local err = failure(result)
+    if err then
+      return cb(err)
     end
     cb(nil, M.parse_outline(result.stdout))
   end)

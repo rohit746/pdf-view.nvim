@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format follows
 
 - Nothing was drawn on Neovim 0.11: images were sent with `nvim_ui_send()`, which only exists from Neovim 0.12, so
   every render ended in an error. On 0.11 they are now written to the terminal through Neovim's stderr channel.
+- Stopping a search with `<Esc>`, or starting another one before it had finished, warned that the abandoned search had
+  no matches. A search that was stopped or replaced no longer reports anything.
+- When the PDF changed twice in quick succession, the active search could end up with no matches until the next
+  change. A search that is still running when the file changes now starts over on the new file.
 
 ## [0.1.1] - 2026-10-10
 
