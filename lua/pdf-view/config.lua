@@ -34,7 +34,8 @@ local M = {}
 ---@field help string[] show the key summary
 
 ---@class PdfView.Config
----@field auto_open boolean open `*.pdf` buffers (`:edit`, `nvim file.pdf`, ...) in the viewer
+---@field auto_open boolean open files with one of `extensions` (`:edit`, `nvim file.pdf`, ...) in the viewer
+---@field extensions string[] file extensions that `auto_open` and `:PdfView` take, matched ignoring case
 ---@field live_reload boolean re-render when the PDF changes on disk
 ---@field reload_delay integer ms to wait after the last file event before reloading
 ---@field winbar boolean show "<file> <page> / <pages>" in the window's winbar
@@ -58,6 +59,7 @@ local M = {}
 ---@type PdfView.Config
 local defaults = {
   auto_open = true,
+  extensions = { "pdf", "cbz", "xps" },
   live_reload = true,
   reload_delay = 200,
   winbar = true,
@@ -170,6 +172,14 @@ local function validate(opts)
   end
   if opts.mutool ~= nil and (type(opts.mutool) ~= "string" or opts.mutool == "") then
     fail("mutool", "a non-empty string", opts.mutool)
+  end
+  if opts.extensions ~= nil then
+    check_string_list("extensions", opts.extensions)
+    for _, extension in ipairs(opts.extensions) do
+      if not extension:match("^%w+$") then
+        fail("extensions", 'extensions without the dot, like { "pdf", "cbz" }', extension)
+      end
+    end
   end
   if opts.transmission ~= nil and not vim.tbl_contains({ "auto", "file", "direct" }, opts.transmission) then
     fail("transmission", '"auto", "file" or "direct"', opts.transmission)

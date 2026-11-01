@@ -18,10 +18,16 @@ USAGE                                                      *pdf-view-usage*
 
                                                                   *:PdfView*
 :PdfView {file}         Open the PDF {file} in the current window. Without an
-                        argument the current buffer is used if it is a PDF.
+                        argument the current buffer is used if its
+                        extension is one of `extensions`.
 
 With |pdf-view-config| `auto_open` (the default) every `*.pdf` that is read
 (`:edit`, `nvim file.pdf`, |:split|, ...) becomes a viewer.
+
+Comic book archives (`*.cbz`) and XPS documents (`*.xps`) open the same way,
+and the extension is matched in any case (`.PDF`, `.Cbz`). The `extensions`
+option sets the list. |:PdfView| {file} takes any file MuPDF can open.
+Reflowable formats (EPUB, FB2, MOBI) are not supported yet.
 
 The viewer is a buffer named after the file with 'buftype' `nofile` and
 'filetype' `pdf-view`. Its winbar shows "<file>  <page> / <pages>".
@@ -148,6 +154,7 @@ CONFIGURATION                                              *pdf-view-config*
 >lua
     require("pdf-view").setup({
       auto_open = true,        -- take over *.pdf buffers
+      extensions = { "pdf", "cbz", "xps" }, -- what auto_open takes
       live_reload = true,      -- re-render when the file changes on disk
       reload_delay = 200,      -- ms the file must stay quiet before reloading
       winbar = true,           -- page indicator in the winbar

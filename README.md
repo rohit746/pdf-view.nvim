@@ -202,6 +202,7 @@ back to it, as it was. Marks and the jump list belong to the viewer, and they st
 ```lua
 require("pdf-view").setup({
   auto_open = true,        -- take over *.pdf buffers (:edit, nvim file.pdf, ...)
+  extensions = { "pdf", "cbz", "xps" }, -- the files auto_open and :PdfView take, in any case (.PDF, .Cbz, ...)
   live_reload = true,      -- re-render when the file changes on disk
   reload_delay = 200,      -- ms the file must stay quiet before reloading
   winbar = true,           -- "<file>   <page> / <pages>" in the window's winbar
@@ -258,6 +259,10 @@ require("pdf-view").setup({
 Unknown or mistyped options raise an error immediately. A keymap list replaces the default list for that action.
 
 With `auto_open = false` only `:PdfView` and `require("pdf-view").open()` open PDFs.
+
+Comic book archives (`.cbz`) and XPS documents open like PDFs, since MuPDF reads them too. `require("pdf-view").open()`
+and `:PdfView {file}` take any file MuPDF can open, whatever its extension. Reflowable formats (EPUB, FB2, MOBI) are not
+supported yet: their pages depend on a layout size the viewer does not set.
 
 ## Live reload
 
@@ -323,7 +328,7 @@ sending all of its bytes). In zellij, which forgets an image once nothing shows 
 
 ```
 lua/pdf-view/
-  init.lua        setup(), the :PdfView command, the *.pdf handler
+  init.lua        setup(), the :PdfView command, the *.pdf (and *.cbz, ...) handler
   config.lua      defaults and validation
   viewer.lua      a PDF buffer's lifecycle: attach, open, file watching, cleanup
   session.lua     per-buffer state and the helpers that touch windows, the winbar and the render cache

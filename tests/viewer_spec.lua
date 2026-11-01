@@ -317,6 +317,53 @@ describe("viewer", function()
     setup()
   end)
 
+  it("opens CBZ files and extensions in any case", function()
+    reset()
+    local pdf = make("comic", { { w = 612, h = 792 }, { w = 400, h = 300 } })
+    local cbz = dir .. "/comic.CbZ"
+    local result = vim.system({ "mutool", "convert", "-o", cbz, pdf }):wait()
+    eq(0, result.code, result.stderr)
+    local s = open(cbz)
+    eq("nofile", vim.bo.buftype)
+    eq(2, s.count)
+    truthy(s.slot ~= 0, "the first page of the CBZ is drawn")
+    reset()
+    local mixed = dir .. "/mixed.Pdf"
+    vim.uv.fs_copyfile(pdf, mixed)
+    eq(2, open(mixed).count)
+  end)
+
+  it("opens only the configured extensions, and :PdfView takes them without an argument", function()
+    reset()
+    local pdf = make("only-cbz", pages(2))
+    local cbz = dir .. "/only-cbz.cbz"
+    eq(0, vim.system({ "mutool", "convert", "-o", cbz, pdf }):wait().code)
+    setup({ extensions = { "cbz" } })
+    vim.cmd.edit(vim.fn.fnameescape(pdf))
+    eq(nil, viewer.sessions[vim.api.nvim_get_current_buf()], "a .pdf is not taken any more")
+    eq("", vim.bo.buftype)
+    truthy(viewer.sessions[pdf_view.open(cbz)])
+    setup({ auto_open = false })
+    reset()
+    vim.cmd.edit(vim.fn.fnameescape(cbz))
+    eq(nil, viewer.sessions[vim.api.nvim_get_current_buf()], "auto_open is off")
+    vim.cmd("PdfView")
+    truthy(viewer.sessions[vim.api.nvim_get_current_buf()], ":PdfView opens the .cbz buffer")
+    reset()
+    local notices = {}
+    local notify = vim.notify
+    vim.notify = function(message)
+      notices[#notices + 1] = message
+    end
+    vim.cmd.edit(vim.fn.fnameescape(dir .. "/notes.txt"))
+    vim.cmd("PdfView")
+    vim.notify = notify
+    eq(nil, viewer.sessions[vim.api.nvim_get_current_buf()])
+    truthy(notices[1] and notices[1]:find("usage", 1, true), vim.inspect(notices))
+    reset()
+    setup()
+  end)
+
   it("rejects an unreadable path in open()", function()
     local ok, err = pcall(pdf_view.open, dir .. "/nope.pdf")
     eq(false, ok)
