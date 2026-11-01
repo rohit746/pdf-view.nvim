@@ -20,8 +20,15 @@ All notable changes to this project are documented here. The format follows
 - A PDF reopened after restarting Neovim started on the first page. The page, fit and zoom of the last 100 PDFs are
   now kept in `stdpath("state")/pdf-view/positions.json`, and a PDF opens where it was left. `remember_position =
   false` turns this off.
+- `/` and `?` started from an empty prompt every time. Searches now go into the search history (`:history /`), and
+  an empty prompt searches again for the last text, as `/<CR>` does in Vim.
 
 ### Changed
+
+- On a long document nothing happened on screen between answering the `/` prompt and the first match. The winbar
+  now shows `/needle searching…` until the search finishes.
+- After a search on a fitted page, `+` zoomed in on the middle of the page, away from the match. It now zooms in
+  towards the current match when it is on the page.
 
 - Turning to a page that was not cached started `mutool` twice, and each run opened and parsed the document again;
   on a 756-page PDF that took about 200 ms. A worker process per viewer now keeps the document open and does all the

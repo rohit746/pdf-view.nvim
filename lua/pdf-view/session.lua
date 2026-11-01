@@ -52,6 +52,8 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field zoom number multiplies the fitted size: 1 is as fitted, 2 is twice that
 ---@field search? PdfView.Search the active search, whose matches are highlighted
 ---@field search_job? PdfView.Job in-flight search
+---@field searching? string the needle of the in-flight search, for the winbar
+---@field last_needle? string the text last searched for, which an empty `/` prompt searches for again
 ---@field search_again? fun() starts the in-flight search over, for when the file changes under it
 ---@field jumps PdfView.Position[] where jumps (`gg`, `G`, bookmarks, searches, marks) started, oldest first
 ---@field jump_index integer the entry of `jumps` that `<C-o>` and `<C-i>` are at: `#jumps + 1` after a new jump
@@ -250,12 +252,12 @@ local function update_winbar(s, win)
   end
 
   local found = ""
-  if s.search then
-    local needle = s.search.needle
+  local needle = s.searching or (s.search and s.search.needle)
+  if needle then
     if vim.fn.strchars(needle) > 24 then
       needle = vim.fn.strcharpart(needle, 0, 23) .. "…"
     end
-    found = ("/%s %s   "):format(needle, search.progress(s.search))
+    found = ("/%s %s   "):format(needle, s.searching and "searching…" or search.progress(s.search))
   end
 
   local text = (" %s%%=%s%d / %s%s "):format(
