@@ -75,6 +75,23 @@ describe("mupdf", function()
     eq({ 321, 123 }, { png_size(out) })
   end)
 
+  it("reports an empty image as a failure", function()
+    -- a mutool that exits 0 after creating an empty output file
+    local fake = dir .. "/empty-mutool"
+    local file = assert(io.open(fake, "w"))
+    file:write('#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && : > "$2"; shift; done\nexit 0\n')
+    file:close()
+    vim.uv.fs_chmod(fake, 493) -- 0755
+    config.setup({ mutool = fake })
+    local out = dir .. "/empty.png"
+    local err = await(function(cb)
+      mupdf.render(pdf, 1, 10, 10, out, cb)
+    end)
+    config.setup()
+    eq(0, vim.uv.fs_stat(out).size, "the fake mutool made an empty file")
+    eq("mutool did not produce an image", err)
+  end)
+
   describe("render_clip", function()
     local red = dir .. "/red.pdf"
     fixture.write(
