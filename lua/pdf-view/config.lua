@@ -7,6 +7,10 @@ local M = {}
 ---@field up string[] scroll up when zoomed in, else (or at the top edge) previous page
 ---@field right string[] scroll right when zoomed in, else (or at the right edge) next page
 ---@field left string[] scroll left when zoomed in, else (or at the left edge) previous page
+---@field scroll_down string[] mouse wheel: `down` for the viewer under the mouse
+---@field scroll_up string[] mouse wheel: `up` for the viewer under the mouse
+---@field scroll_right string[] mouse wheel: `right` for the viewer under the mouse
+---@field scroll_left string[] mouse wheel: `left` for the viewer under the mouse
 ---@field first string[] first page, or page {count}
 ---@field last string[] last page, or page {count}
 ---@field zoom_in string[] zoom in (accepts a count: `3+` zooms in three steps)
@@ -72,6 +76,10 @@ local defaults = {
     up = { "k", "<Up>" },
     right = { "l", "<Right>" },
     left = { "h", "<Left>" },
+    scroll_down = { "<ScrollWheelDown>" },
+    scroll_up = { "<ScrollWheelUp>" },
+    scroll_right = { "<ScrollWheelRight>" },
+    scroll_left = { "<ScrollWheelLeft>" },
     first = { "gg", "<Home>" },
     last = { "G", "<End>" },
     zoom_in = { "+", "=" },

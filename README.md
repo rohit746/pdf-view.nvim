@@ -111,6 +111,7 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `k` `<Up>`                   | scroll up; at the top edge (or when not zoomed) previous page                   |
 | `l` `<Right>`                | scroll right; at the right edge (or when not zoomed) next page                  |
 | `h` `<Left>`                 | scroll left; at the left edge (or when not zoomed) previous page                |
+| mouse wheel                  | like `j` `k` `l` `h`, while a viewer has focus: moves the viewer under the mouse |
 | `<PageDown>` `<C-f>`         | next page, always (`3<PageDown>`: three pages ahead)                            |
 | `<PageUp>` `<BS>` `<C-b>`    | previous page, always                                                           |
 | `gg` `<Home>`                | first page; `12gg` goes to page 12                                              |
@@ -195,6 +196,10 @@ require("pdf-view").setup({
     up = { "k", "<Up>" },
     right = { "l", "<Right>" },
     left = { "h", "<Left>" },
+    scroll_down = { "<ScrollWheelDown>" },   -- the wheel; `{}` leaves it to Neovim
+    scroll_up = { "<ScrollWheelUp>" },
+    scroll_right = { "<ScrollWheelRight>" },
+    scroll_left = { "<ScrollWheelLeft>" },
     next = { "<PageDown>", "<C-f>" },
     prev = { "<PageUp>", "<BS>", "<C-b>" },
     first = { "gg", "<Home>" },

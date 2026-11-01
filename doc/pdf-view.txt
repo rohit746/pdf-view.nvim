@@ -42,6 +42,9 @@ between matches accept a count.
                           zoomed, next page
   h <Left>                scroll left; at the left edge, or when not zoomed,
                           previous page
+  <ScrollWheelDown> etc.  like j k l h, while a viewer has focus: moves the
+                          viewer under the mouse (keymaps `scroll_down`,
+                          `scroll_up`, `scroll_right`, `scroll_left`)
   <PageDown> <C-f>        next page, always ({count} pages ahead)
   <PageUp> <BS> <C-b>     previous page, always
   gg <Home>               first page, or page {count}

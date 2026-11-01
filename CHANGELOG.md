@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The mouse wheel did nothing in a viewer. While a viewer has focus, it now scrolls a zoomed page and turns pages,
+  like `j` `k` `l` `h`, in the viewer under the mouse; over other windows it scrolls them as before. The
+  `scroll_down`, `scroll_up`, `scroll_right` and `scroll_left` keymaps set its keys; `{}` turns one off.
+
 ### Fixed
 
 - With `auto_open = false`, `:edit` in a viewer left an empty buffer whose keys did nothing. The viewer now comes

@@ -197,6 +197,24 @@ local function move(s, dx, dy)
   go(s, (s.target or s.page) + (forward and count or -count), anchor)
 end
 
+--- The mouse wheel moves the viewer it is over, as `move` does. These keys are mapped in the focused viewer only,
+--- so over any other window the wheel does what it would do there without the mapping.
+---@param s PdfView.Session
+---@param dx -1|0|1
+---@param dy -1|0|1
+---@param lhs string the key that was pressed
+local function wheel(s, dx, dy, lhs)
+  local win = vim.fn.getmousepos().winid
+  if win == 0 then -- no mouse position: the key came from a script or another mapping
+    return move(s, dx, dy)
+  end
+  local over = session.sessions[vim.api.nvim_win_get_buf(win)]
+  if over then
+    return move(over, dx, dy)
+  end
+  vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+end
+
 ---@param message string
 ---@param level? integer
 local function notify(message, level)
@@ -366,6 +384,10 @@ local ACTION_ORDER = {
   "up",
   "right",
   "left",
+  "scroll_down",
+  "scroll_up",
+  "scroll_right",
+  "scroll_left",
   "next",
   "prev",
   "first",
@@ -386,7 +408,7 @@ local ACTION_ORDER = {
   "help",
 }
 
----@type table<string, { desc: string, run: fun(s: PdfView.Session) }>
+---@type table<string, { desc: string, run: fun(s: PdfView.Session, lhs: string) }>
 local ACTIONS = {}
 
 ACTIONS.down = {
@@ -414,6 +436,34 @@ ACTIONS.left = {
   desc = "scroll left, or previous page",
   run = function(s)
     move(s, -1, 0)
+  end,
+}
+
+ACTIONS.scroll_down = {
+  desc = "scroll down, or next page",
+  run = function(s, lhs)
+    wheel(s, 0, 1, lhs)
+  end,
+}
+
+ACTIONS.scroll_up = {
+  desc = "scroll up, or previous page",
+  run = function(s, lhs)
+    wheel(s, 0, -1, lhs)
+  end,
+}
+
+ACTIONS.scroll_right = {
+  desc = "scroll right, or next page",
+  run = function(s, lhs)
+    wheel(s, 1, 0, lhs)
+  end,
+}
+
+ACTIONS.scroll_left = {
+  desc = "scroll left, or previous page",
+  run = function(s, lhs)
+    wheel(s, -1, 0, lhs)
   end,
 }
 
@@ -557,7 +607,7 @@ local function set_keymaps(s)
   for action, keys in pairs(keymaps) do
     for _, lhs in ipairs(keys) do
       vim.keymap.set("n", lhs, function()
-        ACTIONS[action].run(s)
+        ACTIONS[action].run(s, lhs)
       end, { buffer = s.buf, nowait = true, silent = true, desc = "PDF: " .. ACTIONS[action].desc })
       s.mapped[#s.mapped + 1] = lhs
     end
