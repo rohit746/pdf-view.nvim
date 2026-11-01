@@ -25,6 +25,10 @@ local M = {}
 ---@field search_prev string[] previous match
 ---@field search_clear string[] remove the highlights
 ---@field outline string[] pick a bookmark to jump to
+---@field jump_back string[] back through the jump list (`gg`, `G`, bookmarks, searches and marks are jumps)
+---@field jump_forward string[] forward through the jump list
+---@field mark string[] followed by a to z: mark the page, fit, zoom and view
+---@field goto_mark string[] followed by a to z: go to that mark; doubled (`''`): to where the latest jump started
 ---@field reload string[] re-render the current page
 ---@field close string[] close the viewer buffer
 ---@field help string[] show the key summary
@@ -97,6 +101,10 @@ local defaults = {
     search_prev = { "N" },
     search_clear = { "<Esc>" },
     outline = { "gO" },
+    jump_back = { "<C-o>" },
+    jump_forward = { "<C-i>", "<Tab>" },
+    mark = { "m" },
+    goto_mark = { "'", "`" },
     reload = { "r" },
     close = { "q" },
     help = { "g?" },

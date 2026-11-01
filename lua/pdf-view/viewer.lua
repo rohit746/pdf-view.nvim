@@ -22,9 +22,9 @@ local reset_view = session.reset_view
 
 local RELOAD_RETRIES = 8
 
---- Where the viewer of a buffer was when the buffer was unloaded. `:edit` unloads a buffer and reads it again, and
---- this is what brings it back to the same page instead of the first one.
----@type table<integer, { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }>
+--- Where the viewer of a buffer was when the buffer was unloaded, with its jump list and marks. `:edit` unloads a
+--- buffer and reads it again, and this is what brings it back to the same page instead of the first one.
+---@type table<integer, PdfView.Position|{ jumps?: PdfView.Position[], jump_index?: integer, marks?: table<string, PdfView.Position> }>
 local resume = {}
 
 --- Holds each viewer's own `BufReadCmd`, which outlives the session (`destroy` clears only `augroup`) so `:edit`
@@ -37,11 +37,17 @@ local function position(s)
   return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
 end
 
+--- What `resume` keeps of the viewer `s`: where it is, its jump list and its marks.
+---@param s PdfView.Session
+local function kept(s)
+  return vim.tbl_extend("force", position(s), { jumps = s.jumps, jump_index = s.jump_index, marks = s.marks })
+end
+
 --- Remember where the viewer `s` is for `:edit`, and in the state file for the next Neovim.
 ---@param s PdfView.Session
 local function leave(s)
   local where = position(s)
-  resume[s.buf] = where
+  resume[s.buf] = kept(s)
   if config.options.remember_position then
     pcall(positions.set, s.path, where)
   end
@@ -170,6 +176,9 @@ function M.attach(buf)
     zoom = last.zoom or 1,
     cx = last.cx or 0.5,
     cy = last.cy or 0.5,
+    jumps = last.jumps or {},
+    jump_index = last.jump_index or 1,
+    marks = last.marks or {},
     gen = 0,
     ids = allocate_ids(),
     slot = 0,
@@ -292,7 +301,7 @@ function M.save_copy(s, target)
   end
   vim.api.nvim_echo({ { ('"%s" written'):format(vim.fn.fnamemodify(target, ":~:.")) } }, false, {})
   if vim.api.nvim_buf_get_name(s.buf) ~= s.path then -- :saveas has renamed the buffer: view the copy
-    resume[s.buf] = position(s)
+    resume[s.buf] = kept(s)
     destroy(s)
     M.attach(s.buf)
   end

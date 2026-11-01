@@ -66,6 +66,74 @@ local function rescan(s)
   end)
 end
 
+--- Where a viewer is: its page, fit, zoom and the centre of the view. The jump list and the marks hold these.
+---@alias PdfView.Position { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }
+
+local JUMP_LIMIT = 100 -- as in Vim
+
+---@param s PdfView.Session
+---@return PdfView.Position
+local function here(s)
+  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+end
+
+--- Go back to `where`, with the fit and zoom it had.
+---@param s PdfView.Session
+---@param where PdfView.Position
+local function restore(s, where)
+  if s.closed then
+    return
+  end
+  s.mode, s.zoom, s.cx, s.cy = where.mode, where.zoom, where.cx, where.cy
+  s.target = math.max(1, math.min(where.page, s.count or where.page))
+  show(s, s.target)
+end
+
+--- Put the position `where` at the end of the jump list, in place of an older entry for the same page.
+---@param s PdfView.Session
+---@param where PdfView.Position
+local function push_jump(s, where)
+  local jumps = s.jumps
+  for index = #jumps, 1, -1 do
+    if jumps[index].page == where.page then
+      table.remove(jumps, index)
+    end
+  end
+  jumps[#jumps + 1] = where
+  if #jumps > JUMP_LIMIT then
+    table.remove(jumps, 1)
+  end
+  s.jump_index = #jumps + 1
+end
+
+--- Record a jump that is about to leave the current position: `<C-o>` comes back to it, and so does `''`.
+---@param s PdfView.Session
+local function record_jump(s)
+  local where = here(s)
+  push_jump(s, where)
+  s.marks["'"] = where
+end
+
+--- Move `count` entries through the jump list: back for a negative count, forward for a positive one.
+---@param s PdfView.Session
+---@param count integer
+local function walk_jumps(s, count)
+  local jumps = s.jumps
+  local index = s.jump_index
+  if count < 0 and index > #jumps then
+    -- leaving the end of the list: keep the current position so `<C-i>` can come back to it
+    push_jump(s, here(s))
+    index = #jumps
+  end
+  local to = index + count
+  if to < 1 or to > #jumps then
+    return
+  end
+  s.marks["'"] = here(s)
+  s.jump_index = to
+  restore(s, jumps[to])
+end
+
 --- Where on the new page a zoomed view starts, as a fraction of the page. Missing fields keep their value.
 ---@alias PdfView.Anchor { cx?: number, cy?: number }
 
@@ -79,6 +147,9 @@ local TOP = { cy = 0 }
 local function go(s, page, anchor, jump)
   if s.closed then
     return
+  end
+  if jump then
+    record_jump(s)
   end
   page = math.max(1, math.min(page, s.count or page))
   if page == (s.target or s.page) and s.slot ~= 0 then
@@ -254,6 +325,7 @@ end
 ---@param index integer
 local function goto_match(s, index)
   local match = s.search.matches[index]
+  record_jump(s)
   s.search.current = index
   if not match_visible(s, match) then
     s.cx, s.cy = match.cx, match.cy
@@ -380,6 +452,44 @@ local function pick_outline(s)
   end)
 end
 
+--- Read the name of a mark after `m`, `'` or `` ` ``. Nil when the key is not one: <Esc> cancels quietly.
+---@param allowed string Lua pattern of the names
+---@return string?
+local function read_mark(allowed)
+  local ok, key = pcall(vim.fn.getcharstr)
+  if not ok or key == "\27" then
+    return nil
+  end
+  if not key:match("^" .. allowed .. "$") then
+    notify(("`%s` is not a mark: use a to z"):format(vim.fn.keytrans(key)), vim.log.levels.WARN)
+    return nil
+  end
+  return key
+end
+
+---@param s PdfView.Session
+local function set_mark(s)
+  local name = read_mark("%l")
+  if name then
+    s.marks[name] = here(s)
+  end
+end
+
+--- Jump to mark a to z, or with `''` (or ``` `` ```) back to where the latest jump started.
+---@param s PdfView.Session
+local function goto_mark(s)
+  local name = read_mark("[%l'`]")
+  if not name then
+    return
+  end
+  local where = s.marks[name == "`" and "'" or name]
+  if not where then
+    return notify(("mark `%s` is not set"):format(name), vim.log.levels.WARN)
+  end
+  record_jump(s)
+  restore(s, where)
+end
+
 local ACTION_ORDER = {
   "down",
   "up",
@@ -405,6 +515,10 @@ local ACTION_ORDER = {
   "search_prev",
   "search_clear",
   "outline",
+  "jump_back",
+  "jump_forward",
+  "mark",
+  "goto_mark",
   "reload",
   "close",
   "help",
@@ -575,6 +689,30 @@ ACTIONS.search_clear = {
 ACTIONS.outline = {
   desc = "jump to a bookmark",
   run = pick_outline,
+}
+
+ACTIONS.jump_back = {
+  desc = "back to where the previous jump started ({count} jumps)",
+  run = function(s)
+    walk_jumps(s, -vim.v.count1)
+  end,
+}
+
+ACTIONS.jump_forward = {
+  desc = "forward in the jump list",
+  run = function(s)
+    walk_jumps(s, vim.v.count1)
+  end,
+}
+
+ACTIONS.mark = {
+  desc = "m{a-z}: mark the page, fit and zoom",
+  run = set_mark,
+}
+
+ACTIONS.goto_mark = {
+  desc = "'{a-z}: go to a mark; '' to where the latest jump started",
+  run = goto_mark,
 }
 
 ACTIONS.reload = { desc = "re-render the page", run = M.reload }
