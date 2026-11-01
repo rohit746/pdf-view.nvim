@@ -542,7 +542,14 @@ ACTIONS.help = {
 }
 
 ---@param s PdfView.Session
+--- Map the keys of `config.options.keymaps` in the viewer's buffer, replacing the ones mapped before (`setup()` may
+--- have changed them since).
+---@param s PdfView.Session
 local function set_keymaps(s)
+  for _, lhs in ipairs(s.mapped or {}) do
+    pcall(vim.keymap.del, "n", lhs, { buffer = s.buf })
+  end
+  s.mapped = {}
   local keymaps = config.options.keymaps
   if not keymaps then
     return
@@ -552,6 +559,7 @@ local function set_keymaps(s)
       vim.keymap.set("n", lhs, function()
         ACTIONS[action].run(s)
       end, { buffer = s.buf, nowait = true, silent = true, desc = "PDF: " .. ACTIONS[action].desc })
+      s.mapped[#s.mapped + 1] = lhs
     end
   end
 end

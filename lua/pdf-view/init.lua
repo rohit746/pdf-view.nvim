@@ -25,6 +25,10 @@ end
 function M.setup(opts)
   config.setup(opts)
   sync_handler()
+  local viewer = package.loaded["pdf-view.viewer"]
+  if viewer then -- viewers opened before this call
+    viewer.apply_config()
+  end
   return M
 end
 
