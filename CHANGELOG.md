@@ -25,6 +25,9 @@ All notable changes to this project are documented here. The format follows
 - Live reload did nothing on NFS, SMB, sshfs and WSL's `/mnt/c`, where directory events miss changes or cannot be set
   up, and nothing said so. On those filesystems, and wherever the directory cannot be watched, the file is now checked
   every 500 ms. If that fails too, a notice says live reload is off.
+- With a colorscheme whose `Visual` group sets a text colour, selecting in visual mode (`v`, `V`, `<C-v>` or a mouse
+  drag) broke the selected part of the page. Visual highlighting is now off in viewer windows, like search
+  highlighting.
 
 ## [0.3.0] - 2026-11-01
 

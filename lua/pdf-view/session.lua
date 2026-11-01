@@ -35,7 +35,7 @@ local WINDOW_OPTIONS = {
 -- Highlights that Neovim lays over buffer text. A colour of theirs would replace the image id in the foreground of
 -- the cells it covers, so in a viewer's window they are mapped to a group without colours ('winhighlight' creates
 -- the group, empty, by naming it).
-local MUTED_HIGHLIGHTS = { "Search", "CurSearch", "IncSearch" }
+local MUTED_HIGHLIGHTS = { "Search", "CurSearch", "IncSearch", "Visual", "VisualNOS" }
 local NO_HIGHLIGHT = "PdfViewNone"
 
 ---@class PdfView.Session
