@@ -25,6 +25,7 @@ local M = {}
 ---@field search_prev string[] previous match
 ---@field search_clear string[] remove the highlights
 ---@field outline string[] pick a bookmark to jump to
+---@field follow_link string[] pick a link on the page: go to its page, or open its address with `vim.ui.open()`
 ---@field yank_text string[] yank the text of the page into the register given (`"+y`), linewise
 ---@field show_text string[] show the text of the page in a scratch buffer in a split
 ---@field jump_back string[] back through the jump list (`gg`, `G`, bookmarks, searches and marks are jumps)
@@ -114,6 +115,7 @@ local defaults = {
     search_prev = { "N" },
     search_clear = { "<Esc>" },
     outline = { "gO" },
+    follow_link = { "f" },
     yank_text = { "y" },
     show_text = { "t" },
     jump_back = { "<C-o>" },

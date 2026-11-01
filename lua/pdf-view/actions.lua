@@ -488,6 +488,42 @@ local function pick_outline(s)
   end)
 end
 
+--- Pick one of the links on the page on screen and follow it: a link to a page of the document jumps there, any
+--- other (a web address, an e-mail) opens with `vim.ui.open()`.
+---@param s PdfView.Session
+local function follow_link(s)
+  local page = s.page
+  mupdf.links(s.path, page, function(err, links)
+    if s.closed then
+      return
+    end
+    if err or not links then
+      return notify("cannot read the links of the page: " .. tostring(err), vim.log.levels.WARN)
+    end
+    if #links == 0 then
+      return notify(("page %d has no links"):format(page))
+    end
+    vim.ui.select(links, {
+      prompt = "Links",
+      format_item = function(link)
+        local target = link.page and ("p. %d"):format(link.page) or link.uri
+        return link.text ~= "" and ("%s  (%s)"):format(link.text, target) or target
+      end,
+    }, function(link)
+      if not link then
+        return
+      end
+      if link.page then
+        return go(s, link.page, TOP, true)
+      end
+      local _, open_err = vim.ui.open(link.uri)
+      if open_err then
+        notify(("cannot open %s: %s"):format(link.uri, open_err), vim.log.levels.WARN)
+      end
+    end)
+  end)
+end
+
 --- Read the text of the page on screen and hand its lines to `use`, without the empty lines at its end. A page
 --- without text, such as a scanned one, only gets a notification.
 ---@param s PdfView.Session
@@ -614,6 +650,7 @@ local ACTION_ORDER = {
   "search_prev",
   "search_clear",
   "outline",
+  "follow_link",
   "yank_text",
   "show_text",
   "jump_back",
@@ -791,6 +828,11 @@ ACTIONS.search_clear = {
 ACTIONS.outline = {
   desc = "jump to a bookmark",
   run = pick_outline,
+}
+
+ACTIONS.follow_link = {
+  desc = "pick a link on the page and follow it",
+  run = follow_link,
 }
 
 ACTIONS.yank_text = {

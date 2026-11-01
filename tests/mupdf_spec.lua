@@ -632,6 +632,47 @@ done
     end)
   end)
 
+  describe("links", function()
+    local linked = dir .. "/links.pdf"
+    fixture.write(linked, {
+      {
+        w = 612,
+        h = 792,
+        label = "Contents",
+        texts = { { x = 72, y = 600, text = "Website" }, { x = 72, y = 300, text = "Results" } },
+        links = {
+          { rect = { 70, 290, 250, 330 }, page = 3 }, -- under "Results", listed after the links above it
+          { rect = { 70, 590, 250, 630 }, uri = "https://example.com/" }, -- under "Website"
+          { rect = { 400, 50, 500, 100 }, page = 2 }, -- over no text
+          { rect = { 300, 590, 400, 630 }, uri = "mailto:someone@example.com" }, -- right of "Website"
+        },
+      },
+      { w = 612, h = 792 },
+      { w = 612, h = 792 },
+    })
+
+    it("lists a page's links in reading order, with their text and where they lead", function()
+      local err, links = await(function(cb)
+        mupdf.links(linked, 1, cb)
+      end)
+      eq(nil, err)
+      eq({
+        { text = "Website", uri = "https://example.com/" },
+        { text = "", uri = "mailto:someone@example.com" },
+        { text = "Results", page = 3 },
+        { text = "", page = 2 },
+      }, links)
+    end)
+
+    it("is empty for a page without links", function()
+      local err, links = await(function(cb)
+        mupdf.links(linked, 2, cb)
+      end)
+      eq(nil, err)
+      eq({}, links)
+    end)
+  end)
+
   it("reports an unreadable document", function()
     local broken = dir .. "/broken.pdf"
     local file = assert(io.open(broken, "wb"))

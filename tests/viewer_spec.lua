@@ -1548,6 +1548,110 @@ describe("viewer outline", function()
   end)
 end)
 
+describe("viewer links", function()
+  setup()
+
+  local function linked(name)
+    return make(name, {
+      {
+        w = 612,
+        h = 792,
+        label = "Contents",
+        texts = { { x = 72, y = 600, text = "Website" }, { x = 72, y = 300, text = "Results" } },
+        links = {
+          { rect = { 70, 290, 250, 330 }, page = 3 },
+          { rect = { 70, 590, 250, 630 }, uri = "https://example.com/" },
+        },
+      },
+      LETTER,
+      LETTER,
+    })
+  end
+
+  --- Press `f` and pick the link the picker offers first that `choose` accepts (nil cancels).
+  ---@return { items: PdfView.Link[], opts: table }
+  local function follow(choose)
+    local offered
+    with_stub(vim.ui, "select", function(items, opts, callback)
+      offered = { items = items, opts = opts }
+      callback(choose(items))
+    end, function()
+      press("f")
+      wait_for(function()
+        return offered ~= nil
+      end, "the link picker")
+    end)
+    return offered
+  end
+
+  it("offers the links on the page and jumps to the page one leads to, as a jump", function()
+    reset()
+    local s = open(linked("links"))
+    local offered = follow(function(items)
+      return items[2]
+    end)
+    eq("Links", offered.opts.prompt)
+    eq({ "Website  (https://example.com/)", "Results  (p. 3)" }, vim.tbl_map(offered.opts.format_item, offered.items))
+    on_page(s, 3)
+    press(vim.keycode("<C-o>"))
+    on_page(s, 1)
+  end)
+
+  it("opens an address with vim.ui.open()", function()
+    reset()
+    local s = open(linked("links-open"))
+    local opened
+    with_stub(vim.ui, "open", function(uri)
+      opened = uri
+      return nil, nil
+    end, function()
+      follow(function(items)
+        return items[1]
+      end)
+    end)
+    eq("https://example.com/", opened)
+    eq(1, s.page)
+  end)
+
+  it("does nothing when the picker is cancelled", function()
+    reset()
+    local s = open(linked("links-cancel"))
+    local opened = false
+    with_stub(vim.ui, "open", function()
+      opened = true
+    end, function()
+      follow(function()
+        return nil
+      end)
+    end)
+    eq(false, opened)
+    eq(1, s.page)
+  end)
+
+  it("tells the user when the page has no links", function()
+    reset()
+    local s = open(linked("links-none"))
+    press("2gg")
+    on_page(s, 2)
+    local notes, asked = {}, false
+    with_stub(vim.ui, "select", function()
+      asked = true
+    end, function()
+      with_stub(vim, "notify", function(message)
+        notes[#notes + 1] = message
+      end, function()
+        press("f")
+        wait_for(function()
+          return #notes > 0
+        end, "the notification")
+      end)
+    end)
+    eq(false, asked)
+    truthy(notes[1]:find("page 2 has no links", 1, true), vim.inspect(notes))
+    eq(2, s.page)
+  end)
+end)
+
 describe("viewer page text", function()
   setup()
 

@@ -8,6 +8,12 @@ local M = {}
 ---@field texts? { x: number, y: number, text: string }[] more text, positioned from the bottom-left corner in points
 ---@field color? number[] background {r, g, b} in 0..1
 ---@field rotate? integer /Rotate in degrees (a multiple of 90)
+---@field links? PdfView.FixtureLink[] link annotations
+
+---@class PdfView.FixtureLink
+---@field rect number[] { x0, y0, x1, y1 } in points from the bottom-left corner
+---@field page? integer 1-based page it goes to
+---@field uri? string address it opens instead
 
 ---@class PdfView.FixtureOutline
 ---@field title string
@@ -50,11 +56,31 @@ function M.write(path, pages, opts)
     local object = add(
       (
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %d %d] /Rotate %d /Contents %d 0 R "
-        .. "/Resources << /Font << /F1 3 0 R >> >> >>"
+        .. "/Resources << /Font << /F1 3 0 R >> >>%%s >>"
       ):format(page.w, page.h, page.rotate or 0, contents)
     )
     page_objects[index] = object
     kids[#kids + 1] = object .. " 0 R"
+  end
+  -- links can lead to any page, so they are added once every page has its object
+  for index, page in ipairs(pages) do
+    local annots = {}
+    for _, link in ipairs(page.links or {}) do
+      local action = link.page and ("/Dest [%d 0 R /Fit]"):format(page_objects[link.page])
+        or ("/A << /S /URI /URI (%s) >>"):format(link.uri)
+      local annot = add(
+        ("<< /Type /Annot /Subtype /Link /Rect [%g %g %g %g] /Border [0 0 0] %s >>"):format(
+          link.rect[1],
+          link.rect[2],
+          link.rect[3],
+          link.rect[4],
+          action
+        )
+      )
+      annots[#annots + 1] = annot .. " 0 R"
+    end
+    local object = page_objects[index]
+    objects[object] = objects[object]:format(#annots > 0 and (" /Annots [%s]"):format(table.concat(annots, " ")) or "")
   end
   objects[2] = ("<< /Type /Pages /Kids [%s] /Count %d >>"):format(table.concat(kids, " "), #pages)
 
