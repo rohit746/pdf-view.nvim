@@ -26,6 +26,10 @@ With |pdf-view-config| `auto_open` (the default) every `*.pdf` that is read
 The viewer is a buffer named after the file with 'buftype' `nofile` and
 'filetype' `pdf-view`. Its winbar shows "<file>  <page> / <pages>".
 
+`:w` never overwrites the PDF. |:w| {file} and |:saveas| {file} save a copy
+of it; after |:saveas| the viewer shows the copy. A range or |:w_a| is
+refused.
+
                                                               *pdf-view-keys*
 All keys are buffer-local and normal mode. The keys that move, zoom or step
 between matches accept a count.
