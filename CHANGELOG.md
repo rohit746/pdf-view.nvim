@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Only `*.pdf` and `*.PDF` opened in the viewer, although MuPDF also reads comic book archives and XPS documents.
+  `*.cbz` and `*.xps` now open too, and the extension is matched in any case, so `paper.Pdf` is covered. The
+  `extensions` option sets the list, for `auto_open` and for `:PdfView` without an argument.
 - `gg`, `G`, `{count}G`, outline picks and search jumps could not be undone. Each viewer now keeps a jump list:
   `<C-o>` and `<C-i>` go back and forward through it, and `''` swaps with the position before the latest jump.
   `m{a-z}` marks the page with its fit, zoom and view, and `'{a-z}` or `` `{a-z} `` goes back to it. The

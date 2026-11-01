@@ -4,16 +4,38 @@ local M = {}
 
 local group = vim.api.nvim_create_augroup("PdfView", { clear = true })
 
---- Own `*.pdf` reads when `auto_open` is on. Re-run after the configuration changes.
+--- `*.[pP][dD][fF]` for "pdf": the autocommand pattern of one extension, matching any case.
+---@param extension string
+---@return string
+local function pattern(extension)
+  return "*." .. extension:gsub("%a", function(letter)
+    return "[" .. letter:lower() .. letter:upper() .. "]"
+  end)
+end
+
+--- Whether `path` has one of the `extensions` the viewer takes.
+---@param path string
+---@return boolean
+local function supported(path)
+  local extension = vim.fn.fnamemodify(path, ":e"):lower()
+  for _, candidate in ipairs(config.options.extensions) do
+    if candidate:lower() == extension then
+      return true
+    end
+  end
+  return false
+end
+
+--- Own reads of the files with one of the `extensions` when `auto_open` is on. Re-run after the configuration changes.
 local function sync_handler()
   vim.api.nvim_clear_autocmds({ group = group, event = "BufReadCmd" })
-  if not config.options.auto_open then
+  if not config.options.auto_open or #config.options.extensions == 0 then
     return
   end
   vim.api.nvim_create_autocmd("BufReadCmd", {
     group = group,
-    pattern = { "*.pdf", "*.PDF" },
-    desc = "Open PDF files in pdf-view",
+    pattern = vim.tbl_map(pattern, config.options.extensions),
+    desc = "Open PDF (and CBZ, XPS, ...) files in pdf-view",
     callback = function(args)
       require("pdf-view.viewer").read(args.buf)
     end,
@@ -61,7 +83,7 @@ function M._init()
     local path = args.fargs[1]
     if not path then
       path = vim.api.nvim_buf_get_name(0)
-      if not path:lower():match("%.pdf$") then
+      if not supported(path) then
         return vim.notify("pdf-view: usage: :PdfView {file.pdf}", vim.log.levels.ERROR)
       end
     end

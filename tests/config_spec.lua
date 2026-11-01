@@ -83,6 +83,18 @@ describe("config", function()
     eq({ "<ScrollWheelLeft>" }, keymaps.scroll_left)
   end)
 
+  it("takes PDF, CBZ and XPS by default and replaces the list", function()
+    eq({ "pdf", "cbz", "xps" }, config.setup().extensions)
+    eq({ "epub" }, config.setup({ extensions = { "epub" } }).extensions)
+    eq({}, config.setup({ extensions = {} }).extensions)
+  end)
+
+  it("rejects bad extensions", function()
+    rejects({ extensions = "pdf" }, "`extensions`")
+    rejects({ extensions = { ".pdf" } }, "`extensions`")
+    rejects({ extensions = { "p*" } }, "`extensions`")
+  end)
+
   it("rejects an unknown transmission mode", function()
     rejects({ transmission = "carrier-pigeon" }, "`transmission`")
   end)
