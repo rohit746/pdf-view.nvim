@@ -77,6 +77,8 @@ describe("config", function()
     eq({ "0" }, keymaps.zoom_reset)
     eq({ "j", "<Down>" }, keymaps.down)
     eq({ "l", "<Right>" }, keymaps.right)
+    eq({ "<ScrollWheelDown>" }, keymaps.scroll_down)
+    eq({ "<ScrollWheelLeft>" }, keymaps.scroll_left)
   end)
 
   it("rejects an unknown transmission mode", function()

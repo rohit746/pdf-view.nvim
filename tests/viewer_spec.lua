@@ -519,6 +519,31 @@ describe("viewer zoom", function()
     on_page(s, 3)
   end)
 
+  it("scrolls and turns pages with the mouse wheel", function()
+    reset()
+    local s = open(make("zoom-wheel", pages(3)))
+    local function wheel(dir)
+      press(vim.keycode("<ScrollWheel" .. dir .. ">"))
+      settle(s)
+    end
+    wheel("Down") -- not zoomed: a page turn
+    on_page(s, 2)
+    wheel("Up")
+    on_page(s, 1)
+    press("4+")
+    settle(s)
+    wheel("Down")
+    truthy(s.cy > 0.5, "scrolled down, cy = " .. s.cy)
+    eq(1, s.page)
+    local cy = s.cy
+    wheel("Up")
+    truthy(s.cy < cy, "scrolled back up, cy = " .. s.cy)
+
+    setup({ keymaps = { scroll_down = {} } })
+    eq("", vim.fn.maparg("<ScrollWheelDown>", "n"), "an empty list turns the wheel off")
+    setup()
+  end)
+
   it("treats movement keys as page turns when nothing is zoomed", function()
     reset()
     local s = open(make("zoom-none", pages(4)))
