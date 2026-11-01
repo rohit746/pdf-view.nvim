@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-01
+
 ### Added
 
 - zellij support. zellij 0.45 implements the Kitty graphics protocol itself but not Unicode placeholders, so inside
@@ -96,7 +98,8 @@ First release.
   colour setup.
 - Configuration with validation: unknown or mistyped options raise immediately.
 
-[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rohit746/pdf-view.nvim/releases/tag/v0.1.0
