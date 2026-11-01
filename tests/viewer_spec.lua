@@ -1443,6 +1443,70 @@ describe("viewer robustness", function()
     end, "a reload after the new file behind the link changed", 8000)
   end)
 
+  it("polls the file when its directory cannot be watched", function()
+    reset()
+    local path = make("no-events", pages(2))
+    with_stub(vim.uv, "new_fs_event", function()
+      return nil
+    end, function()
+      local s = open(path)
+      fixture.write(path, pages(4))
+      wait_for(function()
+        return s.count == 4 and s.job == nil
+      end, "a reload found by polling", 8000)
+    end)
+  end)
+
+  it("polls a file on a network filesystem, where directory events miss changes made elsewhere", function()
+    reset()
+    local path = make("nfs", pages(2))
+    -- A watch that starts but never hears anything, like inotify on NFS for a write from another machine.
+    local deaf = {
+      start = function()
+        return true
+      end,
+      stop = function() end,
+      close = function() end,
+      is_closing = function()
+        return false
+      end,
+    }
+    with_stub(vim.uv, "fs_statfs", function()
+      return { type = 0x6969 } -- NFS_SUPER_MAGIC
+    end, function()
+      with_stub(vim.uv, "new_fs_event", function()
+        return deaf
+      end, function()
+        local s = open(path)
+        fixture.write(path, pages(4))
+        wait_for(function()
+          return s.count == 4 and s.job == nil
+        end, "a reload found by polling", 8000)
+      end)
+    end)
+  end)
+
+  it("says once that live reload is off when the file cannot be watched", function()
+    reset()
+    local notices = {}
+    with_stub(vim, "notify", function(message)
+      notices[#notices + 1] = message
+    end, function()
+      with_stub(vim.uv, "new_fs_event", function()
+        return nil
+      end, function()
+        with_stub(vim.uv, "new_fs_poll", function()
+          return nil
+        end, function()
+          open(make("unwatched-1", pages(1)))
+          open(make("unwatched-2", pages(1)))
+        end)
+      end)
+    end)
+    eq(1, #notices)
+    truthy(notices[1]:find("live reload is off", 1, true), notices[1])
+  end)
+
   it("opens files whose names have characters that expand() would rewrite", function()
     reset()
     for _, name in ipairs({ "a{b,c}", "price $HOME", "tick`x`", "notes [draft]" }) do

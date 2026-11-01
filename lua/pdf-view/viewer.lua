@@ -52,6 +52,7 @@ local function on_file_changed(s)
 end
 
 local global_autocmds = false
+local warned_unwatched = false -- the notice that live reload could not be set up is shown once
 
 local function set_global_autocmds()
   if global_autocmds then
@@ -215,6 +216,13 @@ function M.attach(buf)
     s.watcher = watch.start(s.path, config.options.reload_delay, function()
       on_file_changed(s)
     end)
+    if not s.watcher and not warned_unwatched then
+      warned_unwatched = true
+      vim.notify(
+        ("pdf-view: live reload is off: cannot watch `%s` for changes: reload it with :edit"):format(s.path),
+        vim.log.levels.WARN
+      )
+    end
   end
 
   if vim.api.nvim_get_current_buf() == buf then

@@ -22,6 +22,9 @@ All notable changes to this project are documented here. The format follows
 - When the terminal could not read the PNG files pdf-view writes (Neovim in a container or running as another user,
   or a flatpak terminal), pages stayed blank and nothing said why. On Neovim 0.12 the terminal is now asked once
   whether it can read them; if it cannot, pages are sent as bytes instead, and `:checkhealth pdf-view` says so.
+- Live reload did nothing on NFS, SMB, sshfs and WSL's `/mnt/c`, where directory events miss changes or cannot be set
+  up, and nothing said so. On those filesystems, and wherever the directory cannot be watched, the file is now checked
+  every 500 ms. If that fails too, a notice says live reload is off.
 
 ## [0.3.0] - 2026-11-01
 

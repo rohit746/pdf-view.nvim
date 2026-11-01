@@ -228,6 +228,9 @@ current page is re-rendered, staying on the same page number. A file that is mid
 is retried for a few seconds while the previous page stays on screen. A PDF opened through a symbolic link is followed
 to the file the link points to. `:edit` re-reads the file by hand and stays on the same page too.
 
+On NFS, SMB, sshfs and WSL's `/mnt/c` (detected on Linux), and wherever the directory cannot be watched, the file is
+checked for changes every 500 ms instead. If even that cannot be set up, a notice says live reload is off.
+
 ## zellij
 
 zellij 0.45 implements the Kitty graphics protocol itself, but not its Unicode placeholders. Inside zellij (detected
