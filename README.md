@@ -121,10 +121,11 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `gg` `<Home>`                | first page; `12gg` goes to page 12                                              |
 | `G` `<End>`                  | last page; `12G` goes to page 12                                                |
 | `+` `=`                      | zoom in (`3+`: three steps)                                                     |
-| `-`                          | zoom out; from a width/height fit, back to the whole page                       |
+| `-`                          | zoom out; from a width/height/content fit, back to the whole page               |
 | `0`                          | fit the whole page to the window                                                |
 | `w`                          | fit the page's width to the window                                              |
 | `W`                          | fit the page's height to the window                                             |
+| `c`                          | fit the page's content to the window, cropping the margins                      |
 | `/`                          | search forward: prompts for text, jumps to the first match                      |
 | `?`                          | search backward                                                                 |
 | `n` `N`                      | next / previous match (`n` repeats the direction of the search; takes a count)  |
@@ -153,6 +154,12 @@ document reads like a scrolling column. `W` is the same for height, useful for l
 mode applies to every page (each page is fitted by its own size), survives resizes, and combines with zoom: `+` in width
 mode shows `width 125%` in the winbar. `-` steps back out to the fitted size first and to the whole page after that;
 `0` goes straight to the whole page.
+
+Papers often have wide margins. `c` fits the part of the page that has something on it, plus a few points of paper,
+so the text is as large as the window allows. Everything that is not white counts as content: text, images and
+figures. Each page is cropped to its own content, which is found the first time a page is shown in this mode (one
+extra render of the page) and remembered until the file changes. Zoom scrolls over the content only, leaving the
+margins out. A page with a coloured background has no margins to crop, so it is shown whole.
 
 ### Search
 
@@ -214,6 +221,7 @@ require("pdf-view").setup({
     zoom_reset = { "0" },
     fit_width = { "w" },
     fit_height = { "W" },
+    fit_content = { "c" },
     search = { "/" },
     search_back = { "?" },
     search_next = { "n" },

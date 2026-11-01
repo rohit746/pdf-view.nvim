@@ -18,6 +18,7 @@ local M = {}
 ---@field zoom_reset string[] fit the whole page to the window
 ---@field fit_width string[] fit the page's width to the window
 ---@field fit_height string[] fit the page's height to the window
+---@field fit_content string[] fit the part of the page with content on it to the window, cropping the margins
 ---@field search string[] prompt for text and search forward
 ---@field search_back string[] prompt for text and search backward
 ---@field search_next string[] next match, in the direction of the search
@@ -89,6 +90,7 @@ local defaults = {
     zoom_reset = { "0" },
     fit_width = { "w" },
     fit_height = { "W" },
+    fit_content = { "c" },
     search = { "/" },
     search_back = { "?" },
     search_next = { "n" },

@@ -106,8 +106,9 @@ function M.reload(s)
   rescan(s)
 end
 
---- Fit the whole page ("page"), its width ("width") or its height ("height") to the window, at zoom 1.
---- A page is read from the top, so a width fit starts at the top and a height fit at the left edge.
+--- Fit the whole page ("page"), its width ("width"), its height ("height") or the part of it with content on it
+--- ("content") to the window, at zoom 1. A page is read from the top, so a width fit starts at the top and a height fit
+--- at the left edge.
 ---@param s PdfView.Session
 ---@param mode PdfView.FitMode
 local function set_mode(s, mode)
@@ -138,7 +139,7 @@ local function set_zoom(s, zoom)
   if zoom == s.zoom then
     return
   end
-  if s.mode == "page" and s.zoom == 1 then
+  if (s.mode == "page" or s.mode == "content") and s.zoom == 1 then
     -- the fitted page is centred, wherever an earlier page turn left the stored centre
     s.cx, s.cy = 0.5, 0.5
   end
@@ -159,17 +160,17 @@ local function pan(s, dx, dy, steps)
   end
   local cols, rows = text_area(win)
   local cell = terminal.cell_size()
-  local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode)
+  local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)
 
   local moved = false
   if dx ~= 0 and view.scroll_x then
-    local x = math.min(math.max(view.vx + dx * steps * config.options.pan_step * view.view_w, 0), view.max_x)
+    local x = math.min(math.max(view.vx + dx * steps * config.options.pan_step * view.view_w, view.min_x), view.max_x)
     if math.abs(x - view.vx) > 0.5 then
       s.cx, moved = (x + view.view_w / 2) / view.full_w, true
     end
   end
   if dy ~= 0 and view.scroll_y then
-    local y = math.min(math.max(view.vy + dy * steps * config.options.pan_step * view.view_h, 0), view.max_y)
+    local y = math.min(math.max(view.vy + dy * steps * config.options.pan_step * view.view_h, view.min_y), view.max_y)
     if math.abs(y - view.vy) > 0.5 then
       s.cy, moved = (y + view.view_h / 2) / view.full_h, true
     end
@@ -235,7 +236,7 @@ local function match_visible(s, match)
   if not uses_viewport(s) then
     return true -- the whole page is on screen
   end
-  local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode)
+  local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)
   for _, rect in ipairs(match.rects) do
     local inside = rect[1] * view.scale >= view.vx
       and rect[3] * view.scale <= view.vx + view.view_w
@@ -397,6 +398,7 @@ local ACTION_ORDER = {
   "zoom_reset",
   "fit_width",
   "fit_height",
+  "fit_content",
   "search",
   "search_back",
   "search_next",
@@ -527,6 +529,13 @@ ACTIONS.fit_height = {
   desc = "fit the page's height to the window",
   run = function(s)
     set_mode(s, "height")
+  end,
+}
+
+ACTIONS.fit_content = {
+  desc = "fit the page's content to the window, without its margins",
+  run = function(s)
+    set_mode(s, "content")
   end,
 }
 

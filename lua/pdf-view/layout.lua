@@ -71,6 +71,8 @@ end
 ---@field view_h number viewport height
 ---@field full_w number the zoomed page's width in device pixels
 ---@field full_h number
+---@field min_x number how far left the viewport can travel: the left edge of the content in a "content" fit, else 0
+---@field min_y number how far up the viewport can travel
 ---@field max_x number how far the viewport can travel right
 ---@field max_y number how far the viewport can travel down
 ---@field scroll_x boolean whether the page is wider than the window, so horizontal movement scrolls
@@ -78,15 +80,16 @@ end
 ---@field cx number viewport centre as a fraction of the page width, clamped to what is reachable
 ---@field cy number
 
----@alias PdfView.FitMode "page"|"width"|"height"
+---@alias PdfView.FitMode "page"|"width"|"height"|"content"
 
 --- The part of a zoomed page that is on screen.
 ---
---- Zoom 1 is the page at its fitted size: the whole page (`mode` "page", what `fit` draws), or the page as wide
---- ("width") or as tall ("height") as the window. Zoom z shows it z times larger. When the page then overflows the
---- window the viewport is a window-sized crop of it, positioned by its centre as a fraction of the page so that it
---- survives resizes and zoom changes. A side that still fits is centred and its sub-cell remainder is cropped,
---- which keeps the image an exact whole number of cells.
+--- Zoom 1 is the page at its fitted size: the whole page (`mode` "page", what `fit` draws), the page as wide
+--- ("width") or as tall ("height") as the window, or the part of the page with content on it, `box`, as large as fits
+--- ("content"). Zoom z shows it z times larger. When the page then overflows the window the viewport is a window-sized
+--- crop of it, positioned by its centre as a fraction of the page so that it survives resizes and zoom changes. A
+--- "content" fit only travels over `box`, leaving the margins out. A side that still fits is centred and its sub-cell
+--- remainder is cropped, which keeps the image an exact whole number of cells.
 ---@param page_w number
 ---@param page_h number
 ---@param win_cols integer
@@ -97,37 +100,47 @@ end
 ---@param cx number desired viewport centre, 0..1 of the page width
 ---@param cy number desired viewport centre, 0..1 of the page height
 ---@param mode? PdfView.FitMode what zoom 1 means, "page" by default
+---@param box? number[] `{ x0, y0, x1, y1 }` in points from the page's top-left corner, for "content"; the whole page
+--- when missing
 ---@return PdfView.Viewport
-function M.viewport(page_w, page_h, win_cols, win_rows, cell_w, cell_h, zoom, cx, cy, mode)
+function M.viewport(page_w, page_h, win_cols, win_rows, cell_w, cell_h, zoom, cx, cy, mode, box)
   local max_cols = math.max(1, math.min(win_cols, M.MAX_CELLS))
   local max_rows = math.max(1, math.min(win_rows, M.MAX_CELLS))
   local box_w, box_h = max_cols * cell_w, max_rows * cell_h
 
+  local x0, y0, x1, y1 = 0, 0, page_w, page_h
+  if mode == "content" and box then
+    x0, y0, x1, y1 = box[1], box[2], box[3], box[4]
+  end
+  local shown_w, shown_h = x1 - x0, y1 - y0
+
   local base
   if mode == "width" then
-    base = box_w / page_w
+    base = box_w / shown_w
   elseif mode == "height" then
-    base = box_h / page_h
+    base = box_h / shown_h
   else
-    base = math.min(box_w / page_w, box_h / page_h)
+    base = math.min(box_w / shown_w, box_h / shown_h)
   end
   local scale = base * zoom
   local full_w, full_h = page_w * scale, page_h * scale
+  local reach_w, reach_h = shown_w * scale, shown_h * scale
 
   -- the epsilon keeps a page fitted exactly to the window from losing a cell to floating point error
-  local scroll_x, scroll_y = full_w > box_w + 0.5, full_h > box_h + 0.5
-  local cols = scroll_x and max_cols or math.max(1, math.min(max_cols, math.floor(full_w / cell_w + 1e-6)))
-  local rows = scroll_y and max_rows or math.max(1, math.min(max_rows, math.floor(full_h / cell_h + 1e-6)))
+  local scroll_x, scroll_y = reach_w > box_w + 0.5, reach_h > box_h + 0.5
+  local cols = scroll_x and max_cols or math.max(1, math.min(max_cols, math.floor(reach_w / cell_w + 1e-6)))
+  local rows = scroll_y and max_rows or math.max(1, math.min(max_rows, math.floor(reach_h / cell_h + 1e-6)))
   local view_w, view_h = cols * cell_w, rows * cell_h
-  local max_x, max_y = math.max(0, full_w - view_w), math.max(0, full_h - view_h)
+  local min_x, min_y = x0 * scale, y0 * scale
+  local max_x, max_y = min_x + math.max(0, reach_w - view_w), min_y + math.max(0, reach_h - view_h)
 
-  local vx, vy = max_x / 2, max_y / 2
+  local vx, vy = (min_x + max_x) / 2, (min_y + max_y) / 2
   if scroll_x then
-    vx = math.min(math.max(cx * full_w - view_w / 2, 0), max_x)
+    vx = math.min(math.max(cx * full_w - view_w / 2, min_x), max_x)
     cx = (vx + view_w / 2) / full_w
   end
   if scroll_y then
-    vy = math.min(math.max(cy * full_h - view_h / 2, 0), max_y)
+    vy = math.min(math.max(cy * full_h - view_h / 2, min_y), max_y)
     cy = (vy + view_h / 2) / full_h
   end
 
@@ -147,6 +160,8 @@ function M.viewport(page_w, page_h, win_cols, win_rows, cell_w, cell_h, zoom, cx
     view_h = view_h,
     full_w = full_w,
     full_h = full_h,
+    min_x = min_x,
+    min_y = min_y,
     max_x = max_x,
     max_y = max_y,
     scroll_x = scroll_x,

@@ -55,10 +55,13 @@ between matches accept a count.
   gg <Home>               first page, or page {count}
   G <End>                 last page, or page {count}
   + =                     zoom in ({count} steps)
-  -                       zoom out; from a width/height fit, to the whole page
+  -                       zoom out; from a width/height/content fit, to the
+                          whole page
   0                       fit the whole page to the window
   w                       fit the page's width to the window
   W                       fit the page's height to the window
+  c                       fit the page's content to the window, cropping
+                          the margins
   /                       search forward (prompts for text)
   ?                       search backward
   n N                     next / previous match ({count} matches)
@@ -82,6 +85,12 @@ reloads, and the winbar shows it.
 `W` fits its height. Each page is fitted by its own size, and the mode
 survives resizes and page turns. Zoom multiplies the fitted size: `-` steps
 back to the fitted size and then to the whole page, `0` goes there directly.
+
+`c` fits the part of the page that is not white (text, images, figures),
+plus a few points of paper, so wide margins are cropped away. Each page is
+cropped to its own content, found the first time the page is shown in this
+mode and remembered until the file changes. Zoomed in, the view scrolls over
+the content only. A page with a coloured background is shown whole.
 
                                                               *pdf-view-search*
 `/` and `?` prompt (via |vim.ui.input()|) for text and search the whole

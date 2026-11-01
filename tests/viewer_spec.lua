@@ -601,6 +601,16 @@ local function text_cols()
   return vim.fn.getwininfo(vim.api.nvim_get_current_win())[1].width
 end
 
+local function with_stub(owner, key, replacement, body)
+  local original = owner[key]
+  owner[key] = replacement
+  local ok, err = pcall(body)
+  owner[key] = original
+  if not ok then
+    error(err, 0)
+  end
+end
+
 describe("viewer fit modes", function()
   setup()
 
@@ -734,6 +744,79 @@ describe("viewer fit modes", function()
     eq({ 2, cy }, { s.page, s.cy }, "<PageDown> on the last page does not scroll to its top")
   end)
 
+  it("fits the content of each page, cropping its margins, and scrolls over the content only", function()
+    reset()
+    local function sparse(text)
+      return { w = 612, h = 792, color = { 1, 1, 1 }, label = "", texts = { { x = 200, y = 300, text = text } } }
+    end
+    local s = open(make("fit-content", { sparse("Middle"), sparse("Second") }))
+    local page_rows = select(2, placement())
+    local clips, asked = {}, {}
+    local info, render_clip = mupdf.info, mupdf.render_clip
+
+    --- The part of the page the last render showed, in points.
+    local function shown()
+      local clip = clips[#clips]
+      return {
+        clip.x / clip.scale_x,
+        clip.y / clip.scale_y,
+        (clip.x + clip.width) / clip.scale_x,
+        (clip.y + clip.height) / clip.scale_y,
+      }
+    end
+    local function inside(box, rect, what)
+      truthy(
+        rect[1] >= box[1] - 0.5 and rect[2] >= box[2] - 0.5 and rect[3] <= box[3] + 0.5 and rect[4] <= box[4] + 0.5,
+        ("%s: %s lies inside the content %s"):format(what, vim.inspect(rect), vim.inspect(box))
+      )
+    end
+
+    with_stub(mupdf, "info", function(file, page, cb, content)
+      asked[#asked + 1] = { page, content or false }
+      return info(file, page, cb, content)
+    end, function()
+      with_stub(mupdf, "render_clip", function(file, page, clip, out, cb)
+        clips[#clips + 1] = clip
+        return render_clip(file, page, clip, out, cb)
+      end, function()
+        press("c")
+        settle(s)
+        eq({ "content", 1 }, { s.mode, s.zoom })
+        truthy(vim.wo.winbar:find("content", 1, true), vim.wo.winbar)
+        eq("1 / 2 content", pdf_view.status())
+        local box = s.geom.box
+        truthy(box[1] > 150 and box[3] < 400 and box[2] > 400 and box[4] < 550, vim.inspect(box))
+        local rect = shown()
+        inside(box, rect, "the fitted content")
+        local cols, rows = placement()
+        truthy(cols == text_cols() or rows == text_rows(), "the content fills the window one way")
+        truthy(clips[#clips].scale_x > 3 * (text_rows() * 20 / 792), "much larger than the fitted page")
+
+        press("++++")
+        settle(s)
+        for _, keys in ipairs({ "hhhhhhhhhh", "kkkkkkkkkk" }) do
+          press(keys)
+          settle(s)
+          eq(1, s.page, keys .. " stops at the edge of the content")
+          inside(box, shown(), "zoomed to the top-left")
+        end
+        harness.near(box[1], shown()[1], 1, "at the left edge of the content")
+        harness.near(box[2], shown()[2], 1, "at the top edge of the content")
+
+        press(vim.api.nvim_replace_termcodes("<PageDown>", true, false, true))
+        on_page(s, 2)
+        eq("content", s.mode)
+        inside(s.geom.box, shown(), "the next page")
+      end)
+    end)
+    eq({ { 1, true }, { 2, true } }, asked, "each page's content is found once, when it is first shown")
+
+    press("0")
+    settle(s)
+    eq({ "page", 1 }, { s.mode, s.zoom })
+    eq(page_rows, select(2, placement()), "0 shows the whole page again")
+  end)
+
   it("follows the window when it is resized", function()
     reset()
     local s = open(make("fit-resize", pages(2)))
@@ -747,16 +830,6 @@ describe("viewer fit modes", function()
     eq(text_cols(), (placement()), "still as wide as the (narrower) window")
   end)
 end)
-
-local function with_stub(owner, key, replacement, body)
-  local original = owner[key]
-  owner[key] = replacement
-  local ok, err = pcall(body)
-  owner[key] = original
-  if not ok then
-    error(err, 0)
-  end
-end
 
 --- Run `body` while `vim.ui.input` answers every prompt with `text`.
 local function answering(text, body)

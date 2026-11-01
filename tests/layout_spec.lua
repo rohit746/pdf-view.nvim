@@ -208,3 +208,48 @@ describe("layout.viewport modes", function()
     end
   end)
 end)
+
+describe("layout.viewport content fit", function()
+  -- a 100x40 cell window of 10x20 px cells is a 1000x800 px box; the content is 200x100 points, 100 points in
+  local BOX = { 100, 300, 300, 400 }
+  local function view(zoom, cx, cy, box)
+    return layout.viewport(612, 792, 100, 40, 10, 20, zoom or 1, cx or 0.5, cy or 0.5, "content", box or BOX)
+  end
+
+  it("fits the content box as large as the window allows", function()
+    local v = view()
+    near(math.min(1000 / 200, 800 / 100), v.scale, 1e-9)
+    eq({ false, false }, { v.scroll_x, v.scroll_y })
+    eq({ 100, 25 }, { v.cols, v.rows })
+    eq({ 1000, 500 }, { v.width, v.height })
+    eq({ 500, 1500 }, { v.x, v.y }, "the image starts at the content, not at the page's corner")
+  end)
+
+  it("travels over the content only once zoomed in", function()
+    local scale = 2 * 5
+    local left = view(2, 0, 0)
+    eq({ true, true }, { left.scroll_x, left.scroll_y })
+    eq({ 100 * scale, 300 * scale }, { left.x, left.y }, "stops at the content's top-left corner")
+    local right = view(2, 1, 1)
+    eq({ 300 * scale - right.view_w, 400 * scale - right.view_h }, { right.x, right.y }, "and at its bottom-right")
+    eq({ left.min_x, left.min_y, left.max_x, left.max_y }, { 1000, 3000, 3000 - 1000, 4000 - 800 })
+  end)
+
+  it("reports the centre as a fraction of the whole page", function()
+    local v = view(2, 0, 0)
+    harness.near((v.vx + v.view_w / 2) / (612 * v.scale), v.cx, 1e-9)
+    harness.near((v.vy + v.view_h / 2) / (792 * v.scale), v.cy, 1e-9)
+  end)
+
+  it("fits the whole page when the content is not known", function()
+    local whole = layout.viewport(612, 792, 100, 40, 10, 20, 1, 0.5, 0.5, "page")
+    local v = layout.viewport(612, 792, 100, 40, 10, 20, 1, 0.5, 0.5, "content")
+    eq({ whole.scale, whole.cols, whole.rows, whole.x, whole.y }, { v.scale, v.cols, v.rows, v.x, v.y })
+  end)
+
+  it("ignores the box in the other modes", function()
+    local plain = layout.viewport(612, 792, 100, 40, 10, 20, 2, 0.5, 0.5, "width")
+    local boxed = layout.viewport(612, 792, 100, 40, 10, 20, 2, 0.5, 0.5, "width", BOX)
+    eq({ plain.scale, plain.x, plain.y, plain.min_x }, { boxed.scale, boxed.x, boxed.y, boxed.min_x })
+  end)
+end)

@@ -109,7 +109,7 @@ local function present(s, win, png, info, fit, rows)
   end
 
   s.slot, s.page, s.count, s.target = slot, info.page, info.count, nil
-  s.geom = { w = info.width, h = info.height }
+  s.geom = { w = info.width, h = info.height, box = info.content }
   if fit.cx then
     s.cx, s.cy = fit.cx, fit.cy -- what was reachable, after clamping to the page
   end
@@ -212,7 +212,8 @@ local function show(s, page, opts)
     -- page renders just the part that is on screen, and highlights are drawn by the same script.
     local fit, cache_key, render
     if uses_viewport(s) then
-      local view = layout.viewport(info.width, info.height, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode)
+      local view =
+        layout.viewport(info.width, info.height, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, info.content)
       fit = view
       cache_key = table.concat({
         stamp,
@@ -278,13 +279,15 @@ local function show(s, page, opts)
     end)
   end
 
-  -- a page's geometry only changes with the file, so mutool is asked for it once
+  -- a page's geometry only changes with the file, so mutool is asked for it once, and for where its content is
+  -- the first time that is needed
   local wanted = page or s.target or s.page
+  local content = s.mode == "content"
   local known = known_info(s, stamp, wanted)
-  if known then
+  if known and (known.content or not content) then
     return on_info(nil, known)
   end
-  s.job = mupdf.info(s.path, wanted, on_info)
+  s.job = mupdf.info(s.path, wanted, on_info, content)
 end
 
 --- Show the page again if the window changed size or the file changed on disk since it was last rendered.

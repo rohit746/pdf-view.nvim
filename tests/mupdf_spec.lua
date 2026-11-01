@@ -58,6 +58,34 @@ describe("mupdf", function()
     eq({ 400, 600 }, { info.width, info.height })
   end)
 
+  it("finds the part of the page with content on it, with a margin", function()
+    local sparse = dir .. "/sparse.pdf"
+    fixture.write(sparse, {
+      { w = 612, h = 792, color = { 1, 1, 1 }, label = "", texts = { { x = 200, y = 300, text = "Middle" } } },
+      { w = 612, h = 792, color = { 1, 1, 1 }, label = "" },
+      { w = 400, h = 300 },
+    })
+    local err, info = await(function(cb)
+      mupdf.info(sparse, 1, cb, true)
+    end)
+    eq(nil, err)
+    local box = info.content
+    -- 36 pt Helvetica from x = 200 on the baseline y = 300 (492 from the top), plus 8 points of margin
+    truthy(box[1] > 185 and box[1] < 200, "left " .. box[1])
+    truthy(box[2] > 450 and box[2] < 480, "top " .. box[2])
+    truthy(box[3] > 300 and box[3] < 340, "right " .. box[3])
+    truthy(box[4] > 492 and box[4] < 510, "bottom " .. box[4])
+
+    local _, blank = await(function(cb)
+      mupdf.info(sparse, 2, cb, true)
+    end)
+    eq({ 0, 0, 612, 792 }, blank.content, "a blank page is shown whole")
+    local _, coloured = await(function(cb)
+      mupdf.info(sparse, 3, cb, true)
+    end)
+    eq({ 0, 0, 400, 300 }, coloured.content, "so is a page with a coloured background")
+  end)
+
   it("renders a PNG of exactly the requested size", function()
     local out = dir .. "/page.png"
     local err = await(function(cb)

@@ -5,7 +5,7 @@ local M = {}
 local uv = vim.uv
 
 local LIMIT = 100
-local MODES = { page = true, width = true, height = true }
+local MODES = { page = true, width = true, height = true, content = true }
 
 --- The JSON file. Tests point it somewhere else.
 ---@type string?
