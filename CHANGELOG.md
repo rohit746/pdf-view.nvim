@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-01
+
 ### Added
 
 - Links in a document could not be followed. `f` lists the links on the page, with the text under each, through
@@ -48,7 +50,6 @@ All notable changes to this project are documented here. The format follows
   now shows `/needle searching…` until the search finishes.
 - After a search on a fitted page, `+` zoomed in on the middle of the page, away from the match. It now zooms in
   towards the current match when it is on the page.
-
 - Turning to a page that was not cached started `mutool` twice, and each run opened and parsed the document again;
   on a 756-page PDF that took about 200 ms. A worker process per viewer now keeps the document open and does all the
   rendering, the next and previous pages are rendered in the background while you read, and turning back to one of
@@ -56,6 +57,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `{count}n` and `{count}N` did not say `search hit BOTTOM, continuing at TOP` when the search wrapped before the
+  last step. After turning away from the current match, `n` and `N` also ignored the count and never reported a wrap.
+  Both now count every step and report any wrap.
 - With `auto_open = false`, `:edit` in a viewer left an empty buffer whose keys did nothing. The viewer now comes
   back, on the same page.
 - A password-protected PDF failed with `cannot draw '<file>'`. It now says the PDF is password-protected, and other
@@ -177,7 +181,8 @@ First release.
   colour setup.
 - Configuration with validation: unknown or mistyped options raise immediately.
 
-[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/rohit746/pdf-view.nvim/compare/v0.1.0...v0.1.1
