@@ -55,6 +55,28 @@ end
 local global_autocmds = false
 local warned_unwatched = false -- the notice that live reload could not be set up is shown once
 
+--- Watch the file of `s` as `config.options` says, replacing the watcher it had.
+---@param s PdfView.Session
+local function start_watcher(s)
+  if s.watcher then
+    s.watcher.stop()
+    s.watcher = nil
+  end
+  if not config.options.live_reload then
+    return
+  end
+  s.watcher = watch.start(s.path, config.options.reload_delay, function()
+    on_file_changed(s)
+  end)
+  if not s.watcher and not warned_unwatched then
+    warned_unwatched = true
+    vim.notify(
+      ("pdf-view: live reload is off: cannot watch `%s` for changes: reload it with :edit"):format(s.path),
+      vim.log.levels.WARN
+    )
+  end
+end
+
 local function set_global_autocmds()
   if global_autocmds then
     return
@@ -220,18 +242,7 @@ function M.attach(buf)
 
   set_keymaps(s)
   set_global_autocmds()
-  if config.options.live_reload then
-    s.watcher = watch.start(s.path, config.options.reload_delay, function()
-      on_file_changed(s)
-    end)
-    if not s.watcher and not warned_unwatched then
-      warned_unwatched = true
-      vim.notify(
-        ("pdf-view: live reload is off: cannot watch `%s` for changes: reload it with :edit"):format(s.path),
-        vim.log.levels.WARN
-      )
-    end
-  end
+  start_watcher(s)
 
   if vim.api.nvim_get_current_buf() == buf then
     cursor.hide(buf) -- BufEnter may already have fired for this buffer
@@ -240,6 +251,16 @@ function M.attach(buf)
     relayout(s)
   end)
   return s
+end
+
+--- Bring the viewers that are open in line with `config.options` after `setup()`: their keys and live reload.
+function M.apply_config()
+  for _, s in pairs(sessions) do
+    if not s.closed then
+      set_keymaps(s)
+      start_watcher(s)
+    end
+  end
 end
 
 --- `BufWriteCmd` handler (`:w {file}`, `:saveas {file}`): copy the PDF to `target`. Neovim has already refused a

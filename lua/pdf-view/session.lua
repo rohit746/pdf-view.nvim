@@ -72,6 +72,7 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field dirty? boolean the screen may have moved or dropped the placements: place them again
 ---@field cut_key? string the last placements of `picture` that were cut around a float, since it was sent
 ---@field watcher? PdfView.Watcher
+---@field mapped? string[] the keys mapped in the buffer by `actions.set_keymaps`
 ---@field waiting_for_ui? boolean the first render is waiting for a UI to attach
 ---@field closed boolean
 

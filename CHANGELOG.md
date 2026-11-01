@@ -28,6 +28,8 @@ All notable changes to this project are documented here. The format follows
 - With a colorscheme whose `Visual` group sets a text colour, selecting in visual mode (`v`, `V`, `<C-v>` or a mouse
   drag) broke the selected part of the page. Visual highlighting is now off in viewer windows, like search
   highlighting.
+- Calling `setup()` again left viewers that were already open with their old keys and their old live reload (on,
+  off, or `reload_delay`). Open viewers now take the new `keymaps`, `live_reload` and `reload_delay`.
 - After tmux was detached and attached again from another terminal window, pages stayed blank until `r` was pressed:
   the new terminal held none of the images, and the old terminal's type was still assumed. When the Neovim pane gets
   focus through a different tmux client, the terminal is now detected again and pages are sent again from the render

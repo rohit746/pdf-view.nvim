@@ -92,7 +92,9 @@ depth, and goes to the chosen page.
 LUA API                                                      *pdf-view-api*
 
 require("pdf-view").setup({opts})                    *pdf-view.setup()*
-    Configure the plugin; optional. See |pdf-view-config|.
+    Configure the plugin; optional. See |pdf-view-config|. Calling it again
+    also gives open viewers the new `keymaps`, `live_reload` and
+    `reload_delay`.
 
 require("pdf-view").open({path})                     *pdf-view.open()*
     Open {path} in the current window. Errors if it is not a readable file.
