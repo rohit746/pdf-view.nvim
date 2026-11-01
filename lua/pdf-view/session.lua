@@ -44,7 +44,8 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field page integer page on screen (or being shown)
 ---@field target? integer page requested by the latest navigation key, until it is on screen
 ---@field count? integer number of pages
----@field mode PdfView.FitMode what zoom 1 means: the whole page, or the page as wide / as tall as the window
+---@field mode PdfView.FitMode what zoom 1 means: the whole page, the page as wide / as tall as the window, or the
+--- part of the page with content on it
 ---@field zoom number multiplies the fitted size: 1 is as fitted, 2 is twice that
 ---@field search? PdfView.Search the active search, whose matches are highlighted
 ---@field search_job? PdfView.Job in-flight search
@@ -52,7 +53,8 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field outline? { stamp: string, entries: PdfView.OutlineEntry[] } bookmarks of the file as of `stamp`
 ---@field cx number centre of the viewport as a fraction of the page width (only matters while zoomed)
 ---@field cy number centre of the viewport as a fraction of the page height
----@field geom? { w: number, h: number } size in points of the page on screen
+---@field geom? { w: number, h: number, box?: number[] } size in points of the page on screen, and the part of it with
+--- content (`PdfView.PageInfo.content`) once that was read
 ---@field gen integer incremented by every render request
 ---@field job? PdfView.Job in-flight mutool process
 ---@field ids integer[] two Kitty image ids, used alternately so a page swap never shows a blank frame

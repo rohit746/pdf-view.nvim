@@ -11,6 +11,10 @@ local OUTLINE = vim.fs.joinpath(ROOT, "scripts", "outline.js")
 
 local MAX_PAGE = 2 ^ 31 - 1
 
+--- Points of paper kept around the content of a page, so that fitting the content does not put text against the
+--- edge of the window.
+local CONTENT_MARGIN = 8
+
 ---@class PdfView.Job
 ---@field kill fun(self: PdfView.Job, signal?: integer)
 
@@ -19,6 +23,8 @@ local MAX_PAGE = 2 ^ 31 - 1
 ---@field page integer the requested page, clamped to the document
 ---@field width number page width in points
 ---@field height number page height in points
+---@field content? number[] `{ x0, y0, x1, y1 }`: the part of the page with something drawn on it, in points from the
+--- page's top-left corner, with a margin of `CONTENT_MARGIN` (the whole page when it is blank). Only read when asked for
 
 --- The line of mutool's stderr that says why it failed: the last error, or else the last line. mutool ends with a
 --- summary such as "cannot draw 'file.pdf'" that does not say why, and a script's exception is followed by its stack.
@@ -88,20 +94,38 @@ end
 ---@param path string
 ---@param page integer 1-based; clamped to the document
 ---@param cb fun(err?: string, info?: PdfView.PageInfo)
+---@param content? boolean also find the part of the page that has content (`info.content`), which renders the page
 ---@return PdfView.Job
-function M.info(path, page, cb)
+function M.info(path, page, cb, content)
   local cmd = { config.options.mutool, "run", PAGE_INFO, path, ("%d"):format(math.min(math.max(page, 1), MAX_PAGE)) }
+  if content then
+    cmd[#cmd + 1] = "content"
+  end
   return run(cmd, function(result)
     local err = failure(result)
     if err then
       return cb(err)
     end
-    local count, resolved, width, height = (result.stdout or ""):match("^(%d+) (%d+) ([%d%.]+) ([%d%.]+)")
-    count, resolved, width, height = tonumber(count), tonumber(resolved), tonumber(width), tonumber(height)
-    if not count or count < 1 or not width or not height or width <= 0 or height <= 0 then
+    local fields = vim.split(vim.trim(result.stdout or ""), "%s+")
+    local count, resolved, width, height =
+      tonumber(fields[1]), tonumber(fields[2]), tonumber(fields[3]), tonumber(fields[4])
+    if not count or count < 1 or not resolved or not width or not height or width <= 0 or height <= 0 then
       return cb("could not read the page geometry (is mutool built with JavaScript support?)")
     end
-    cb(nil, { count = count, page = resolved, width = width, height = height })
+    local info = { count = count, page = resolved, width = width, height = height }
+    if content then
+      local x0, y0, x1, y1 = tonumber(fields[5]), tonumber(fields[6]), tonumber(fields[7]), tonumber(fields[8])
+      if not (x0 and y0 and x1 and y1 and x1 > x0 and y1 > y0) then
+        x0, y0, x1, y1 = 0, 0, width, height
+      end
+      info.content = {
+        math.max(0, x0 - CONTENT_MARGIN),
+        math.max(0, y0 - CONTENT_MARGIN),
+        math.min(width, x1 + CONTENT_MARGIN),
+        math.min(height, y1 + CONTENT_MARGIN),
+      }
+    end
+    cb(nil, info)
   end)
 end
 

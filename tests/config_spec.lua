@@ -122,6 +122,7 @@ describe("config search and fit options", function()
     eq({ "gO" }, options.keymaps.outline)
     eq({ "w" }, options.keymaps.fit_width)
     eq({ "W" }, options.keymaps.fit_height)
+    eq({ "c" }, options.keymaps.fit_content)
     eq({ "g?" }, options.keymaps.help)
   end)
 

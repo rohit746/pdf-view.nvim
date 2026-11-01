@@ -16,6 +16,12 @@ describe("positions", function()
     eq(nil, positions.get("/b.pdf"))
   end)
 
+  it("keeps a content fit", function()
+    use("content")
+    positions.set("/a.pdf", { page = 2, mode = "content", zoom = 1, cx = 0.5, cy = 0 })
+    eq("content", positions.get("/a.pdf").mode)
+  end)
+
   it("keeps only the 100 most recently stored files", function()
     use("limit")
     local entries = {}
