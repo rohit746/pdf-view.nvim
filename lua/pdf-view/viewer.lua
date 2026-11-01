@@ -6,6 +6,7 @@ local config = require("pdf-view.config")
 local cursor = require("pdf-view.cursor")
 local render = require("pdf-view.render")
 local session = require("pdf-view.session")
+local terminal = require("pdf-view.terminal")
 local watch = require("pdf-view.watch")
 
 local M = {}
@@ -63,6 +64,13 @@ local function set_global_autocmds()
     group = augroup,
     desc = "Re-fit PDF pages to their window",
     callback = schedule_relayout,
+  })
+  vim.api.nvim_create_autocmd({ "FocusGained", "UIEnter" }, {
+    group = augroup,
+    desc = "Send PDF pages again when tmux is attached from another terminal",
+    callback = function()
+      terminal.check_client()
+    end,
   })
   vim.api.nvim_create_autocmd("WinScrolled", {
     group = augroup,

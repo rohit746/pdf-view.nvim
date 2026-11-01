@@ -148,6 +148,11 @@ function M.check()
 end
 
 local prepared
+-- the tmux client pages were first sent through (see `check_client()`)
+local client
+
+-- asks tmux which client is attached: one per `tmux attach`, so another terminal (or window) is another client
+local CLIENT_QUERY = { "tmux", "display-message", "-p", "#{client_pid}" }
 
 --- One-time terminal preparation: tmux only forwards graphics escape codes when passthrough is on, and the terminal
 --- is asked whether it can read the PNGs of pages.
@@ -156,10 +161,39 @@ function M.prepare()
     return
   end
   prepared = true
-  if M.in_tmux() and config.options.tmux_passthrough then
-    capture({ "tmux", "set-option", "-p", "allow-passthrough", "on" })
+  if M.in_tmux() then
+    client = capture(CLIENT_QUERY)
+    if config.options.tmux_passthrough then
+      capture({ "tmux", "set-option", "-p", "allow-passthrough", "on" })
+    end
   end
   M.probe_file(vim.fs.dirname(vim.fn.tempname()))
+end
+
+--- Called when tmux was attached again through another client, whose terminal holds none of the images sent so far.
+--- Set by `render`.
+M.on_reattach = function() end
+
+--- Whether tmux is now attached through another client than the one pages were sent through. When it is, the new
+--- terminal holds none of the images and may be another kind of terminal: what was detected about the old one is
+--- forgotten and `on_reattach()` sends the pages again. Asked on FocusGained and UIEnter; the answer comes later.
+function M.check_client()
+  if not (prepared and M.in_tmux()) then
+    return
+  end
+  pcall(vim.system, CLIENT_QUERY, { text = true }, function(result)
+    local now = result.code == 0 and vim.trim(result.stdout or "") or ""
+    vim.schedule(function()
+      if now == "" or now == client or not prepared then
+        return
+      end
+      detected, prepared = nil, nil -- `prepare()` notes the new client
+      if not (M.probe and M.probe.state == "pending") then
+        M.probe = nil -- the new terminal is asked again whether it can read the PNGs
+      end
+      M.on_reattach()
+    end)
+  end)
 end
 
 ---@return boolean

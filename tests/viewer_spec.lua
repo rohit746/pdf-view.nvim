@@ -69,6 +69,9 @@ end
 local function transmitted()
   local paths = {}
   for _, data in ipairs(writes) do
+    data = data:gsub("^\27Ptmux;(.*)\27\\$", function(inner) -- tmux passthrough
+      return (inner:gsub("\27\27", "\27"))
+    end)
     local payload = data:match("\27_Ga=t,f=100,i=%d+,q=2,t=f;([^\27]+)\27\\")
     if payload then
       paths[#paths + 1] = vim.base64.decode(payload)
@@ -1653,6 +1656,95 @@ describe("viewer robustness", function()
         return s.count == 5 and s.job == nil
       end, "live reload", 8000)
       truthy(#asked > 1, "asked again for the new file")
+    end)
+  end)
+end)
+
+describe("viewer in tmux", function()
+  --- Run `body` inside a pretend tmux whose attached client, and that client's $TERM, can be changed.
+  ---@param body fun(attach: fun(pid: string, termname: string))
+  local function in_tmux(body)
+    local saved_tmux, saved_system = vim.env.TMUX, vim.system
+    local client = { pid = "100", termname = "xterm-kitty" }
+    vim.env.TMUX = "/tmp/tmux-1000/default,1,0"
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(cmd, opts, on_exit)
+      if cmd[1] ~= "tmux" then
+        return saved_system(cmd, opts, on_exit)
+      end
+      local stdout = ""
+      if cmd[2] == "display-message" then
+        stdout = cmd[4]:gsub("#{client_pid}", client.pid):gsub("#{client_termname}", client.termname)
+      end
+      local result = { code = 0, stdout = stdout .. "\n", stderr = "" }
+      if on_exit then
+        on_exit(result)
+      end
+      return {
+        wait = function()
+          return result
+        end,
+      }
+    end
+    local ok, err = pcall(body, function(pid, termname)
+      client.pid, client.termname = pid, termname
+      vim.api.nvim_exec_autocmds("FocusGained", {})
+      vim.wait(100) -- the client is asked in the background
+    end)
+    vim.env.TMUX, vim.system = saved_tmux, saved_system
+    if not ok then
+      error(err, 0)
+    end
+  end
+
+  it("sends the pages again, without rendering them, when tmux is attached from another terminal", function()
+    reset()
+    in_tmux(function(attach)
+      local s = open(make("tmux-reattach", pages(2)))
+      attach("100", "xterm-kitty") -- whatever the client was before this test, it is this one now
+      on_page(s, 1)
+      local path = s.cache[next(s.cache)]
+      eq("kitty", terminal.detect().name)
+
+      writes = {}
+      attach("100", "xterm-kitty")
+      eq({}, transmitted(), "nothing is sent again while the same client is attached")
+
+      local slot = s.slot
+      attach("200", "xterm-ghostty")
+      wait_for(function()
+        return #transmitted() == 1
+      end, "the page sent again")
+      eq({ path }, transmitted(), "the PNG that was already rendered")
+      eq(1, vim.tbl_count(s.cache), "nothing rendered again")
+      eq(true, s.slot ~= slot, "placed under the other image id")
+      eq("ghostty", terminal.detect().name, "the new terminal is detected again")
+    end)
+  end)
+
+  it("sends a viewer that was in no window when a window shows it again", function()
+    reset()
+    in_tmux(function(attach)
+      local s = open(make("tmux-hidden", pages(1)))
+      attach("300", "xterm-kitty")
+      on_page(s, 1)
+      local path = s.cache[next(s.cache)]
+      local other = open(make("tmux-shown", pages(1)))
+      on_page(other, 1)
+
+      writes = {}
+      attach("400", "xterm-kitty")
+      wait_for(function()
+        return #transmitted() == 1
+      end, "the viewer on screen sent again")
+      eq(false, vim.tbl_contains(transmitted(), path), "the hidden viewer is not sent yet")
+
+      writes = {}
+      vim.cmd.buffer(s.buf)
+      wait_for(function()
+        return #transmitted() == 1
+      end, "the hidden viewer sent once shown")
+      eq({ path }, transmitted())
     end)
   end)
 end)
