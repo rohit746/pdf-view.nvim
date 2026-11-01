@@ -135,6 +135,8 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `n` `N`                      | next / previous match (`n` repeats the direction of the search; takes a count)  |
 | `<Esc>`                      | remove the search highlights                                                    |
 | `gO`                         | pick a bookmark from the document's outline and go to its page                  |
+| `y`                          | yank the page's text, linewise (`"+y`: to the clipboard)                        |
+| `t`                          | show the page's text in a scratch split                                         |
 | `<C-o>` `<C-i>` `<Tab>`      | back / forward through the jump list (takes a count)                            |
 | `m{a-z}`                     | mark the page, with its fit, zoom and view                                      |
 | `'{a-z}` `` `{a-z} ``        | go to a mark; `''` goes back to where the latest jump started                   |
@@ -189,6 +191,14 @@ a translucent fill instead, which dulls the text under a match a little). The co
 
 `gO` lists the document's bookmarks, indented by depth, through `vim.ui.select` (a picker such as snacks.nvim's if you
 use one) and jumps to the chosen page. Documents without bookmarks say so.
+
+### Page text
+
+`y` yanks the text of the page on screen, a line per line of text and an empty line between blocks, into the register
+given (`"+y` copies it to the clipboard, `"ay` into register `a`), linewise. `t` shows the same text in a scratch buffer
+in a vertical split next to the viewer, to quote from or to search with Neovim's own tools; `t` on a page whose text is
+already shown goes back to it. The text of an EPUB, FB2 or MOBI page follows its layout. A scanned page has no text to
+copy, and says so.
 
 ### Jumps and marks
 
@@ -250,6 +260,8 @@ require("pdf-view").setup({
     search_prev = { "N" },
     search_clear = { "<Esc>" },
     outline = { "gO" },
+    yank_text = { "y" },
+    show_text = { "t" },
     jump_back = { "<C-o>" },
     jump_forward = { "<C-i>", "<Tab>" },
     mark = { "m" },       -- then a to z
@@ -342,7 +354,7 @@ lua/pdf-view/
   viewer.lua      a PDF buffer's lifecycle: attach, open, file watching, cleanup
   session.lua     per-buffer state and the helpers that touch windows, the winbar and the render cache
   render.lua      showing a page: mutool -> PNG -> terminal -> placeholder cells, latest request wins
-  actions.lua     what the keys do: page turns, scrolling, zoom, fit modes, search, outline
+  actions.lua     what the keys do: page turns, scrolling, zoom, fit modes, search, outline, page text
   cursor.lua      hiding the cursor while a viewer is focused
   layout.lua      fitting a page into whole terminal cells; zoomed viewports (pure)
   search.lua      search results: parsing, stepping, highlight strings (pure)
@@ -353,7 +365,7 @@ lua/pdf-view/
   terminal.lua    terminal detection, cell size, tmux
   watch.lua       file watching
   health.lua      :checkhealth pdf-view
-scripts/          JavaScript run by `mutool run`: the worker (page geometry, rendering), search, outline
+scripts/          JavaScript run by `mutool run`: the worker (page geometry, rendering, page text), search, outline
 tests/            headless suite (`make test`)
 ```
 

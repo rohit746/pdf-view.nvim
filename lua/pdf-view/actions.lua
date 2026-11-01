@@ -488,6 +488,69 @@ local function pick_outline(s)
   end)
 end
 
+--- Read the text of the page on screen and hand its lines to `use`, without the empty lines at its end. A page
+--- without text, such as a scanned one, only gets a notification.
+---@param s PdfView.Session
+---@param use fun(lines: string[], page: integer)
+local function with_page_text(s, use)
+  local page = s.page
+  mupdf.text(s.path, page, function(err, text)
+    if s.closed then
+      return
+    end
+    if err or not text then
+      return notify("cannot read the text of the page: " .. tostring(err), vim.log.levels.WARN)
+    end
+    local lines = vim.split(text, "\n", { plain = true })
+    while #lines > 0 and not lines[#lines]:match("%S") do
+      lines[#lines] = nil
+    end
+    if #lines == 0 then
+      return notify(("page %d has no text"):format(page))
+    end
+    use(lines, page)
+  end)
+end
+
+--- Put the text of the page into the register the key was given (`"+y` for the clipboard), linewise.
+---@param s PdfView.Session
+local function yank_text(s)
+  local register = vim.v.register
+  with_page_text(s, function(lines, page)
+    vim.fn.setreg(register, lines, "l")
+    notify(('page %d: %d lines yanked into "%s'):format(page, #lines, register))
+  end)
+end
+
+--- Show the text of the page in a scratch buffer, in a split next to the viewer. The buffer of a page that is already
+--- shown is filled again and focused.
+---@param s PdfView.Session
+local function show_text(s)
+  with_page_text(s, function(lines, page)
+    local name = ("pdf-view://%s (page %d)"):format(vim.fn.fnamemodify(s.path, ":t"), page)
+    local buf
+    for _, candidate in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_get_name(candidate) == name then
+        buf = candidate
+      end
+    end
+    if not buf then
+      buf = vim.api.nvim_create_buf(false, true)
+      vim.bo[buf].bufhidden = "wipe"
+      vim.api.nvim_buf_set_name(buf, name)
+    end
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modified = false
+    local win = vim.fn.bufwinid(buf)
+    if win ~= -1 then
+      vim.api.nvim_set_current_win(win)
+    else
+      vim.api.nvim_open_win(buf, true, { vertical = true, win = window_for(s) or 0 })
+    end
+  end)
+end
+
 --- Read the name of a mark after `m`, `'` or `` ` ``. Nil when the key is not one: <Esc> cancels quietly.
 ---@param allowed string Lua pattern of the names
 ---@return string?
@@ -551,6 +614,8 @@ local ACTION_ORDER = {
   "search_prev",
   "search_clear",
   "outline",
+  "yank_text",
+  "show_text",
   "jump_back",
   "jump_forward",
   "mark",
@@ -725,6 +790,16 @@ ACTIONS.search_clear = {
 ACTIONS.outline = {
   desc = "jump to a bookmark",
   run = pick_outline,
+}
+
+ACTIONS.yank_text = {
+  desc = "yank the page's text (\"+y: to the clipboard)",
+  run = yank_text,
+}
+
+ACTIONS.show_text = {
+  desc = "show the page's text in a split",
+  run = show_text,
 }
 
 ACTIONS.jump_back = {

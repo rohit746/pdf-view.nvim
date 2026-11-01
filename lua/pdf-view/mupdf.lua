@@ -1,5 +1,6 @@
---- Thin async wrapper around the `mutool` command line. Page geometry and rendering go to a worker per document
---- (`scripts/worker.js`), which keeps the document open between requests; search and the outline run a script each.
+--- Thin async wrapper around the `mutool` command line. Page geometry, rendering and page text go to a worker per
+--- document (`scripts/worker.js`), which keeps the document open between requests; search and the outline run a
+--- script each.
 local config = require("pdf-view.config")
 
 local M = {}
@@ -519,6 +520,25 @@ function M.render(path, page, width, height, out, cb)
     cb(err)
   end)
   return ask(path, { "draw", page, math.floor(width), math.floor(height), out }, done)
+end
+
+--- The text of one page: a line per line of text and an empty line after each block, in reading order. Empty for a
+--- page without text, such as a scanned one.
+---@param path string
+---@param page integer 1-based; clamped to the document
+---@param cb fun(err?: string, text?: string)
+---@return PdfView.Job
+function M.text(path, page, cb)
+  return ask(path, { "text", math.min(math.max(math.floor(page), 1), MAX_PAGE) }, function(err, result)
+    if err then
+      return cb(err)
+    end
+    local ok, text = pcall(vim.json.decode, result or "")
+    if not ok or type(text) ~= "string" then
+      return cb("could not read the text of the page")
+    end
+    cb(nil, text)
+  end)
 end
 
 --- Find every occurrence of `needle` in the document (ignoring case).

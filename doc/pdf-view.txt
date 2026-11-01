@@ -85,6 +85,9 @@ between matches accept a count.
   n N                     next / previous match ({count} matches)
   <Esc>                   remove the search highlights
   gO                      pick a bookmark and go to its page
+  y                       yank the page's text, linewise, into the register
+                          given (`"+y` for the clipboard)
+  t                       show the page's text in a scratch split
   <C-o>                   back through the jump list ({count} jumps)
   <C-i> <Tab>             forward through the jump list
   m{a-z}                  mark the page, with its fit, zoom and view
@@ -132,6 +135,14 @@ the prompt searches again for the last text searched in that viewer, like
                                                             *pdf-view-outline*
 `gO` lists the document's bookmarks through |vim.ui.select()|, indented by
 depth, and goes to the chosen page.
+
+                                                              *pdf-view-text*
+`y` yanks the text of the page on screen into the register given (`"+y` for
+the clipboard, `"ay` for register a), linewise: a line per line of text and
+an empty line between blocks. `t` shows the same text in a scratch buffer in
+a vertical split next to the viewer, to quote from or search with Neovim's
+own tools; `t` again on that page goes back to it. A scanned page has no text
+and says so.
 
                                                               *pdf-view-marks*
 `gg`, `G`, `{count}G`, outline picks, search matches and marks are jumps. Each
