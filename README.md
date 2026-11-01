@@ -202,7 +202,7 @@ back to it, as it was. Marks and the jump list belong to the viewer, and they st
 ```lua
 require("pdf-view").setup({
   auto_open = true,        -- take over *.pdf buffers (:edit, nvim file.pdf, ...)
-  extensions = { "pdf", "cbz", "xps" }, -- the files auto_open and :PdfView take, in any case (.PDF, .Cbz, ...)
+  extensions = { "pdf", "cbz", "xps", "epub", "fb2", "mobi" }, -- the files auto_open and :PdfView take, in any case
   live_reload = true,      -- re-render when the file changes on disk
   reload_delay = 200,      -- ms the file must stay quiet before reloading
   winbar = true,           -- "<file>   <page> / <pages>" in the window's winbar
@@ -218,6 +218,7 @@ require("pdf-view").setup({
   max_zoom = 8,            -- largest zoom, relative to the fitted page
   pan_step = 0.2,          -- one scroll key moves this fraction of the window
   search_limit = 5000,     -- stop collecting matches after this many
+  text_scale = 1,          -- text size of EPUB, FB2 and MOBI books, relative to the terminal's
   highlight = { match = "#ffe14d", current = "#ff8c1a" }, -- multiplied onto search matches
   cell_size = nil,         -- { width, height } in px, only if your terminal does not report its pixel size
   keymaps = {              -- a list per action; `false` for no mappings at all
@@ -261,8 +262,12 @@ Unknown or mistyped options raise an error immediately. A keymap list replaces t
 With `auto_open = false` only `:PdfView` and `require("pdf-view").open()` open PDFs.
 
 Comic book archives (`.cbz`) and XPS documents open like PDFs, since MuPDF reads them too. `require("pdf-view").open()`
-and `:PdfView {file}` take any file MuPDF can open, whatever its extension. Reflowable formats (EPUB, FB2, MOBI) are not
-supported yet: their pages depend on a layout size the viewer does not set.
+and `:PdfView {file}` take any file MuPDF can open, whatever its extension.
+
+E-books (EPUB, FB2, MOBI) have no pages of their own: they are laid out on pages as large as the window, with text
+about the size of the terminal's (`text_scale = 1.5` makes it half as large again). When the window changes size the
+book is laid out again and the viewer stays at the same point of the text. Page numbers change with the layout, so
+marks and the jump list, which remember page numbers, may point elsewhere afterwards.
 
 ## Live reload
 

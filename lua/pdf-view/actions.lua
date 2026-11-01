@@ -471,7 +471,8 @@ local function pick_outline(s)
   end
 
   local stat = uv.fs_stat(s.path)
-  local stamp = stat and stamp_of(stat) or ""
+  -- the pages of a reflowable document follow its layout
+  local stamp = (stat and stamp_of(stat) or "") .. (s.laid_out and "@" .. s.laid_out.key or "")
   if s.outline and s.outline.stamp == stamp then
     return choose(s.outline.entries)
   end
@@ -797,6 +798,8 @@ local function set_keymaps(s)
 end
 
 M.rescan = rescan
+-- a reflowable document laid out again has its matches on other pages
+render.on_reflow = rescan
 M.set_keymaps = set_keymaps
 
 return M

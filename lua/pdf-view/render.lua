@@ -144,6 +144,7 @@ local function present(s, win, png, info, fit, rows)
   end
 
   s.slot, s.page, s.count, s.target = slot, info.page, info.count, nil
+  s.laid_out = info.layout and { key = info.layout, count = info.count } or nil
   s.geom = { w = info.width, h = info.height, box = info.content }
   if fit.cx then
     s.cx, s.cy = fit.cx, fit.cy -- what was reachable, after clamping to the page
@@ -366,6 +367,10 @@ local function show(s, page, opts)
   local cols, rows = text_area(win)
   local cell = terminal.cell_size()
   local key = layout_key(cols, rows, cell)
+  -- a reflowable document is laid out to fill the window; other documents ignore this
+  local reflow = layout.reflow(cols, rows, cell.w, cell.h, config.options.text_scale)
+  local reflow_key = table.concat(reflow, "x")
+  mupdf.set_layout(s.path, reflow)
 
   local function fail(message)
     if gen ~= s.gen then
@@ -389,8 +394,12 @@ local function show(s, page, opts)
   if not stat then
     return fail("file not found: " .. s.path)
   end
-  local stamp = stamp_of(stat)
-  s.requested_key, s.requested_stamp = key, stamp
+  s.requested_key, s.requested_stamp = key, stamp_of(stat)
+  -- what the page geometry and the renders are kept under: the file, and the layout of a reflowable one
+  local stamp = s.requested_stamp
+  if s.reflowable then
+    stamp = stamp .. "@" .. reflow_key
+  end
 
   ---@param err? string
   ---@param info? PdfView.PageInfo
@@ -401,6 +410,13 @@ local function show(s, page, opts)
     s.job = nil
     if err or not info then
       return fail(err or "mutool returned no page information")
+    end
+    if info.reflowable then
+      if not s.reflowable then
+        s.reflowable = true
+        stamp = stamp .. "@" .. reflow_key
+      end
+      info.layout = reflow_key
     end
     remember_info(s, stamp, info)
 
@@ -456,6 +472,13 @@ local function show(s, page, opts)
   -- the first time that is needed
   local wanted = page or s.target or s.page
   local content = s.mode == "content"
+  -- a reflowable document laid out again has other pages: stay at the same point of the text
+  local laid_out = s.laid_out
+  if s.reflowable and not page and laid_out and laid_out.key ~= reflow_key then
+    M.on_reflow(s)
+    s.job = mupdf.info(s.path, wanted, on_info, content, laid_out.count)
+    return
+  end
   local known = known_info(s, stamp, wanted)
   if known and (known.content or not content) then
     return on_info(nil, known)
@@ -516,6 +539,12 @@ terminal.on_reattach = function()
     relayout(s)
   end
 end
+
+--- Called when a reflowable document is laid out again, which moves its text to other pages. `actions` searches
+--- again here.
+---@param s PdfView.Session
+---@diagnostic disable-next-line: unused-local
+M.on_reflow = function(s) end
 
 M.show = show
 M.relayout = relayout

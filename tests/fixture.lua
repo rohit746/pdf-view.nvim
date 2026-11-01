@@ -184,6 +184,33 @@ function M.highlight_mode()
   return M._highlight_mode
 end
 
+--- Write an FB2 e-book, a reflowable format: one section per chapter title, each `paragraphs` paragraphs long. The
+--- text of paragraph i of chapter c is "Chapter c paragraph i" followed by filler.
+---@param path string
+---@param chapters string[]
+---@param paragraphs integer
+function M.write_fb2(path, chapters, paragraphs)
+  local sections = {}
+  for c, title in ipairs(chapters) do
+    local body = { ("<section><title><p>%s</p></title>"):format(title) }
+    for i = 1, paragraphs do
+      body[#body + 1] = ("<p>Chapter %d paragraph %d %s</p>"):format(c, i, ("lorem ipsum dolor sit amet "):rep(12))
+    end
+    body[#body + 1] = "</section>"
+    sections[#sections + 1] = table.concat(body)
+  end
+  local file = assert(io.open(path, "wb"))
+  file:write(
+    '<?xml version="1.0" encoding="utf-8"?>\n'
+      .. '<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">'
+      .. "<description><title-info><book-title>Test</book-title></title-info></description>"
+      .. "<body>"
+      .. table.concat(sections)
+      .. "</body></FictionBook>\n"
+  )
+  file:close()
+end
+
 --- A fresh directory for one test.
 ---@return string
 function M.tmpdir()

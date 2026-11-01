@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- EPUB, FB2 and MOBI books showed on small fixed pages of MuPDF's default layout. They are now laid out to fill the
+  window, with text about the size of the terminal's (`text_scale` changes it), and laid out again when the window
+  changes size, staying at the same point of the text; search matches and the outline follow the new pages.
+  `*.epub`, `*.fb2` and `*.mobi` open by default.
 - Only `*.pdf` and `*.PDF` opened in the viewer, although MuPDF also reads comic book archives and XPS documents.
   `*.cbz` and `*.xps` now open too, and the extension is matched in any case, so `paper.Pdf` is covered. The
   `extensions` option sets the list, for `auto_open` and for `:PdfView` without an argument.

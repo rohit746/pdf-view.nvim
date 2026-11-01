@@ -1,6 +1,6 @@
 // Finds every occurrence of a string in a document.
 //
-// Usage: mutool run search.js <file> <needle> <max hits>
+// Usage: mutool run search.js <file> <needle> <max hits> [<width> <height> <em>]
 //
 // Prints one line per hit, in reading order:
 //
@@ -10,6 +10,10 @@
 // measured from the top-left corner of the displayed page: the space `worker.js` draws highlights in. The
 // search ignores case. If there are more than <max hits> hits, a final line "truncated" is printed.
 var doc = Document.openDocument(scriptArgs[0]);
+// a reflowable document is laid out as worker.js lays it out, so that the pages are the same
+if (scriptArgs.length >= 6 && doc.isReflowable()) {
+  doc.layout(parseFloat(scriptArgs[3]), parseFloat(scriptArgs[4]), parseFloat(scriptArgs[5]));
+}
 var needle = scriptArgs[1];
 var limit = parseInt(scriptArgs[2], 10) || 5000;
 var count = doc.countPages();
