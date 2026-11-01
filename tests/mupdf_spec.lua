@@ -267,6 +267,11 @@ describe("mupdf", function()
       eq(false, complete)
     end)
 
+    it("does not call a list cut short when it has exactly as many matches as the limit", function()
+      local matches, truncated = find("alpha", 4)
+      eq({ 4, false }, { #matches, truncated })
+    end)
+
     it("returns nothing when the text does not occur", function()
       local matches, truncated = find("zzzz")
       eq({ 0, false }, { #matches, truncated })

@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `gg`, `G` and a bookmark picked with `gO` did nothing on a zoomed or fitted page when their page was the one already
+  on screen. They now go to the top of that page.
+- A search with exactly as many matches as `search_limit` warned that it had stopped early and showed a `+` in the
+  winbar. Only a search with more matches than the limit says so now.
+
 ## [0.2.0] - 2026-10-12
 
 ### Added

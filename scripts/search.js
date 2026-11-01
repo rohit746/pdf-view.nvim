@@ -8,12 +8,13 @@
 //
 // <page> is 1-based. A hit that wraps over several lines has one rectangle per line. Rectangles are in points,
 // measured from the top-left corner of the displayed page: the space `render-clip.js` draws highlights in. The
-// search ignores case. If <max hits> was reached a final line "truncated" is printed.
+// search ignores case. If there are more than <max hits> hits, a final line "truncated" is printed.
 var doc = Document.openDocument(scriptArgs[0]);
 var needle = scriptArgs[1];
 var limit = parseInt(scriptArgs[2], 10) || 5000;
 var count = doc.countPages();
 var total = 0;
+var truncated = false;
 
 // bounding rectangle of a quad, measured from the page's top-left corner
 function rect(quad, bounds) {
@@ -32,13 +33,18 @@ function rect(quad, bounds) {
 }
 
 if (needle) {
-  for (var i = 0; i < count && total < limit; i++) {
+  for (var i = 0; i < count && !truncated; i++) {
     var page = doc.loadPage(i);
     var bounds = page.getBounds();
     // Not page.search(needle): it returns nothing at all in MuPDF 1.27.0 and 1.28.0. Searching the page's structured
     // text gives the same hits on every version.
     var hits = page.toStructuredText().search(needle);
-    for (var h = 0; h < hits.length && total < limit; h++) {
+    for (var h = 0; h < hits.length; h++) {
+      if (total >= limit) {
+        // only a hit past the limit means the list is incomplete: exactly <max hits> of them is the whole list
+        truncated = true;
+        break;
+      }
       var rects = hits[h].map(function (quad) {
         return rect(quad, bounds);
       });
@@ -47,6 +53,6 @@ if (needle) {
     }
   }
 }
-if (total >= limit) {
+if (truncated) {
   print("truncated");
 }

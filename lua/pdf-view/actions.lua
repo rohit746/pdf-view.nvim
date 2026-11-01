@@ -74,13 +74,21 @@ local TOP = { cy = 0 }
 ---@param s PdfView.Session
 ---@param page integer
 ---@param anchor? PdfView.Anchor
-local function go(s, page, anchor)
+---@param jump? boolean a jump to a page (`gg`, `G`, a bookmark) moves to `anchor` even on the page that is on screen;
+--- a page turn that cannot go further (the last page, the top of the first one) leaves the view where it is
+local function go(s, page, anchor, jump)
   if s.closed then
     return
   end
   page = math.max(1, math.min(page, s.count or page))
   if page == (s.target or s.page) and s.slot ~= 0 then
-    return
+    if not (jump and anchor and uses_viewport(s)) then
+      return
+    end
+    local cx, cy = anchor.cx or s.cx, anchor.cy or s.cy
+    if cx == s.cx and cy == s.cy then
+      return
+    end
   end
   s.target = page
   if anchor then
@@ -329,7 +337,7 @@ local function pick_outline(s)
       end,
     }, function(entry)
       if entry then
-        go(s, entry.page, TOP)
+        go(s, entry.page, TOP, true)
       end
     end)
   end
@@ -424,14 +432,14 @@ ACTIONS.prev = {
 ACTIONS.first = {
   desc = "first page, or page {count}",
   run = function(s)
-    go(s, vim.v.count > 0 and vim.v.count or 1, TOP)
+    go(s, vim.v.count > 0 and vim.v.count or 1, TOP, true)
   end,
 }
 
 ACTIONS.last = {
   desc = "last page, or page {count}",
   run = function(s)
-    go(s, vim.v.count > 0 and vim.v.count or math.huge, TOP)
+    go(s, vim.v.count > 0 and vim.v.count or math.huge, TOP, true)
   end,
 }
 
