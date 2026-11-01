@@ -6,6 +6,9 @@
 // page's bounds in points after /Rotate, inherited boxes, /CropBox and /UserUnit have been applied, which
 // is what `mutool draw` will render.
 var doc = Document.openDocument(scriptArgs[0]);
+if (doc.needsPassword()) {
+  throw new Error("this PDF is password-protected");
+}
 var count = doc.countPages();
 var page = Math.max(1, Math.min(count, parseInt(scriptArgs[1], 10) || 1));
 var bounds = doc.loadPage(page - 1).getBounds();

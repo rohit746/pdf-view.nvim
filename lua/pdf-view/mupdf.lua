@@ -20,16 +20,21 @@ local MAX_PAGE = 2 ^ 31 - 1
 ---@field width number page width in points
 ---@field height number page height in points
 
+--- The line of mutool's stderr that says why it failed: the last error, or else the last line. mutool ends with a
+--- summary such as "cannot draw 'file.pdf'" that does not say why, and a script's exception is followed by its stack.
 ---@param stderr? string
 ---@return string
 local function reason(stderr)
-  local last
+  local last, last_error
   for line in (stderr or ""):gmatch("[^\r\n]+") do
     if line:match("%S") then
       last = line
+      if line:match("^%a* ?[Ee]rror: ") then
+        last_error = line
+      end
     end
   end
-  local message = (last or "mutool failed"):gsub("^error: ", "")
+  local message = (last_error or last or "mutool failed"):gsub("^%a* ?[Ee]rror: ", "")
   return message
 end
 

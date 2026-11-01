@@ -9,6 +9,8 @@ All notable changes to this project are documented here. The format follows
 
 - With `auto_open = false`, `:edit` in a viewer left an empty buffer whose keys did nothing. The viewer now comes
   back, on the same page.
+- A password-protected PDF failed with `cannot draw '<file>'`. It now says the PDF is password-protected, and other
+  `mutool` failures show mutool's error instead of its closing summary line.
 
 ## [0.3.0] - 2026-11-01
 
