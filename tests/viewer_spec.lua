@@ -1354,7 +1354,11 @@ describe("viewer robustness", function()
     vim.api.nvim_set_hl(0, "Search", { fg = "#112233", bg = "#445566" })
     vim.wo.winhighlight = "Normal:NormalFloat"
     local s = open(make("hlsearch", pages(1)))
-    eq("Normal:NormalFloat,Search:PdfViewNone,CurSearch:PdfViewNone,IncSearch:PdfViewNone", vim.wo.winhighlight)
+    eq(
+      "Normal:NormalFloat,Search:PdfViewNone,CurSearch:PdfViewNone,IncSearch:PdfViewNone,"
+        .. "Visual:PdfViewNone,VisualNOS:PdfViewNone",
+      vim.wo.winhighlight
+    )
 
     vim.fn.setreg("/", ".") -- matches every placeholder cell
     vim.o.hlsearch = true
@@ -1368,6 +1372,22 @@ describe("viewer robustness", function()
     vim.o.hlsearch = false
     vim.wo.winhighlight = ""
     vim.api.nvim_set_hl(0, "Search", search)
+  end)
+
+  it("keeps the visual selection off the page", function()
+    reset()
+    local visual = vim.api.nvim_get_hl(0, { name = "Visual" })
+    vim.api.nvim_set_hl(0, "Visual", { fg = "#112233", bg = "#445566" })
+    local s = open(make("visual", pages(1)))
+    vim.api.nvim_win_set_cursor(0, { s.grid.row + 1, s.grid.col })
+    press("vj")
+    eq("v", vim.fn.mode())
+    vim.cmd("redraw!")
+    local at = vim.fn.screenpos(0, s.grid.row + 1, s.grid.col + 1)
+    local cell = vim.api.nvim__inspect_cell(1, at.row - 1, at.col - 1)
+    eq(s.ids[s.slot], cell[2].foreground, "the selected cell still carries the image id")
+    press(vim.keycode("<Esc>"))
+    vim.api.nvim_set_hl(0, "Visual", visual)
   end)
 
   it("does not let the page be scrolled out of its window", function()
