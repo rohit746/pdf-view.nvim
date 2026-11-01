@@ -3,6 +3,9 @@ local root = vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)))
 vim.opt.runtimepath:prepend(root)
 package.path = root .. "/?.lua;" .. package.path
 
+-- never read or write the user's own reading positions
+require("pdf-view.positions").file = vim.fn.tempname() .. "/positions.json"
+
 local harness = require("tests.harness")
 _G.describe, _G.it = harness.describe, harness.it
 
