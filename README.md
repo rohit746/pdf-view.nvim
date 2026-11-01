@@ -101,6 +101,10 @@ The viewer is a regular buffer named after the file, so buffer lists, `:bdelete`
 as usual. Its winbar shows `paper.pdf   3 / 11`; for a statusline use `require("pdf-view").status()` (`3 / 11`, with
 `width` and `x1.25` added while fitted to the width or zoomed).
 
+A PDF opens where you left it: the page, fit and zoom of the last 100 PDFs are kept in
+`stdpath("state")/pdf-view/positions.json`, so this survives restarting Neovim. `remember_position = false` turns it
+off.
+
 ### Keys
 
 All are buffer-local and normal mode. The keys that move, zoom or step between matches take a count.
@@ -179,6 +183,7 @@ require("pdf-view").setup({
   reload_delay = 200,      -- ms the file must stay quiet before reloading
   winbar = true,           -- "<file>   <page> / <pages>" in the window's winbar
   hide_cursor = true,      -- hide the cursor while a viewer is focused (it would sit on top of the page)
+  remember_position = true, -- reopen a PDF at its last page, fit and zoom, also after restarting Neovim
   mutool = "mutool",       -- executable
   transmission = "auto",   -- "file": the terminal reads the PNG itself; "direct": send the bytes (SSH). auto = SSH-aware
   tmux_passthrough = true, -- run `tmux set -p allow-passthrough on` for this pane

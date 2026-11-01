@@ -4,6 +4,7 @@
 local actions = require("pdf-view.actions")
 local config = require("pdf-view.config")
 local cursor = require("pdf-view.cursor")
+local positions = require("pdf-view.positions")
 local render = require("pdf-view.render")
 local session = require("pdf-view.session")
 local terminal = require("pdf-view.terminal")
@@ -34,6 +35,16 @@ local reread = vim.api.nvim_create_augroup("PdfViewReread", { clear = true })
 ---@param s PdfView.Session
 local function position(s)
   return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+end
+
+--- Remember where the viewer `s` is for `:edit`, and in the state file for the next Neovim.
+---@param s PdfView.Session
+local function leave(s)
+  local where = position(s)
+  resume[s.buf] = where
+  if config.options.remember_position then
+    pcall(positions.set, s.path, where)
+  end
 end
 
 M.sessions = sessions
@@ -129,6 +140,9 @@ local function set_global_autocmds()
     desc = "Free PDF images held by the terminal",
     callback = function()
       for _, s in pairs(sessions) do
+        if not s.closed then
+          leave(s)
+        end
         destroy(s)
       end
     end,
@@ -143,13 +157,14 @@ function M.attach(buf)
     return sessions[buf]
   end
 
-  local last = resume[buf] or {}
+  local path = vim.api.nvim_buf_get_name(buf)
+  local last = resume[buf] or (config.options.remember_position and positions.get(path)) or {}
   resume[buf] = nil
 
   ---@type PdfView.Session
   local s = {
     buf = buf,
-    path = vim.api.nvim_buf_get_name(buf),
+    path = path,
     page = last.page or 1,
     mode = last.mode or "page",
     zoom = last.zoom or 1,
@@ -204,7 +219,7 @@ function M.attach(buf)
     desc = "Release a PDF viewer",
     callback = function(args)
       if args.event == "BufUnload" and not s.closed then
-        resume[buf] = position(s)
+        leave(s)
       end
       destroy(s)
     end,

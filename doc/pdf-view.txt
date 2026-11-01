@@ -26,6 +26,11 @@ With |pdf-view-config| `auto_open` (the default) every `*.pdf` that is read
 The viewer is a buffer named after the file with 'buftype' `nofile` and
 'filetype' `pdf-view`. Its winbar shows "<file>  <page> / <pages>".
 
+A PDF opens at the page, fit and zoom it was left at, also after Neovim is
+restarted: the last 100 are kept in
+`stdpath("state")/pdf-view/positions.json`. Set `remember_position = false`
+to always start on the first page.
+
 `:w` never overwrites the PDF. |:w| {file} and |:saveas| {file} save a copy
 of it; after |:saveas| the viewer shows the copy. A range or |:w_a| is
 refused.
@@ -120,6 +125,7 @@ CONFIGURATION                                              *pdf-view-config*
       reload_delay = 200,      -- ms the file must stay quiet before reloading
       winbar = true,           -- page indicator in the winbar
       hide_cursor = true,      -- hide the cursor while a viewer is focused
+      remember_position = true, -- reopen at the last page, also after a restart
       mutool = "mutool",
       transmission = "auto",   -- "auto" | "file" | "direct"
       tmux_passthrough = true, -- tmux set -p allow-passthrough on

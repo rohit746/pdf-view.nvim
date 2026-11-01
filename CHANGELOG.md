@@ -10,6 +10,9 @@ All notable changes to this project are documented here. The format follows
 - The mouse wheel did nothing in a viewer. While a viewer has focus, it now scrolls a zoomed page and turns pages,
   like `j` `k` `l` `h`, in the viewer under the mouse; over other windows it scrolls them as before. The
   `scroll_down`, `scroll_up`, `scroll_right` and `scroll_left` keymaps set its keys; `{}` turns one off.
+- A PDF reopened after restarting Neovim started on the first page. The page, fit and zoom of the last 100 PDFs are
+  now kept in `stdpath("state")/pdf-view/positions.json`, and a PDF opens where it was left. `remember_position =
+  false` turns this off.
 
 ### Fixed
 
