@@ -19,6 +19,9 @@ All notable changes to this project are documented here. The format follows
 - Inside tmux without truecolor (`RGB`) for the attached terminal, pages did not show and nothing said why: tmux
   reduced the image id colours to 256. `:checkhealth pdf-view` now reports it and gives the `terminal-features` line
   to add.
+- When the terminal could not read the PNG files pdf-view writes (Neovim in a container or running as another user,
+  or a flatpak terminal), pages stayed blank and nothing said why. On Neovim 0.12 the terminal is now asked once
+  whether it can read them; if it cannot, pages are sent as bytes instead, and `:checkhealth pdf-view` says so.
 
 ## [0.3.0] - 2026-11-01
 

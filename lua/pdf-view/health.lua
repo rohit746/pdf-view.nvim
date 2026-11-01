@@ -115,6 +115,36 @@ local function check_mutool()
   os.remove(file)
 end
 
+local function check_transmission()
+  local mode, probe = terminal.transmission(), terminal.probe
+  local blank = 'If pages stay blank, set `transmission = "direct"` in setup().'
+  if config.options.transmission ~= "auto" then
+    vim.health.info(("image transmission: %s (set in setup())"):format(mode))
+  elseif probe and probe.state == "failed" then
+    vim.health.warn(
+      ("the terminal cannot read the PNG files of pages (it said `%s`), so pages are sent as bytes"):format(probe.error),
+      {
+        "Neovim and the terminal do not see the same files: Neovim runs in a container or as another user, or the",
+        'terminal is a flatpak. Pages still show, a little slower. Set `transmission = "direct"` to skip the check.',
+      }
+    )
+  elseif mode == "direct" then
+    vim.health.info("image transmission: direct (over SSH)")
+  elseif probe and probe.state == "ok" then
+    vim.health.ok("image transmission: file (the terminal reads the PNG files of pages)")
+  elseif probe and probe.state == "silent" then
+    vim.health.info("image transmission: file (the terminal did not answer whether it can read the files)", { blank })
+  elseif probe then
+    vim.health.info("image transmission: file (still asking the terminal whether it can read the files)")
+  elseif vim.fn.has("nvim-0.12") == 0 then
+    vim.health.info("image transmission: file (Neovim 0.11 cannot ask the terminal whether it can read the files)", {
+      blank,
+    })
+  else
+    vim.health.info("image transmission: file (the terminal is asked whether it can read the files on the first page)")
+  end
+end
+
 local function check_terminal()
   local detected = terminal.detect()
   if config.options.force then
@@ -198,7 +228,7 @@ local function check_terminal()
     vim.health.ok(("cell size: %.1fx%.1f px (%s)"):format(cell.w, cell.h, cell.source))
   end
 
-  vim.health.info("image transmission: " .. terminal.transmission())
+  check_transmission()
 end
 
 local function check_conflicts()

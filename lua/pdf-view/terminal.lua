@@ -149,7 +149,8 @@ end
 
 local prepared
 
---- One-time terminal preparation: tmux only forwards graphics escape codes when passthrough is on.
+--- One-time terminal preparation: tmux only forwards graphics escape codes when passthrough is on, and the terminal
+--- is asked whether it can read the PNGs of pages.
 function M.prepare()
   if prepared then
     return
@@ -158,19 +159,121 @@ function M.prepare()
   if M.in_tmux() and config.options.tmux_passthrough then
     capture({ "tmux", "set-option", "-p", "allow-passthrough", "on" })
   end
+  M.probe_file(vim.fs.dirname(vim.fn.tempname()))
 end
 
---- How images are handed to the terminal. A local terminal can read the PNG itself; over SSH the bytes are sent.
+---@return boolean
+local function over_ssh()
+  return (vim.env.SSH_CONNECTION or "") ~= "" or (vim.env.SSH_TTY or "") ~= ""
+end
+
+--- How images are handed to the terminal. A local terminal can read the PNG itself; over SSH the bytes are sent, and
+--- so they are when the terminal said it cannot read the file (see `probe_file()`).
 ---@return "file"|"direct"
 function M.transmission()
   local mode = config.options.transmission
   if mode ~= "auto" then
     return mode
   end
-  if (vim.env.SSH_CONNECTION or "") ~= "" or (vim.env.SSH_TTY or "") ~= "" then
+  if over_ssh() or (M.probe and M.probe.state == "failed") then
     return "direct"
   end
   return "file"
+end
+
+-- image id of the probe, above the ids of pages (see `allocate_ids()` in session.lua)
+local PROBE_ID = 0xFFFFFE
+-- a 1x1 transparent PNG
+local PROBE_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+-- a terminal that has not answered by then is not going to (a multiplexer may not pass the reply on)
+local PROBE_TIMEOUT = 3000
+
+---@class PdfView.Probe
+---@field state "pending"|"ok"|"failed"|"silent" "silent": no reply came, so the file medium is kept
+---@field error? string the terminal's reply when it failed
+
+--- Result of the check that the terminal can read the PNGs pdf-view writes, once it has been made.
+---@type PdfView.Probe?
+M.probe = nil
+
+--- Called once the check has found that the terminal cannot read the PNGs, to send pages that are already up again.
+--- Set by `render`.
+M.on_fallback = function() end
+
+--- What a graphics protocol reply says about the probe: nil when the reply is not about it, otherwise whether the
+--- terminal could read the file and, when it could not, its error message.
+---@param sequence string
+---@return boolean? ok
+---@return string? error
+function M.probe_reply(sequence)
+  local keys, message = sequence:match("^\27_G([^;]*);(.-)\27?\\?$")
+  if not keys or tonumber(keys:match("i=(%d+)")) ~= PROBE_ID then
+    return nil
+  end
+  if message == "OK" then
+    return true
+  end
+  return false, message
+end
+
+--- Ask the terminal, once, whether it can read a PNG in the directory pages are rendered to. It cannot when Neovim
+--- runs in a container or as another user, or when the terminal is a flatpak, and then the page would just stay
+--- blank. The question is asked with `a=q`, which loads the image without keeping it; the answer comes back as a
+--- TermResponse. Neovim 0.11 cannot read replies (they would arrive as typed keys), so it is not asked there.
+---@param dir string the directory pages are rendered to
+function M.probe_file(dir)
+  if M.probe or config.options.transmission ~= "auto" or over_ssh() then
+    return
+  end
+  if vim.fn.has("nvim-0.12") == 0 or not M.ui_attached() then
+    return
+  end
+  local path = dir .. "/pdf-view-probe.png"
+  local file = io.open(path, "wb")
+  if not file then
+    return
+  end
+  file:write(vim.base64.decode(PROBE_PNG))
+  file:close()
+
+  local probe = { state = "pending" } ---@type PdfView.Probe
+  M.probe = probe
+  local autocmd, timer
+  local function finish(state, message)
+    if probe.state ~= "pending" then
+      return
+    end
+    probe.state, probe.error = state, message
+    pcall(vim.api.nvim_del_autocmd, autocmd)
+    if timer then
+      timer:stop()
+      timer:close()
+    end
+    os.remove(path)
+    if state == "failed" then
+      M.on_fallback()
+    end
+  end
+  autocmd = vim.api.nvim_create_autocmd("TermResponse", {
+    desc = "pdf-view: whether the terminal can read the PNG files of pages",
+    callback = function(args)
+      local ok, message = M.probe_reply((args.data and args.data.sequence) or vim.v.termresponse or "")
+      if ok ~= nil then
+        vim.schedule(function()
+          finish(ok and "ok" or "failed", message)
+        end)
+      end
+    end,
+  })
+  timer = vim.uv.new_timer()
+  timer:start(PROBE_TIMEOUT, 0, function()
+    vim.schedule(function()
+      finish("silent")
+    end)
+  end)
+
+  local kitty = require("pdf-view.kitty")
+  kitty.send(kitty.sequence({ a = "q", f = 100, t = "f", i = PROBE_ID }, vim.base64.encode(path)))
 end
 
 --- Version of the zellij on $PATH, or nil when it cannot be told.

@@ -284,6 +284,7 @@ scroll positions are cached.
 | Image is blurry                                  | The terminal did not report its pixel size; set `cell_size = { width, height }`.                      |
 | Image vanished after detaching/re-attaching tmux | Press `r`: the new terminal never received the image.                                                 |
 | The PDF opens as binary text                     | The plugin loaded too late. Use `lazy = false` and make sure nothing else owns `BufReadCmd *.pdf`.    |
+| Blank page in a container, flatpak, other user   | The terminal cannot read the PNGs: 0.12 sends bytes instead, on 0.11 set `transmission = "direct"`.   |
 | Over SSH nothing appears                         | Use a terminal that supports the protocol; images are then sent inline (`transmission = "direct"`).   |
 | Nothing appears inside zellij                    | Use zellij 0.45 or newer, without `support_kitty_graphics_protocol false`, in kitty or Ghostty.       |
 
