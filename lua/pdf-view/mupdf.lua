@@ -482,6 +482,7 @@ end
 ---@field width integer
 ---@field height integer
 ---@field highlights? string rectangles to multiply onto the page, as built by `search.highlights()`
+---@field recolor? string how to recolour the image, as built by `session.recolor_spec()`: "" (or nil) for not at all
 
 --- Render a rectangle of a page to a PNG of exactly `clip.width` x `clip.height` pixels. Only that rectangle is
 --- rasterised, so the cost does not grow with the zoom level.
@@ -503,6 +504,7 @@ function M.render_clip(path, page, clip, out, cb)
     math.floor(clip.height),
     out,
     clip.highlights or "",
+    clip.recolor or "",
   }
   return ask(path, request, rendered(out, cb))
 end
@@ -514,12 +516,13 @@ end
 ---@param height integer
 ---@param out string destination PNG
 ---@param cb fun(err?: string)
+---@param recolor? string how to recolour the image, as built by `session.recolor_spec()`
 ---@return PdfView.Job
-function M.render(path, page, width, height, out, cb)
+function M.render(path, page, width, height, out, cb, recolor)
   local done = rendered(out, function(err)
     cb(err)
   end)
-  return ask(path, { "draw", page, math.floor(width), math.floor(height), out }, done)
+  return ask(path, { "draw", page, math.floor(width), math.floor(height), out, recolor or "" }, done)
 end
 
 --- The text of one page: a line per line of text and an empty line after each block, in reading order. Empty for a

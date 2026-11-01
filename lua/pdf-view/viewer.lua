@@ -131,12 +131,15 @@ local function set_global_autocmds()
   })
   vim.api.nvim_create_autocmd("ColorScheme", {
     group = augroup,
-    desc = "Restore PDF image highlights",
+    desc = "Restore PDF image highlights, and recolour pages in the colorscheme's colours",
     callback = function()
       cursor.define()
       for _, s in pairs(sessions) do
         for _, id in ipairs(s.ids) do
           define_highlight(id)
+        end
+        if not s.closed and session.recolor_mode(s) == "colorscheme" then
+          show(s) -- the new colours are part of the render cache key, so the page is drawn again
         end
       end
     end,

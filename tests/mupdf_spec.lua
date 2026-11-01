@@ -352,6 +352,70 @@ done
       end
     end)
 
+    it("inverts the brightness of the page but keeps its hues", function()
+      counter = counter + 1
+      local out = ("%s/clip-%d.png"):format(dir, counter)
+      local clip_spec = { scale_x = 2, scale_y = 2, x = 1200, y = 10, width = 50, height = 40, recolor = "invert" }
+      eq(
+        nil,
+        await(function(cb)
+          mupdf.render_clip(red, 1, clip_spec, out, cb)
+        end)
+      )
+      local page, paper = unpack(fixture.pixels(out, { { 0, 20 }, { 49, 20 } }))
+      truthy(paper[1] < 16 and paper[2] < 16 and paper[3] < 16, "white turns (nearly) black: " .. vim.inspect(paper))
+      truthy(page[1] > 100 and page[1] > 2 * page[2] and page[1] > 2 * page[3], "red stays red: " .. vim.inspect(page))
+    end)
+
+    it("tints the page, highlights included, black to one colour and white to another", function()
+      counter = counter + 1
+      local out = ("%s/clip-%d.png"):format(dir, counter)
+      local clip_spec = {
+        scale_x = 1,
+        scale_y = 1,
+        x = 0,
+        y = 0,
+        width = 300,
+        height = 500,
+        highlights = "100.00,100.00,200.00,150.00,ffffff",
+        recolor = "tint,e0f0ff,102030",
+      }
+      eq(
+        nil,
+        await(function(cb)
+          mupdf.render_clip(white, 1, clip_spec, out, cb)
+        end)
+      )
+      local points = {}
+      for gx = 30, 130, 2 do
+        for gy = 365, 400, 2 do
+          points[#points + 1] = { gx, gy }
+        end
+      end
+      local found_text = false
+      for _, rgb in ipairs(fixture.pixels(out, points)) do
+        found_text = found_text or vim.deep_equal(rgb, { 224, 240, 255 })
+      end
+      truthy(found_text, "black text takes the first colour")
+      eq(
+        { { 16, 32, 48 }, { 16, 32, 48 } },
+        fixture.pixels(out, { { 50, 50 }, { 150, 125 } }),
+        "white takes the second"
+      )
+    end)
+
+    it("recolours a whole page drawn to a size", function()
+      local out = dir .. "/drawn-inverted.png"
+      eq(
+        nil,
+        await(function(cb)
+          mupdf.render(white, 1, 100, 100, out, cb, "invert")
+        end)
+      )
+      local paper = fixture.pixels(out, { { 5, 5 } })[1]
+      truthy(paper[1] < 16 and paper[2] < 16 and paper[3] < 16, "white turns (nearly) black: " .. vim.inspect(paper))
+    end)
+
     it("says how it drew the highlights", function()
       local _, notes = await(function(cb)
         mupdf.render_clip(

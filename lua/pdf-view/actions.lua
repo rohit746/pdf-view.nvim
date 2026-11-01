@@ -620,6 +620,7 @@ local ACTION_ORDER = {
   "jump_forward",
   "mark",
   "goto_mark",
+  "recolor",
   "reload",
   "close",
   "help",
@@ -824,6 +825,19 @@ ACTIONS.mark = {
 ACTIONS.goto_mark = {
   desc = "'{a-z}: go to a mark; '' to where the latest jump started",
   run = goto_mark,
+}
+
+ACTIONS.recolor = {
+  desc = "recolour the pages, or stop (dark mode)",
+  run = function(s)
+    if session.recolor_mode(s) ~= "off" then
+      s.recolor = "off"
+    else
+      local configured = config.options.recolor
+      s.recolor = configured ~= "off" and configured or "invert"
+    end
+    show(s)
+  end,
 }
 
 ACTIONS.reload = { desc = "re-render the page", run = M.reload }

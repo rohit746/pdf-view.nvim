@@ -2918,3 +2918,61 @@ describe("viewer password-protected documents", function()
     vim.fn.inputsecret = nil
   end)
 end)
+
+describe("viewer recolouring", function()
+  --- RGB of the paper (top-left corner) of the page on screen.
+  local function paper(s)
+    local png = s.images[s.ids[s.slot]]
+    truthy(png, "no page on screen")
+    return fixture.pixels(png, { { 2, 2 } })[1]
+  end
+
+  local function dark(rgb)
+    return rgb[1] < 40 and rgb[2] < 40 and rgb[3] < 40
+  end
+
+  local white = { w = 612, h = 792, color = { 1, 1, 1 }, label = "Page 1" }
+
+  it("switches the recolouring on and off with a key", function()
+    setup()
+    reset()
+    local s = open(make("recolor-toggle", { white, white }))
+    eq({ 255, 255, 255 }, paper(s))
+
+    press("i")
+    on_page(s, 1)
+    truthy(dark(paper(s)), "inverted: " .. vim.inspect(paper(s)))
+
+    -- a page turned to is recoloured too, also when it was drawn ahead of time before the switch
+    press(vim.keycode("<PageDown>"))
+    on_page(s, 2)
+    truthy(dark(paper(s)), "page 2 inverted: " .. vim.inspect(paper(s)))
+
+    press("i")
+    on_page(s, 2)
+    eq({ 255, 255, 255 }, paper(s))
+  end)
+
+  it("draws the pages in the colorscheme's colours, and again when the colorscheme changes", function()
+    setup({ recolor = "colorscheme" })
+    reset()
+    vim.api.nvim_set_hl(0, "Normal", { fg = 0xe0e0e0, bg = 0x102030 })
+    local s = open(make("recolor-colorscheme", { white }))
+    eq({ 16, 32, 48 }, paper(s))
+
+    vim.api.nvim_set_hl(0, "Normal", { fg = 0x203040, bg = 0xf0e0d0 })
+    vim.api.nvim_exec_autocmds("ColorScheme", {})
+    wait_for(function()
+      return s.job == nil and vim.deep_equal(paper(s), { 240, 224, 208 })
+    end, "the page in the new colours")
+
+    -- the key stops recolouring, and switches it back to the configured kind
+    press("i")
+    on_page(s, 1)
+    eq({ 255, 255, 255 }, paper(s))
+    press("i")
+    on_page(s, 1)
+    eq({ 240, 224, 208 }, paper(s))
+    setup()
+  end)
+end)

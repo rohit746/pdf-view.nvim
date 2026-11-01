@@ -93,6 +93,8 @@ between matches accept a count.
   m{a-z}                  mark the page, with its fit, zoom and view
   '{a-z} `{a-z}           go to a mark
   '' ``                   back to where the latest jump started
+  i                       recolour the pages (dark mode), or stop: see
+                          |pdf-view-recolor|
   r                       re-render the current page
   q                       close the viewer
   g?                      show the keys
@@ -152,6 +154,15 @@ Page turns and scrolling are not jumps. `m{a-z}` marks the page with its
 fit, zoom and view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and
 the jump list belong to the viewer and stay through |:edit|.
 
+                                                            *pdf-view-recolor*
+`i` recolours the pages, and `i` again shows them as they are. `recolor`
+says how, and whether the pages start out recoloured: "invert" inverts the
+brightness but keeps the hues (black paper, white text, a red figure stays
+red; also what `i` does when `recolor` is "off"), and "colorscheme" draws
+black in the text colour of the |hl-Normal| group and white in its background,
+so the page blends in with the colorscheme. Those pages are drawn again on
+|ColorScheme|. Search highlights are recoloured with the page.
+
 ==============================================================================
 LUA API                                                      *pdf-view-api*
 
@@ -195,6 +206,7 @@ CONFIGURATION                                              *pdf-view-config*
       search_limit = 5000,     -- stop collecting matches after this many
       text_scale = 1,          -- e-book text size, relative to the terminal's
       highlight = { match = "#ffe14d", current = "#ff8c1a" },
+      recolor = "off",         -- "off" | "invert" | "colorscheme"
       cell_size = nil,         -- { width, height } px if undetectable
       keymaps = { ... },       -- see README; `false` disables all
     })
