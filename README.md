@@ -140,6 +140,7 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `<C-o>` `<C-i>` `<Tab>`      | back / forward through the jump list (takes a count)                            |
 | `m{a-z}`                     | mark the page, with its fit, zoom and view                                      |
 | `'{a-z}` `` `{a-z} ``        | go to a mark; `''` goes back to where the latest jump started                   |
+| `i`                          | recolour the pages (dark mode), or stop; see [Dark mode](#dark-mode)            |
 | `r`                          | re-render the current page                                                      |
 | `q`                          | close the viewer (never quits Neovim)                                           |
 | `g?`                         | show this list                                                                  |
@@ -200,6 +201,18 @@ in a vertical split next to the viewer, to quote from or to search with Neovim's
 already shown goes back to it. The text of an EPUB, FB2 or MOBI page follows its layout. A scanned page has no text to
 copy, and says so.
 
+### Dark mode
+
+`i` recolours the pages, and `i` again shows them as they are. `recolor` says how, and whether the pages start out
+recoloured:
+
+- `"invert"` inverts the brightness but keeps the hues: white paper turns black and black text white, while a red
+  figure stays red. `i` recolours this way when `recolor` is `"off"`.
+- `"colorscheme"` draws the pages in the colours of the `Normal` highlight group, black in its text colour and white in
+  its background, so the page blends in with the colorscheme. The pages are drawn again when the colorscheme changes.
+
+Search highlights are recoloured with the page.
+
 ### Jumps and marks
 
 `gg`, `G`, `{count}G`, outline picks, search matches (`/`, `?`, `n`, `N`) and marks are jumps: each viewer keeps a jump
@@ -234,6 +247,7 @@ require("pdf-view").setup({
   search_limit = 5000,     -- stop collecting matches after this many
   text_scale = 1,          -- text size of EPUB, FB2 and MOBI books, relative to the terminal's
   highlight = { match = "#ffe14d", current = "#ff8c1a" }, -- multiplied onto search matches
+  recolor = "off",         -- "invert": dark pages, hues kept; "colorscheme": in the Normal colours. `i` toggles it
   cell_size = nil,         -- { width, height } in px, only if your terminal does not report its pixel size
   keymaps = {              -- a list per action; `false` for no mappings at all
     down = { "j", "<Down>" },
@@ -266,6 +280,7 @@ require("pdf-view").setup({
     jump_forward = { "<C-i>", "<Tab>" },
     mark = { "m" },       -- then a to z
     goto_mark = { "'", "`" }, -- then a to z, or ' for the latest jump
+    recolor = { "i" },
     reload = { "r" },
     close = { "q" },
     help = { "g?" },

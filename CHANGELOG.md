@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Pages were always black on white, glaring next to a dark colorscheme. `i` recolours them: `recolor = "invert"`
+  inverts their brightness but keeps their hues, and `recolor = "colorscheme"` draws them in the colours of the `Normal`
+  highlight, drawing them again when the colorscheme changes. `recolor` also says whether pages start out recoloured,
+  and the `recolor` keymap sets the key.
 - The text of a page could only be read off the image. `y` yanks it into the register given (`"+y` for the
   clipboard), linewise, and `t` shows it in a scratch split next to the viewer, to quote from or search with Neovim's
   own tools. The `yank_text` and `show_text` keymaps set the keys.

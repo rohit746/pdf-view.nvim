@@ -30,10 +30,10 @@
 //     non-white pixels, so a white rectangle laid over the whole page does not count as content. A blank page gives
 //     the whole page.
 //
-//   ["draw", <page>, <width>, <height>, <out.png>]
+//   ["draw", <page>, <width>, <height>, <out.png>, <recolor>]
 //     Renders a whole page to a PNG of exactly <width> x <height> pixels, stretched to it.
 //
-//   ["render", <page>, <scale_x>, <scale_y>, <x>, <y>, <width>, <height>, <out.png>, <highlights>]
+//   ["render", <page>, <scale_x>, <scale_y>, <x>, <y>, <width>, <height>, <out.png>, <highlights>, <recolor>]
 //     Renders a rectangle of a page, at a given scale, to a PNG, optionally with highlighted rectangles on top. Only
 //     the pixels inside the rectangle are rasterised, so zooming deep into a page costs the same as rendering a
 //     window-sized image. <scale_x> and <scale_y> are device pixels per point (equal for a zoomed view, different
@@ -46,6 +46,11 @@
 //     before 1.27 cannot draw that (its JavaScript blend groups draw nothing), so there they are laid over the page as
 //     a translucent fill instead. The result says which was used: "highlights: multiply" or "highlights: translucent",
 //     and is empty without highlights.
+//
+//     <recolor> recolours the finished image, highlights included: "" leaves it alone, "invert" inverts its brightness
+//     but keeps its hues (a dark page with light text, and colours still telling apart), and "tint,<rrggbb>,<rrggbb>"
+//     maps black to the first colour and white to the second, the shades in between to the shades between them (a
+//     page in the colours of the editor's text and background).
 //
 //   ["text", <page>]
 //     The text of a page, as a JSON string: a line per line of text and an empty line after each block, in reading
@@ -205,7 +210,19 @@ function groupsWork() {
   return multiply;
 }
 
-function render(number, scaleX, scaleY, x, y, width, height, out, highlights) {
+// Recolour a rendered page as <recolor> says (see "render").
+function recolor(pixmap, how) {
+  if (how === "invert") {
+    pixmap.invertLuminance();
+  } else if (how && how.indexOf("tint,") === 0) {
+    var colors = how.split(",");
+    pixmap.tint(parseInt(colors[1], 16), parseInt(colors[2], 16));
+  } else if (how) {
+    throw new Error("unknown recolouring: " + how);
+  }
+}
+
+function render(number, scaleX, scaleY, x, y, width, height, out, highlights, how) {
   var count = openDocument().countPages();
   if (!(number >= 1 && number <= count)) {
     throw new Error("page " + number + " does not exist (the document has " + count + ")");
@@ -244,6 +261,7 @@ function render(number, scaleX, scaleY, x, y, width, height, out, highlights) {
   }
 
   device.close();
+  recolor(pixmap, how);
   pixmap.saveAsPNG(out);
   return notes;
 }
@@ -282,7 +300,7 @@ function answer(request) {
       var bounds = load(request[2]).bounds;
       var sx = request[3] / (bounds[2] - bounds[0]);
       var sy = request[4] / (bounds[3] - bounds[1]);
-      return render(request[2], sx, sy, 0, 0, request[3], request[4], request[5], "");
+      return render(request[2], sx, sy, 0, 0, request[3], request[4], request[5], "", request[6]);
     case "render":
       return render(
         request[2],
@@ -293,7 +311,8 @@ function answer(request) {
         request[7],
         request[8],
         request[9],
-        request[10]
+        request[10],
+        request[11]
       );
     case "text":
       return pageText(request[2]);

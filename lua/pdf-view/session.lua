@@ -93,6 +93,7 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field mapped? string[] the keys mapped in the buffer by `actions.set_keymaps`
 ---@field waiting_for_ui? boolean the first render is waiting for a UI to attach
 ---@field unlocking? boolean the password prompt of a password-protected document is open
+---@field recolor? PdfView.Recolor how the pages are recoloured, once toggled; until then `config.options.recolor`
 ---@field closed boolean
 
 ---@type table<integer, PdfView.Session>
@@ -127,6 +128,32 @@ end
 local function match_colors()
   local highlight = config.options.highlight
   return { match = highlight.match:sub(2), current = highlight.current:sub(2) }
+end
+
+--- How the pages of `s` are recoloured: as toggled in the viewer, or else as configured.
+---@param s PdfView.Session
+---@return PdfView.Recolor
+local function recolor_mode(s)
+  return s.recolor or config.options.recolor
+end
+
+--- How `worker.js` recolours the pages of `s`: "" for not at all, "invert", or "tint,<fg>,<bg>" with the `Normal`
+--- colours, black becoming the text colour and white the background. A colour the colorscheme leaves unset (a
+--- transparent background) is white or black, whichever suits 'background'.
+---@param s PdfView.Session
+---@return string
+local function recolor_spec(s)
+  local mode = recolor_mode(s)
+  if mode == "invert" then
+    return "invert"
+  elseif mode ~= "colorscheme" then
+    return ""
+  end
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+  local dark = vim.o.background == "dark"
+  local fg = normal.fg or (dark and 0xffffff or 0x000000)
+  local bg = normal.bg or (dark and 0x000000 or 0xffffff)
+  return ("tint,%06x,%06x"):format(fg, bg)
 end
 
 ---@param stat uv.fs_stat.result
@@ -390,6 +417,8 @@ M.ns = ns
 M.augroup = augroup
 M.define_highlight = define_highlight
 M.match_colors = match_colors
+M.recolor_mode = recolor_mode
+M.recolor_spec = recolor_spec
 M.stamp_of = stamp_of
 M.layout_key = layout_key
 M.write_buffer = write_buffer

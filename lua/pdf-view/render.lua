@@ -17,6 +17,7 @@ local uv = vim.uv
 local ns, augroup, sessions = session.ns, session.augroup, session.sessions
 local define_highlight = session.define_highlight
 local match_colors = session.match_colors
+local recolor_spec = session.recolor_spec
 local stamp_of = session.stamp_of
 local layout_key = session.layout_key
 local write_buffer = session.write_buffer
@@ -171,6 +172,7 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
   if s.search then
     highlights, highlights_key = search.highlights(s.search, info.page, match_colors())
   end
+  local recolor = recolor_spec(s)
 
   -- A whole fitted page is stretched to its cells. A zoomed or width/height-fitted page renders just the part that is
   -- on screen. Highlights are drawn by the same render.
@@ -186,6 +188,7 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
       view.width,
       view.height,
       highlights_key,
+      recolor,
     }, ":")
     return view,
       cache_key,
@@ -198,13 +201,14 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
           width = view.width,
           height = view.height,
           highlights = highlights,
+          recolor = recolor,
         }
         return mupdf.render_clip(s.path, info.page, clip, out, cb)
       end
   end
 
   local fit = layout.fit(info.width, info.height, cols, rows, cell.w, cell.h, config.options.max_pixels)
-  local cache_key = table.concat({ stamp, info.page, fit.width, fit.height, highlights_key }, ":")
+  local cache_key = table.concat({ stamp, info.page, fit.width, fit.height, highlights_key, recolor }, ":")
   return fit,
     cache_key,
     function(out, cb)
@@ -217,10 +221,11 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
           width = fit.width,
           height = fit.height,
           highlights = highlights,
+          recolor = recolor,
         }
         return mupdf.render_clip(s.path, info.page, clip, out, cb)
       end
-      return mupdf.render(s.path, info.page, fit.width, fit.height, out, cb)
+      return mupdf.render(s.path, info.page, fit.width, fit.height, out, cb, recolor)
     end
 end
 

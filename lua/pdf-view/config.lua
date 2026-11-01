@@ -31,9 +31,12 @@ local M = {}
 ---@field jump_forward string[] forward through the jump list
 ---@field mark string[] followed by a to z: mark the page, fit, zoom and view
 ---@field goto_mark string[] followed by a to z: go to that mark; doubled (`''`): to where the latest jump started
+---@field recolor string[] switch the recolouring of the pages on and off (`recolor`, or "invert" when that is "off")
 ---@field reload string[] re-render the current page
 ---@field close string[] close the viewer buffer
 ---@field help string[] show the key summary
+
+---@alias PdfView.Recolor "off"|"invert"|"colorscheme"
 
 ---@class PdfView.Config
 ---@field auto_open boolean open files with one of `extensions` (`:edit`, `nvim file.pdf`, ...) in the viewer
@@ -57,6 +60,8 @@ local M = {}
 ---@field text_scale number size of the text of reflowable documents (EPUB, FB2, MOBI), which are laid out to fit the
 --- window, relative to the terminal's text
 ---@field highlight { match: string, current: string } `#rrggbb` colours multiplied onto search matches
+---@field recolor PdfView.Recolor how pages are recoloured: not at all, with their brightness inverted but their hues
+--- kept (dark pages with light text), or in the colours of the `Normal` highlight (text and background)
 ---@field cell_size? number[] `{ width, height }` of a terminal cell in pixels, when it cannot be detected
 ---@field keymaps PdfView.Keymaps|false buffer-local normal mode mappings, `false` for none
 
@@ -81,6 +86,7 @@ local defaults = {
   search_limit = 5000,
   text_scale = 1,
   highlight = { match = "#ffe14d", current = "#ff8c1a" },
+  recolor = "off",
   cell_size = nil,
   keymaps = {
     -- not <Space>: it is often the leader key
@@ -114,6 +120,7 @@ local defaults = {
     jump_forward = { "<C-i>", "<Tab>" },
     mark = { "m" },
     goto_mark = { "'", "`" },
+    recolor = { "i" },
     reload = { "r" },
     close = { "q" },
     help = { "g?" },
@@ -193,6 +200,9 @@ local function validate(opts)
   end
   if opts.placement ~= nil and not vim.tbl_contains({ "auto", "placeholders", "positioned" }, opts.placement) then
     fail("placement", '"auto", "placeholders" or "positioned"', opts.placement)
+  end
+  if opts.recolor ~= nil and not vim.tbl_contains({ "off", "invert", "colorscheme" }, opts.recolor) then
+    fail("recolor", '"off", "invert" or "colorscheme"', opts.recolor)
   end
   if opts.reload_delay ~= nil and (type(opts.reload_delay) ~= "number" or opts.reload_delay < 0) then
     fail("reload_delay", "a non-negative number", opts.reload_delay)
