@@ -92,6 +92,7 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field watcher? PdfView.Watcher
 ---@field mapped? string[] the keys mapped in the buffer by `actions.set_keymaps`
 ---@field waiting_for_ui? boolean the first render is waiting for a UI to attach
+---@field unlocking? boolean the password prompt of a password-protected document is open
 ---@field closed boolean
 
 ---@type table<integer, PdfView.Session>

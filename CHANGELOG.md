@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A password-protected PDF could not be opened. It now asks for the password with `inputsecret()` and keeps it until
+  Neovim exits; a wrong one asks again. The password reaches `mutool` on standard input, so `ps` never shows it.
 - EPUB, FB2 and MOBI books showed on small fixed pages of MuPDF's default layout. They are now laid out to fill the
   window, with text about the size of the terminal's (`text_scale` changes it), and laid out again when the window
   changes size, staying at the same point of the text; search matches and the outline follow the new pages.

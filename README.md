@@ -105,6 +105,10 @@ A PDF opens where you left it: the page, fit and zoom of the last 100 PDFs are k
 `stdpath("state")/pdf-view/positions.json`, so this survives restarting Neovim. `remember_position = false` turns it
 off.
 
+A password-protected PDF asks for its password when it opens, and the password is kept until Neovim exits, so
+reopening the PDF does not ask again. It reaches `mutool` on standard input, never on a command line where `ps` would
+show it. Cancel the prompt to leave the PDF locked, and `:edit` to be asked again.
+
 ### Keys
 
 All are buffer-local and normal mode. The keys that move, zoom or step between matches take a count.
