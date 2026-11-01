@@ -360,6 +360,28 @@ describe("mupdf", function()
     eq("string", type(err))
   end)
 
+  describe("a password-protected document", function()
+    local locked = dir .. "/locked.pdf"
+    local made = vim
+      .system({ "mutool", "clean", "-E", "aes-256", "-U", "secret", "-O", "owner", pdf, locked }, { text = true })
+      :wait()
+    assert(made.code == 0, made.stderr)
+
+    it("is reported as such instead of being read", function()
+      local err = await(function(cb)
+        mupdf.info(locked, 1, cb)
+      end)
+      eq("this PDF is password-protected", err)
+    end)
+
+    it("reports mutool's error rather than its closing summary", function()
+      local err = await(function(cb)
+        mupdf.render(locked, 1, 40, 40, dir .. "/locked.png", cb)
+      end)
+      eq("cannot authenticate password: " .. locked, err)
+    end)
+  end)
+
   it("reports a missing mutool instead of throwing", function()
     config.setup({ mutool = "definitely-not-mutool" })
     local err = await(function(cb)
