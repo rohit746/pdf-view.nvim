@@ -171,4 +171,29 @@ function M.viewport(page_w, page_h, win_cols, win_rows, cell_w, cell_h, zoom, cx
   }
 end
 
+--- Text size, in points, that reflowable documents are laid out with.
+M.REFLOW_EM = 12
+--- How many pixels of a terminal cell's height one point of text takes at `text_scale` 1: twelve-point text is then
+--- about as tall as the terminal's own.
+local REFLOW_POINTS_PER_CELL = 14
+--- The smallest side of a reflowed page, in points: smaller pages would hold a word or two each.
+local REFLOW_MIN_SIDE = 72
+
+--- The page a reflowable document (EPUB, FB2, MOBI) is laid out on in a window of `win_cols` x `win_rows` cells: as
+--- large as the window, so that a fitted page fills it, with text `text_scale` times the size of the terminal's.
+---@param win_cols integer
+---@param win_rows integer
+---@param cell_w number
+---@param cell_h number
+---@param text_scale number
+---@return PdfView.Layout
+function M.reflow(win_cols, win_rows, cell_w, cell_h, text_scale)
+  local cols = math.max(1, math.min(win_cols, M.MAX_CELLS))
+  local rows = math.max(1, math.min(win_rows, M.MAX_CELLS))
+  local points_per_pixel = REFLOW_POINTS_PER_CELL / (cell_h * text_scale)
+  local width = math.max(REFLOW_MIN_SIDE, round(cols * cell_w * points_per_pixel))
+  local height = math.max(REFLOW_MIN_SIDE, round(rows * cell_h * points_per_pixel))
+  return { width, height, M.REFLOW_EM }
+end
+
 return M

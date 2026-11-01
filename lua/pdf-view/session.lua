@@ -47,6 +47,9 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field page integer page on screen (or being shown)
 ---@field target? integer page requested by the latest navigation key, until it is on screen
 ---@field count? integer number of pages
+---@field reflowable? boolean the document is laid out to the window (EPUB, FB2, MOBI)
+---@field laid_out? { key: string, count: integer } the layout of the page on screen and the page count it gives, for
+--- a reflowable document
 ---@field mode PdfView.FitMode what zoom 1 means: the whole page, the page as wide / as tall as the window, or the
 --- part of the page with content on it
 ---@field zoom number multiplies the fitted size: 1 is as fitted, 2 is twice that

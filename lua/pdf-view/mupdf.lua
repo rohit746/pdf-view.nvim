@@ -23,6 +23,7 @@ local CONTENT_MARGIN = 8
 ---@field page integer the requested page, clamped to the document
 ---@field width number page width in points
 ---@field height number page height in points
+---@field reflowable boolean the document is laid out to a page size (EPUB, FB2, MOBI), so its pages follow the layout
 ---@field content? number[] `{ x0, y0, x1, y1 }`: the part of the page with something drawn on it, in points from the
 --- page's top-left corner, with a margin of `CONTENT_MARGIN` (the whole page when it is blank). Only read when asked for
 
@@ -95,6 +96,13 @@ end
 --- One worker per document: a `mutool run worker.js` that keeps the document open between requests.
 ---@type table<string, PdfView.Worker>
 local workers = {}
+
+---@alias PdfView.Layout number[] `{ width, height, em }`: the page size in points and the text size a reflowable
+--- document is laid out with
+
+--- The layout of each document, as set by `set_layout()`: every request about the document carries it.
+---@type table<string, PdfView.Layout>
+local layouts = {}
 local next_request = 0
 
 -- longest line `worker.js` is sent: its readline() reads at most 255 bytes
@@ -297,6 +305,7 @@ local function ask(path, request, cb)
     workers[path] = w
   end
   next_request = next_request + 1
+  table.insert(request, 1, layouts[path] or vim.NIL)
   table.insert(request, 1, next_request)
   ---@type PdfView.Request
   local entry = { id = next_request, lines = encode(request), cb = cb }
@@ -332,6 +341,7 @@ end
 --- Stop the worker of `path`, if it has one, and drop what it was asked. The next request starts another.
 ---@param path string
 function M.release(path)
+  layouts[path] = nil
   local w = workers[path]
   if not w then
     return
@@ -343,6 +353,26 @@ function M.release(path)
   for _, request in ipairs(queue) do
     finish(request, "mutool was killed (signal 15)")
   end
+end
+
+--- Lay `path` out with `layout` from the next request on, if it is a reflowable document. Other documents ignore it.
+---@param path string
+---@param layout PdfView.Layout
+function M.set_layout(path, layout)
+  layouts[path] = layout
+end
+
+--- The layout of `path` as script arguments: none until one is set.
+---@param path string
+---@return string[]
+local function layout_args(path)
+  local layout = layouts[path]
+  if not layout then
+    return {}
+  end
+  return vim.tbl_map(function(value)
+    return ("%g"):format(value)
+  end, layout)
 end
 
 --- Whether `path` has a worker process running, for tests.
@@ -374,9 +404,11 @@ end
 ---@param page integer 1-based; clamped to the document
 ---@param cb fun(err?: string, info?: PdfView.PageInfo)
 ---@param content? boolean also find the part of the page that has content (`info.content`), which renders the page
+---@param of? integer `page` is a page of a reflowable document as it was laid out before, with this many pages: the
+--- answer is the page that now starts at the same point of the text
 ---@return PdfView.Job
-function M.info(path, page, cb, content)
-  local request = { "info", math.min(math.max(math.floor(page), 1), MAX_PAGE), content == true }
+function M.info(path, page, cb, content, of)
+  local request = { "info", math.min(math.max(math.floor(page), 1), MAX_PAGE), content == true, of or vim.NIL }
   return ask(path, request, function(err, result)
     if err then
       return cb(err)
@@ -387,9 +419,9 @@ function M.info(path, page, cb, content)
     if not count or count < 1 or not resolved or not width or not height or width <= 0 or height <= 0 then
       return cb("could not read the page geometry (is mutool built with JavaScript support?)")
     end
-    local info = { count = count, page = resolved, width = width, height = height }
+    local info = { count = count, page = resolved, width = width, height = height, reflowable = fields[5] == "1" }
     if content then
-      local x0, y0, x1, y1 = tonumber(fields[5]), tonumber(fields[6]), tonumber(fields[7]), tonumber(fields[8])
+      local x0, y0, x1, y1 = tonumber(fields[6]), tonumber(fields[7]), tonumber(fields[8]), tonumber(fields[9])
       if not (x0 and y0 and x1 and y1 and x1 > x0 and y1 > y0) then
         x0, y0, x1, y1 = 0, 0, width, height
       end
@@ -459,7 +491,7 @@ end
 ---@param cb fun(err?: string, matches?: PdfView.Match[], truncated?: boolean)
 ---@return PdfView.Job
 function M.search(path, needle, limit, cb)
-  local cmd = { config.options.mutool, "run", SEARCH, path, needle, ("%d"):format(limit) }
+  local cmd = { config.options.mutool, "run", SEARCH, path, needle, ("%d"):format(limit), unpack(layout_args(path)) }
   return run(cmd, function(result)
     local err = failure(result)
     if err then
@@ -494,7 +526,7 @@ end
 ---@param cb fun(err?: string, entries?: PdfView.OutlineEntry[])
 ---@return PdfView.Job
 function M.outline(path, cb)
-  return run({ config.options.mutool, "run", OUTLINE, path }, function(result)
+  return run({ config.options.mutool, "run", OUTLINE, path, unpack(layout_args(path)) }, function(result)
     local err = failure(result)
     if err then
       return cb(err)

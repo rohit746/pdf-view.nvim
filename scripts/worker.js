@@ -3,17 +3,23 @@
 //
 // Usage: mutool run worker.js <file>
 //
-// A request is a JSON array, [<id>, <command>, <arguments>...], sent as lines of at most 200 bytes (readline() reads
+// A request is a JSON array, [<id>, <layout>, <command>, <arguments>...], sent as lines of at most 200 bytes (readline() reads
 // at most 255): every line but the last starts with "+", the last with ":". The answer is one line,
 // "@<id> ok <result>" or "@<id> error <message>". print() does not flush standard output, so every answer is followed
 // by a line of padding longer than the stdio buffer, which pushes the answer out of it. The worker exits at the end
 // of its input.
 //
+// <layout> is [<width>, <height>, <em>] or null. A reflowable document (EPUB, FB2, MOBI) is laid out on pages of
+// <width> x <height> points with <em> point text before the command runs, and again whenever the layout changes; its
+// page count and every page change with it. Other documents ignore it. null keeps MuPDF's own layout.
+//
 // Commands:
 //
-//   ["info", <page>, <content>]
-//     "<page count> <resolved page> <width> <height>", followed by " <x0> <y0> <x1> <y1>" when <content> is true.
-//     <page> is 1-based and clamped to the document, so a huge number means "the last page". The size is the page's
+//   ["info", <page>, <content>, <of>]
+//     "<page count> <resolved page> <width> <height> <reflowable>", followed by " <x0> <y0> <x1> <y1>" when <content>
+//     is true. <reflowable> is 1 for a reflowable document, else 0. <page> is 1-based and clamped to the document, so
+//     a huge number means "the last page". When <of> is a number, <page> is a page of a document of <of> pages (as it
+//     was laid out before) and stands for the page that starts at the same point of the text now. The size is the page's
 //     bounds in points after /Rotate, inherited boxes, /CropBox and /UserUnit have been applied. (<x0>, <y0>, <x1>,
 //     <y1>) is the rectangle, in points from the page's top-left corner, that holds everything drawn on the page that
 //     is not white: text, images and vector graphics alike. It is found by rendering the page small and scanning for
@@ -49,6 +55,7 @@ var KEEP = 3;
 
 var doc = null;
 var kept = [];
+var laidOut = "";
 
 function openDocument() {
   if (!doc) {
@@ -59,6 +66,20 @@ function openDocument() {
     doc = opened;
   }
   return doc;
+}
+
+// Lay the document out as <layout> says, if it is reflowable and was laid out differently.
+function layout(size) {
+  var d = openDocument();
+  if (!size || !d.isReflowable()) {
+    return;
+  }
+  var key = size.join(" ");
+  if (key !== laidOut) {
+    d.layout(size[0], size[1], size[2]);
+    laidOut = key;
+    kept = []; // the display lists are of the old pages
+  }
 }
 
 // The page (1-based, clamped to the document), its bounds and its display list.
@@ -123,12 +144,17 @@ function contentBox(entry, width, height) {
   return [left / scale, top / scale, Math.min(width, (right + 1) / scale), Math.min(height, (bottom + 1) / scale)];
 }
 
-function info(number, content) {
+function info(number, content, of) {
+  if (of > 0) {
+    var count = openDocument().countPages();
+    number = Math.floor(((Math.min(number, of) - 1) * count) / of) + 1;
+  }
   var entry = load(number);
   var bounds = entry.bounds;
   var width = bounds[2] - bounds[0];
   var height = bounds[3] - bounds[1];
-  var line = entry.count + " " + entry.number + " " + width + " " + height;
+  var reflowable = doc.isReflowable() ? 1 : 0;
+  var line = entry.count + " " + entry.number + " " + width + " " + height + " " + reflowable;
   if (content) {
     line += " " + contentBox(entry, width, height).join(" ");
   }
@@ -206,9 +232,11 @@ function render(number, scaleX, scaleY, x, y, width, height, out, highlights) {
 }
 
 function answer(request) {
+  layout(request[1]);
+  request = [request[0]].concat(request.slice(2));
   switch (request[1]) {
     case "info":
-      return info(request[2], request[3]);
+      return info(request[2], request[3], request[4]);
     case "draw":
       var bounds = load(request[2]).bounds;
       var sx = request[3] / (bounds[2] - bounds[0]);

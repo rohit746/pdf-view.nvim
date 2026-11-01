@@ -1,10 +1,14 @@
 // Prints a document's outline (bookmarks) as a flat list in reading order.
 //
-// Usage: mutool run outline.js <file>
+// Usage: mutool run outline.js <file> [<width> <height> <em>]
 //
 // One line per entry: "<depth>\t<page>\t<title>", with depth 0 for top-level entries and page 1-based. Entries
 // that do not point at a page of the document are skipped. A document without an outline prints nothing.
 var doc = Document.openDocument(scriptArgs[0]);
+// a reflowable document is laid out as worker.js lays it out, so that the pages are the same
+if (scriptArgs.length >= 4 && doc.isReflowable()) {
+  doc.layout(parseFloat(scriptArgs[1]), parseFloat(scriptArgs[2]), parseFloat(scriptArgs[3]));
+}
 var count = doc.countPages();
 
 function walk(items, depth) {

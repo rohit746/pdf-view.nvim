@@ -1388,6 +1388,57 @@ describe("viewer search", function()
   end)
 end)
 
+describe("viewer reflowable documents", function()
+  setup()
+
+  local layout = require("pdf-view.layout")
+
+  ---@return number[]
+  local function window_layout()
+    local info = vim.fn.getwininfo(vim.api.nvim_get_current_win())[1]
+    return layout.reflow(info.width - info.textoff, info.height, 10, 20, 1)
+  end
+
+  it("lays an FB2 book out to fill the window", function()
+    reset()
+    local book = dir .. "/fill.FB2"
+    fixture.write_fb2(book, { "One", "Two" }, 20)
+    local s = open(book)
+    eq(true, s.reflowable)
+    local size = window_layout()
+    eq({ size[1], size[2] }, { s.geom.w, s.geom.h })
+    local cols, rows = vim.fn.getwininfo(vim.api.nvim_get_current_win())[1].width, vim.api.nvim_win_get_height(0) - 1
+    local fit = s.grid_key and vim.split(s.grid_key, "x") or {}
+    eq({ tostring(cols), tostring(rows) }, { fit[1], fit[2] }, "the page covers the whole window")
+  end)
+
+  it("lays the book out again when the window changes, at the same point of the text, and searches again", function()
+    reset()
+    local book = dir .. "/resize.fb2"
+    fixture.write_fb2(book, { "One", "Two", "Three" }, 30)
+    local s = open(book)
+    answering("Chapter 3 paragraph 1 ", function()
+      press("/")
+      searched(s)
+    end)
+    local before = { page = s.page, count = s.count, key = s.laid_out.key, match = s.search.matches[1].page }
+    truthy(before.page > 1, "the match is past the first page")
+
+    vim.cmd("vsplit")
+    wait_for(function()
+      return s.laid_out and s.laid_out.key ~= before.key and s.job == nil and s.search_job == nil
+    end, "the new layout")
+    local size = window_layout()
+    eq({ size[1], size[2] }, { s.geom.w, s.geom.h })
+    truthy(s.count > before.count, ("narrower pages, more of them: %d, %d"):format(before.count, s.count))
+    eq(math.floor((before.page - 1) * s.count / before.count) + 1, s.page)
+    truthy(s.search.matches[1].page > before.match, "the match moved to a later page")
+    press("n")
+    searched(s)
+    eq(s.search.matches[1].page, s.page, "n goes to where the match is now")
+  end)
+end)
+
 describe("viewer outline", function()
   setup()
 

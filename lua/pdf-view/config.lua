@@ -52,6 +52,8 @@ local M = {}
 ---@field max_zoom number largest zoom, relative to the fit-to-window size
 ---@field pan_step number how far one scroll key moves, as a fraction of the window (0 to 1]
 ---@field search_limit integer stop collecting matches after this many
+---@field text_scale number size of the text of reflowable documents (EPUB, FB2, MOBI), which are laid out to fit the
+--- window, relative to the terminal's text
 ---@field highlight { match: string, current: string } `#rrggbb` colours multiplied onto search matches
 ---@field cell_size? number[] `{ width, height }` of a terminal cell in pixels, when it cannot be detected
 ---@field keymaps PdfView.Keymaps|false buffer-local normal mode mappings, `false` for none
@@ -59,7 +61,7 @@ local M = {}
 ---@type PdfView.Config
 local defaults = {
   auto_open = true,
-  extensions = { "pdf", "cbz", "xps" },
+  extensions = { "pdf", "cbz", "xps", "epub", "fb2", "mobi" },
   live_reload = true,
   reload_delay = 200,
   winbar = true,
@@ -75,6 +77,7 @@ local defaults = {
   max_zoom = 8,
   pan_step = 0.2,
   search_limit = 5000,
+  text_scale = 1,
   highlight = { match = "#ffe14d", current = "#ff8c1a" },
   cell_size = nil,
   keymaps = {
@@ -204,6 +207,9 @@ local function validate(opts)
   end
   if opts.search_limit ~= nil then
     check_positive_integer("search_limit", opts.search_limit)
+  end
+  if opts.text_scale ~= nil and (type(opts.text_scale) ~= "number" or opts.text_scale <= 0) then
+    fail("text_scale", "a positive number", opts.text_scale)
   end
   if opts.highlight ~= nil then
     if type(opts.highlight) ~= "table" then
