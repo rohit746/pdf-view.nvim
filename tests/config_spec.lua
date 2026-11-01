@@ -83,6 +83,12 @@ describe("config", function()
     rejects({ transmission = "carrier-pigeon" }, "`transmission`")
   end)
 
+  it("rejects an unknown placement mode", function()
+    rejects({ placement = "telepathy" }, "`placement`")
+    eq("positioned", config.setup({ placement = "positioned" }).placement)
+    eq("auto", config.setup().placement)
+  end)
+
   it("rejects a malformed cell_size", function()
     rejects({ cell_size = { 10 } }, "`cell_size`")
   end)

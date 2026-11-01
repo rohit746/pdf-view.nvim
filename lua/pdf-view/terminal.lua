@@ -10,6 +10,23 @@ function M.in_tmux()
   return (vim.env.TMUX or "") ~= ""
 end
 
+--- zellij sets `$ZELLIJ` in its panes. It implements the Kitty graphics protocol itself (0.45 and newer) rather than
+--- passing it through, and it does not support Unicode placeholders.
+---@return boolean
+function M.in_zellij()
+  return (vim.env.ZELLIJ or "") ~= ""
+end
+
+--- How pages are put on screen: as Unicode placeholder cells, or as placements at the screen position of the window.
+---@return "placeholders"|"positioned"
+function M.placement()
+  local mode = config.options.placement
+  if mode ~= "auto" then
+    return mode
+  end
+  return M.in_zellij() and "positioned" or "placeholders"
+end
+
 ---@return boolean
 function M.ui_attached()
   return #vim.api.nvim_list_uis() > 0
@@ -94,6 +111,8 @@ function M.detect()
     end
   end
 
+  -- zellij passes the outer terminal's $TERM, $TERM_PROGRAM, $KITTY_WINDOW_ID and $GHOSTTY_RESOURCES_DIR on to its
+  -- panes, so the checks below see through it
   local name
   if M.in_tmux() then
     -- inside tmux $TERM says nothing about the outer terminal, but the attached client knows
@@ -120,11 +139,12 @@ function M.check()
     return true
   end
   local term = M.detect().term
+  local needs = M.placement() == "positioned" and "Kitty graphics" or "Kitty graphics and Unicode placeholder"
   return false,
     (
-      "pdf-view: %s does not look like a terminal with Kitty graphics and Unicode placeholder support "
-      .. "(kitty, Ghostty). Set `force = true` in setup() to try anyway."
-    ):format(term ~= "" and ("`" .. term .. "`") or "this terminal")
+      "pdf-view: %s does not look like a terminal with %s support (kitty, Ghostty). "
+      .. "Set `force = true` in setup() to try anyway."
+    ):format(term ~= "" and ("`" .. term .. "`") or "this terminal", needs)
 end
 
 local prepared
@@ -151,6 +171,13 @@ function M.transmission()
     return "direct"
   end
   return "file"
+end
+
+--- Version of the zellij on $PATH, or nil when it cannot be told.
+---@return vim.Version?
+function M.zellij_version()
+  local out = capture({ "zellij", "--version" })
+  return out and vim.version.parse(out:match("%d+%.%d+%.%d+") or "") or nil
 end
 
 --- tmux's effective `allow-passthrough` for this pane ("on", "all", "off"), or nil outside tmux.

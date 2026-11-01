@@ -33,7 +33,9 @@ local M = {}
 ---@field mutool string mutool executable
 ---@field transmission "auto"|"file"|"direct" how images reach the terminal ("auto" is "direct" over SSH)
 ---@field tmux_passthrough boolean let the plugin run `tmux set -p allow-passthrough on` for its pane
----@field force boolean skip terminal detection and assume Kitty graphics + Unicode placeholders work
+---@field placement "auto"|"placeholders"|"positioned" how the page is put on screen: as Unicode placeholder text,
+--- or at the screen position of its window (for zellij, which has no placeholders). "auto" is "positioned" in zellij
+---@field force boolean skip terminal detection and assume the Kitty graphics protocol works
 ---@field max_pixels integer cap for either side of a rendered page image (zoomed views are window-sized)
 ---@field zoom_step number factor of one zoom step, greater than 1
 ---@field max_zoom number largest zoom, relative to the fit-to-window size
@@ -53,6 +55,7 @@ local defaults = {
   mutool = "mutool",
   transmission = "auto",
   tmux_passthrough = true,
+  placement = "auto",
   force = false,
   max_pixels = 4096,
   zoom_step = 1.25,
@@ -148,6 +151,9 @@ local function validate(opts)
   end
   if opts.transmission ~= nil and not vim.tbl_contains({ "auto", "file", "direct" }, opts.transmission) then
     fail("transmission", '"auto", "file" or "direct"', opts.transmission)
+  end
+  if opts.placement ~= nil and not vim.tbl_contains({ "auto", "placeholders", "positioned" }, opts.placement) then
+    fail("placement", '"auto", "placeholders" or "positioned"', opts.placement)
   end
   if opts.reload_delay ~= nil and (type(opts.reload_delay) ~= "number" or opts.reload_delay < 0) then
     fail("reload_delay", "a non-negative number", opts.reload_delay)

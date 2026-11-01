@@ -22,6 +22,7 @@ kitty.write = function(data)
   writes[#writes + 1] = data
 end
 vim.env.TMUX = nil
+vim.env.ZELLIJ = nil
 
 local ns = vim.api.nvim_create_namespace("pdf-view")
 local dir = fixture.tmpdir()
@@ -40,6 +41,7 @@ local function reset()
   vim.cmd("silent! only")
   vim.cmd("silent! %bwipeout!")
   writes = {}
+  vim.v.scrollstart = "" -- in zellij without replies (Neovim 0.11) a scrolled screen sends the page again
 end
 
 ---@return PdfView.Session
@@ -1412,4 +1414,268 @@ describe("viewer robustness", function()
       truthy(#asked > 1, "asked again for the new file")
     end)
   end)
+end)
+
+--- Placements at a screen position in the latest write that has any: `{ row, col, keys }`, rows and columns 1-based.
+local function last_batch()
+  for index = #writes, 1, -1 do
+    local list = {}
+    for row, col, keys in writes[index]:gmatch("\27%[(%d+);(%d+)H\27_G([^;\27]*)\27\\") do
+      local parsed = {}
+      for key, value in keys:gmatch("(%a)=(-?%w+)") do
+        parsed[key] = tonumber(value) or value
+      end
+      list[#list + 1] = { row = tonumber(row), col = tonumber(col), keys = parsed }
+    end
+    if #list > 0 then
+      return list, index
+    end
+  end
+  return {}, 0
+end
+
+--- Index of the first write that contains `needle`, or nil.
+local function write_index(needle)
+  for index, data in ipairs(writes) do
+    if data:find(needle, 1, true) then
+      return index
+    end
+  end
+end
+
+--- 0-based screen rectangle of the page image.
+local function image_rect(s, win)
+  local origin = vim.fn.screenpos(win or 0, 1, 1)
+  local pic = s.picture
+  return { row = origin.row - 1 + pic.row, col = origin.col - 1 + pic.col, rows = pic.rows, cols = pic.cols }
+end
+
+local function overlaps(a, b)
+  return a.row < b.row + b.rows and b.row < a.row + a.rows and a.col < b.col + b.cols and b.col < a.col + a.cols
+end
+
+describe("viewer in zellij", function()
+  setup({ placement = "positioned" })
+  local quiet = vim.fn.has("nvim-0.12") == 1 and 1 or 2
+
+  it("leaves the buffer blank and places the page at its window's position", function()
+    reset()
+    local s = open(make("zellij-basic", pages(2)))
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    eq(text_rows(), #lines, "as tall as the window, so it cannot scroll")
+    eq({ "" }, vim.fn.uniq(lines), "no placeholders")
+    eq(false, sent("U=1"), "no virtual placement")
+
+    local batch = last_batch()
+    eq(1, #batch)
+    local pic, image = s.picture, image_rect(s)
+    eq({ image.row + 1, image.col + 1 }, { batch[1].row, batch[1].col })
+    eq({
+      C = 1,
+      a = "p",
+      c = pic.cols,
+      h = pic.height,
+      i = s.ids[s.slot],
+      p = 1,
+      q = quiet,
+      r = pic.rows,
+      w = pic.width,
+      x = 0,
+      y = 0,
+      z = -1,
+    }, batch[1].keys)
+    truthy(pic.col > 0, "centred: " .. pic.col)
+    truthy(writes[#writes]:find("^\0277") and writes[#writes]:find("\0278$"), "the cursor is saved and restored")
+  end)
+
+  it("follows its window when another one opens above it", function()
+    reset()
+    local s = open(make("zellij-split", pages(1)))
+    local win = vim.api.nvim_get_current_win()
+    vim.cmd("aboveleft new")
+    wait_for(function()
+      local batch = last_batch()
+      return s.job == nil and #batch == 1 and batch[1].row == image_rect(s, win).row + 1
+    end, "the page placed in the moved window")
+  end)
+
+  it("cuts the page around a floating window and makes it whole again when it closes", function()
+    reset()
+    local s = open(make("zellij-float", pages(1)))
+    local image = image_rect(s)
+    local float = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, {
+      relative = "editor",
+      row = image.row + 2,
+      col = image.col + 3,
+      width = 4,
+      height = 2,
+      border = "single",
+    })
+    local hole = { row = image.row + 2, col = image.col + 3, rows = 4, cols = 6 } -- the border included
+    local before = #writes
+    vim.cmd.redraw()
+    wait_for(function()
+      return select(2, last_batch()) > before
+    end, "the page placed around the float")
+    local batch = last_batch()
+    truthy(#batch > 1, "in pieces")
+    local area, pic = 0, s.picture
+    for _, piece in ipairs(batch) do
+      local rect = { row = piece.row - 1, col = piece.col - 1, rows = piece.keys.r, cols = piece.keys.c }
+      eq(false, overlaps(rect, hole), "a piece overlaps the float: " .. vim.inspect(piece))
+      area = area + rect.rows * rect.cols
+      -- each piece shows the part of the page that is under it
+      eq((rect.col - image.col) * pic.width / pic.cols, piece.keys.x)
+      eq((rect.row - image.row) * pic.height / pic.rows, piece.keys.y)
+    end
+    eq(image.rows * image.cols - hole.rows * hole.cols, area, "everything else is covered")
+
+    local sent_before = #transmitted()
+    vim.api.nvim_win_set_config(float, { relative = "editor", row = image.row + 3, col = image.col + 3 })
+    before = #writes
+    vim.cmd.redraw()
+    wait_for(function()
+      return select(2, last_batch()) > before
+    end, "the page placed around the moved float")
+    eq(sent_before + 1, #transmitted(), "zellij keeps one copy of a cut piece per size: the page is sent again")
+
+    local cut_ids = {}
+    for _, piece in ipairs(last_batch()) do
+      cut_ids[#cut_ids + 1] = piece.keys.p
+    end
+    before = #writes
+    vim.api.nvim_win_close(float, true)
+    vim.cmd.redraw()
+    wait_for(function()
+      return select(2, last_batch()) > before
+    end, "the page placed again")
+    local whole = last_batch()
+    eq(1, #whole)
+    for _, id in ipairs(cut_ids) do
+      -- zellij would leave a piece on the host terminal if its placement id went on to show the whole page
+      truthy(id ~= whole[1].keys.p, "the whole page has a placement id of its own")
+      truthy(sent(("a=d,d=i,i=%d,p=%d,q=2"):format(s.ids[s.slot], id)), "removed piece " .. id)
+    end
+  end)
+
+  it("takes the page away while its window shows another buffer, and sends it again after", function()
+    reset()
+    local s = open(make("zellij-hide", pages(1)))
+    local id, path = s.ids[s.slot], transmitted()[1]
+    writes = {}
+    vim.cmd.enew()
+    vim.cmd.redraw()
+    wait_for(function()
+      return sent(("a=d,d=i,i=%d,q=2"):format(id))
+    end, "the page taken away")
+    eq(true, s.lost, "zellij frees an image with its last placement")
+
+    writes = {}
+    vim.cmd.buffer(s.buf)
+    vim.cmd.redraw()
+    wait_for(function()
+      return #last_batch() == 1
+    end, "the page placed again")
+    eq({ path }, transmitted(), "sent again first")
+  end)
+
+  it("takes the page away in another tab page", function()
+    reset()
+    local s = open(make("zellij-tab", pages(1)))
+    local id = s.ids[s.slot]
+    writes = {}
+    vim.cmd.tabnew()
+    vim.cmd.redraw()
+    wait_for(function()
+      return sent(("a=d,d=i,i=%d,q=2"):format(id))
+    end, "the page taken away")
+    writes = {}
+    vim.cmd.tabprevious()
+    vim.cmd.redraw()
+    wait_for(function()
+      return #last_batch() == 1
+    end, "the page placed again")
+    vim.cmd("silent! tabonly")
+  end)
+
+  it("places the page again after its window is redrawn, without sending it again", function()
+    reset()
+    open(make("zellij-redraw", pages(1)))
+    writes = {}
+    vim.cmd("redraw!")
+    wait_for(function()
+      return #last_batch() == 1
+    end, "the page placed again")
+    eq({}, transmitted())
+  end)
+
+  it("removes the previous page only after the next one is placed", function()
+    reset()
+    local s = open(make("zellij-turn", pages(2)))
+    local old = s.ids[s.slot]
+    writes = {}
+    press("j")
+    on_page(s, 2)
+    local new = s.ids[s.slot]
+    local placed = write_index(("i=%d,p=1"):format(new))
+    local removed = write_index(("a=d,d=I,i=%d"):format(old))
+    truthy(placed and removed and placed < removed, ("placed at %s, removed at %s"):format(placed, removed))
+  end)
+
+  it("takes the page away for a message", function()
+    reset()
+    local s = open(make("zellij-message", pages(1)))
+    local id = s.ids[s.slot]
+    writes = {}
+    require("pdf-view.session").display_message(s, vim.api.nvim_get_current_win(), "pdf-view: a message")
+    truthy(sent(("a=d,d=i,i=%d,q=2"):format(id)))
+    eq(nil, s.picture)
+  end)
+
+  it("takes a message that scrolled the screen to have dropped the page, when replies cannot be read", function()
+    reset()
+    local positioned = require("pdf-view.positioned")
+    local replies = positioned.replies
+    positioned.replies = false -- as on Neovim 0.11
+    local ok, err = pcall(function()
+      local s = open(make("zellij-scrolled", pages(1)))
+      local path = transmitted()[1]
+      eq(2, last_batch()[1].keys.q, "no replies asked for")
+      writes = {}
+      vim.v.scrollstart = "Unknown" -- what a message that scrolls the screen leaves behind
+      vim.cmd("redraw!")
+      wait_for(function()
+        return #transmitted() == 1 and #last_batch() == 1
+      end, "sent and placed again")
+      eq({ path }, transmitted())
+      eq("", vim.v.scrollstart, "ready for the next scroll")
+      eq(false, s.lost)
+    end)
+    positioned.replies = replies
+    if not ok then
+      error(err, 0)
+    end
+  end)
+
+  if vim.fn.has("nvim-0.12") == 1 then
+    it("sends the page again when the terminal says it lost it, once", function()
+      reset()
+      local s = open(make("zellij-lost", pages(1)))
+      local id, path = s.ids[s.slot], transmitted()[1]
+      local reply = ("\27_Gi=%d,p=1;ENOENT:unknown image id\27\\"):format(id)
+      writes = {}
+      vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = reply } })
+      wait_for(function()
+        return #transmitted() == 1 and #last_batch() == 1
+      end, "sent and placed again")
+      eq({ path }, transmitted())
+
+      writes = {}
+      vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = reply } })
+      vim.wait(100)
+      eq({}, transmitted(), "a terminal that cannot keep the image is not flooded with it")
+    end)
+  end
+
+  setup()
 end)

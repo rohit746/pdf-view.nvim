@@ -3,6 +3,7 @@
 local config = require("pdf-view.config")
 local cursor = require("pdf-view.cursor")
 local kitty = require("pdf-view.kitty")
+local positioned = require("pdf-view.positioned")
 local search = require("pdf-view.search")
 
 local M = {}
@@ -64,6 +65,12 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field requested_stamp? string file stamp of the latest render request
 ---@field grid_key? string
 ---@field grid? PdfView.Placeholders
+---@field picture? PdfView.Picture the image on screen, when it is placed at the window's position (zellij)
+---@field placed? { id: integer, count: integer, key: string, base: integer } the placements of `picture` the
+--- terminal has: ids `base + 1` to `base + count`
+---@field lost? boolean the terminal no longer has `picture`: send it again before placing it
+---@field dirty? boolean the screen may have moved or dropped the placements: place them again
+---@field cut_key? string the last placements of `picture` that were cut around a float, since it was sent
 ---@field watcher? PdfView.Watcher
 ---@field waiting_for_ui? boolean the first render is waiting for a UI to attach
 ---@field closed boolean
@@ -316,6 +323,7 @@ end
 ---@param win integer
 ---@param text string
 local function display_message(s, win, text)
+  positioned.clear(s)
   vim.api.nvim_buf_clear_namespace(s.buf, ns, 0, -1)
   s.grid_key, s.grid = nil, nil
   -- the window does not wrap its lines (that would tear a page apart), so the message is wrapped here
@@ -345,6 +353,7 @@ local function destroy(s)
       kitty.send(kitty.delete(id))
     end
   end
+  positioned.forget(s)
   purge_cache(s)
   cursor.show(s.buf)
   sessions[s.buf] = nil

@@ -22,7 +22,8 @@ LaTeX or Typst build, say — the page refreshes by itself.
 
 - Pages are rendered by [MuPDF](https://mupdf.com)'s `mutool` and drawn with the
   [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) using Unicode placeholders, so the
-  image behaves like text: it follows splits, tabs, resizes and works inside tmux.
+  image behaves like text: it follows splits, tabs, resizes and works inside tmux. zellij has no placeholders, so
+  there the page is placed at its window's position instead ([zellij](#zellij)).
 - No dependency on other plugins, ImageMagick or Ghostscript.
 - Opening a PDF never reads its bytes into a buffer, and `:w` can never overwrite it.
 
@@ -34,7 +35,8 @@ LaTeX or Typst build, say — the page refreshes by itself.
 
 ## Requirements
 
-- Neovim 0.11 or newer, with `termguicolors` (the image id travels in a 24-bit foreground colour).
+- Neovim 0.11 or newer, with `termguicolors` (the image id travels in a 24-bit foreground colour; zellij does not need
+  it).
 - `mutool` from MuPDF, built with JavaScript support (the Homebrew `mupdf`, Debian/Ubuntu and Arch `mupdf-tools`
   packages are):
   `brew install mupdf` · `apt install mupdf-tools` · `pacman -S mupdf-tools`
@@ -42,6 +44,7 @@ LaTeX or Typst build, say — the page refreshes by itself.
   [Ghostty](https://ghostty.org). WezTerm and iTerm2 do not implement placeholders.
 - Inside tmux (3.3a or newer): nothing to configure, the plugin runs `tmux set -p allow-passthrough on` for its own
   pane. To manage it yourself, set `tmux_passthrough = false` and add `set -g allow-passthrough on` to `tmux.conf`.
+- Inside zellij (0.45 or newer): nothing to configure either. See [zellij](#zellij) for how it differs.
 
 > [!TIP]
 > Run `:checkhealth pdf-view` to verify all of this.
@@ -176,6 +179,7 @@ require("pdf-view").setup({
   mutool = "mutool",       -- executable
   transmission = "auto",   -- "file": the terminal reads the PNG itself; "direct": send the bytes (SSH). auto = SSH-aware
   tmux_passthrough = true, -- run `tmux set -p allow-passthrough on` for this pane
+  placement = "auto",      -- "placeholders"; "positioned": at the window's position. auto = positioned in zellij
   force = false,           -- skip terminal detection
   max_pixels = 4096,       -- cap for either side of a fitted page (zoomed views are window-sized anyway)
   zoom_step = 1.25,        -- factor of one zoom step
@@ -222,6 +226,30 @@ current page is re-rendered, staying on the same page number. A file that is mid
 is retried for a few seconds while the previous page stays on screen. A PDF opened through a symbolic link is followed
 to the file the link points to. `:edit` re-reads the file by hand and stays on the same page too.
 
+## zellij
+
+zellij 0.45 implements the Kitty graphics protocol itself, but not its Unicode placeholders. Inside zellij (detected
+by `$ZELLIJ`) the buffer is left blank and the page is placed at the screen position of its window instead. The plugin
+then keeps the image in step with the screen:
+
+- It is cut around floating windows and the popup menu that cover it.
+- It is taken away while its window is hidden or in another tab page, and put back after Neovim redraws the window.
+- zellij forgets an image once it has been scrolled or cleared off its screen (by a long message, or a suspended
+  Neovim), and the plugin sends the page again. Neovim 0.12 reads zellij's reply that the image is gone. Neovim 0.11
+  cannot read such replies, so there any message that scrolled the screen counts as having dropped the page.
+
+Compared with kitty or Ghostty on their own:
+
+- Turning pages is slower: zellij passes every image on to the terminal as raw pixels, about ten times the size of
+  the PNG ([zellij#5596](https://github.com/zellij-org/zellij/issues/5596), fixed in zellij's main branch).
+- When a PDF is shown in several windows of one tab page, only one of them shows the page.
+- The page is drawn under the text, so text the plugin does not cut the page around shows on top of it.
+- In zellij 0.45.1 the page is sent again whenever a float over it moves or changes size. This works around zellij
+  drawing the wrong part of a cropped image.
+
+Set `placement = "placeholders"` once your zellij supports Unicode placeholders
+([zellij#5531](https://github.com/zellij-org/zellij/pull/5531)).
+
 ## How it works
 
 1. `mutool run` reports the page count and the exact size of the page (rotation, crop box and `UserUnit` applied).
@@ -230,6 +258,9 @@ to the file the link points to. `:edit` re-reads the file by hand and stays on t
 3. The PNG is uploaded to the terminal (`a=t`) and a virtual placement is created (`a=p,U=1`).
 4. The buffer is filled with `U+10EEEE` placeholder cells whose foreground colour is the image id; the terminal paints
    the image over them.
+
+In zellij, steps 3 and 4 differ. The buffer stays blank, and the image is placed (`a=p`) at the screen position of the
+window, under the text, after moving the cursor there; see [zellij](#zellij).
 
 When zoomed, step 2 renders only the rectangle of the enlarged page that is on screen (a small script run by
 `mutool run`), so a window-sized PNG is all that is ever drawn and uploaded, however deep the zoom, and scrolling costs
@@ -252,10 +283,12 @@ scroll positions are cached.
 | Image vanished after detaching/re-attaching tmux | Press `r`: the new terminal never received the image.                                                 |
 | The PDF opens as binary text                     | The plugin loaded too late. Use `lazy = false` and make sure nothing else owns `BufReadCmd *.pdf`.    |
 | Over SSH nothing appears                         | Use a terminal that supports the protocol; images are then sent inline (`transmission = "direct"`).   |
+| Nothing appears inside zellij                    | Use zellij 0.45 or newer, without `support_kitty_graphics_protocol false`, in kitty or Ghostty.       |
 
 ## Limitations
 
-- Terminals: kitty and Ghostty (Unicode placeholders are required; WezTerm and iTerm2 do not implement them).
+- Terminals: kitty and Ghostty, on their own or inside tmux or zellij (Unicode placeholders are required outside
+  zellij; WezTerm and iTerm2 do not implement them).
 - Search is literal and ignores case; there is no regex or case-sensitive mode. It only finds text that is in the PDF,
   so scanned pages without an OCR layer have no matches.
 - A buffer shown in two windows has one layout, computed for the window you are in; the other shows the same cells.
@@ -263,7 +296,7 @@ scroll positions are cached.
 
 ## Compatibility
 
-Developed against Neovim 0.12, MuPDF 1.28 and tmux 3.7. The test suite passes on Neovim 0.11.0 and 0.12 and on MuPDF
+Developed against Neovim 0.12, MuPDF 1.28, tmux 3.7 and zellij 0.45.1. The test suite passes on Neovim 0.11.0 and 0.12 and on MuPDF
 1.23.10, 1.24, 1.25, 1.26, 1.27 and 1.28 (older MuPDF is untested), and CI runs it on Linux and macOS.
 `:checkhealth pdf-view` tells you whether your `mutool` supports everything the plugin needs.
 
@@ -283,6 +316,7 @@ lua/pdf-view/
   mupdf.lua       async wrapper around mutool
   kitty.lua       graphics protocol encoding, tmux passthrough
   placeholder.lua Unicode placeholder text
+  positioned.lua  zellij: the page placed at its window's position, kept in step with floats and redraws
   terminal.lua    terminal detection, cell size, tmux
   watch.lua       file watching
   health.lua      :checkhealth pdf-view

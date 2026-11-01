@@ -90,4 +90,20 @@ describe("kitty", function()
     -- nvim_ui_send() arrived in Neovim 0.12; before that the terminal is reached through stderr
     eq({ { original.ui_send and "ui" or vim.v.stderr, "data" } }, written)
   end)
+
+  it("places part of an image at the cursor, under the text, without moving the cursor", function()
+    eq(
+      ESC .. "_GC=1,a=p,h=40,i=9,p=2,q=2,w=30,x=10,y=20,z=-1" .. ESC .. "\\",
+      kitty.place_at(9, 2, { x = 10, y = 20, w = 30, h = 40 })
+    )
+    eq(
+      ESC .. "_GC=1,a=p,c=3,h=40,i=9,p=1,q=1,r=2,w=30,x=0,y=0,z=-1" .. ESC .. "\\",
+      kitty.place_at(9, 1, { x = 0, y = 0, w = 30, h = 40, cols = 3, rows = 2 }, 1)
+    )
+  end)
+
+  it("removes one placement or all of them and keeps the image", function()
+    eq(ESC .. "_Ga=d,d=i,i=9,p=2,q=2" .. ESC .. "\\", kitty.unplace(9, 2))
+    eq(ESC .. "_Ga=d,d=i,i=9,q=2" .. ESC .. "\\", kitty.unplace(9))
+  end)
 end)

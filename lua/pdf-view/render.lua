@@ -6,6 +6,7 @@ local kitty = require("pdf-view.kitty")
 local layout = require("pdf-view.layout")
 local mupdf = require("pdf-view.mupdf")
 local placeholder = require("pdf-view.placeholder")
+local positioned = require("pdf-view.positioned")
 local search = require("pdf-view.search")
 local session = require("pdf-view.session")
 local terminal = require("pdf-view.terminal")
@@ -58,22 +59,54 @@ local function present(s, win, png, info, fit, rows)
   end
   kitty.send(kitty.delete(id)) -- drop whatever this id held two pages ago
   kitty.send(commands)
-  kitty.send(kitty.place(id, fit.cols, fit.rows))
-  define_highlight(id)
+  s.win = win
 
-  local grid_key = table.concat({ fit.cols, fit.rows, fit.pad_left, fit.pad_top, rows }, "x")
-  if s.grid_key ~= grid_key then
-    s.grid = placeholder.build(fit.cols, fit.rows, fit.pad_left, fit.pad_top, rows)
-    s.grid_key = grid_key
-    write_buffer(s, s.grid.lines)
+  if terminal.placement() == "positioned" then
+    -- the buffer is blank, as tall as the window; the image is placed over it
+    local grid_key = "positioned:" .. rows
+    if s.grid_key ~= grid_key then
+      s.grid, s.grid_key = nil, grid_key
+      local lines = {}
+      for index = 1, rows do
+        lines[index] = ""
+      end
+      write_buffer(s, lines)
+    end
+    vim.api.nvim_buf_clear_namespace(s.buf, ns, 0, -1)
+    -- zellij gives a pane the pixel size of its cells, so a page drawn for that size needs no scaling
+    local cell = terminal.cell_size()
+    local exact = cell.source == "ioctl"
+      and math.abs(fit.width - fit.cols * cell.w) < 0.5
+      and math.abs(fit.height - fit.rows * cell.h) < 0.5
+    positioned.show(s, {
+      id = id,
+      path = png,
+      cols = fit.cols,
+      rows = fit.rows,
+      width = fit.width,
+      height = fit.height,
+      row = fit.pad_top,
+      col = fit.pad_left,
+      exact = exact,
+    })
+  else
+    kitty.send(kitty.place(id, fit.cols, fit.rows))
+    define_highlight(id)
+
+    local grid_key = table.concat({ fit.cols, fit.rows, fit.pad_left, fit.pad_top, rows }, "x")
+    if s.grid_key ~= grid_key then
+      s.grid = placeholder.build(fit.cols, fit.rows, fit.pad_left, fit.pad_top, rows)
+      s.grid_key = grid_key
+      write_buffer(s, s.grid.lines)
+    end
+    local grid = s.grid --[[@as PdfView.Placeholders]]
+    vim.api.nvim_buf_clear_namespace(s.buf, ns, 0, -1)
+    vim.api.nvim_buf_set_extmark(s.buf, ns, grid.row, grid.col, {
+      end_row = grid.end_row,
+      end_col = grid.end_col,
+      hl_group = "PdfViewImage" .. id,
+    })
   end
-  local grid = s.grid --[[@as PdfView.Placeholders]]
-  vim.api.nvim_buf_clear_namespace(s.buf, ns, 0, -1)
-  vim.api.nvim_buf_set_extmark(s.buf, ns, grid.row, grid.col, {
-    end_row = grid.end_row,
-    end_col = grid.end_col,
-    hl_group = "PdfViewImage" .. id,
-  })
 
   s.slot, s.page, s.count, s.target = slot, info.page, info.count, nil
   s.geom = { w = info.width, h = info.height }
@@ -284,6 +317,10 @@ local function schedule_relayout()
       relayout(s)
     end
   end, RESIZE_DELAY)
+end
+
+positioned.rerender = function(s)
+  show(s)
 end
 
 M.show = show

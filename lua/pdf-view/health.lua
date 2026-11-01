@@ -125,10 +125,30 @@ local function check_terminal()
     vim.health.error(
       ("terminal not recognised (TERM_PROGRAM=%s, TERM=%s)"):format(vim.env.TERM_PROGRAM or "", vim.env.TERM or ""),
       {
-        "Use a terminal with Kitty graphics and Unicode placeholder support: kitty or Ghostty.",
+        "Use kitty or Ghostty, directly or inside tmux or zellij: they have Kitty graphics and Unicode placeholders.",
         "WezTerm and iTerm2 lack Unicode placeholders. Set `force = true` to try anyway.",
       }
     )
+  end
+
+  local positioned = terminal.placement() == "positioned"
+  if terminal.in_zellij() then
+    local version = terminal.zellij_version()
+    if version and vim.version.lt(version, { 0, 45, 0 }) then
+      vim.health.error(("zellij %s has no Kitty graphics support"):format(tostring(version)), {
+        "Upgrade to zellij 0.45 or newer.",
+      })
+    else
+      vim.health.ok(
+        ("zellij%s implements the Kitty graphics protocol"):format(version and (" " .. tostring(version)) or "")
+      )
+    end
+    vim.health.info("zellij must not have `support_kitty_graphics_protocol false` in its configuration")
+  end
+  if positioned then
+    vim.health.ok("pages are placed at the position of their window (Unicode placeholders are not used)")
+  else
+    vim.health.ok("pages are drawn with Unicode placeholders")
   end
 
   if terminal.in_tmux() then
@@ -145,17 +165,19 @@ local function check_terminal()
     end
   end
 
-  if vim.o.termguicolors then
-    vim.health.ok("'termguicolors' is on")
-  else
-    vim.health.error(
-      "'termguicolors' is off",
-      { "Image ids travel in 24-bit foreground colours: `:set termguicolors`." }
-    )
-  end
-
-  if vim.o.ambiwidth ~= "single" then
-    vim.health.warn("'ambiwidth' is not \"single\"; the placeholder character may be drawn two cells wide")
+  -- placements need neither colours nor the placeholder character
+  if not positioned then
+    if vim.o.termguicolors then
+      vim.health.ok("'termguicolors' is on")
+    else
+      vim.health.error(
+        "'termguicolors' is off",
+        { "Image ids travel in 24-bit foreground colours: `:set termguicolors`." }
+      )
+    end
+    if vim.o.ambiwidth ~= "single" then
+      vim.health.warn("'ambiwidth' is not \"single\"; the placeholder character may be drawn two cells wide")
+    end
   end
 
   local cell = terminal.cell_size()

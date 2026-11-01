@@ -5,10 +5,13 @@ INTRODUCTION                                                     *pdf-view*
 
 pdf-view.nvim shows PDF pages as images inside a normal buffer. Pages are
 rendered with MuPDF's `mutool` and drawn with the Kitty graphics protocol
-(Unicode placeholders), so the page follows splits, tabs and resizes.
+(Unicode placeholders), so the page follows splits, tabs and resizes. Inside
+zellij the page is placed at its window's position instead, see
+|pdf-view-zellij|.
 
 Requirements: Neovim 0.11+, 'termguicolors', `mutool` (with JavaScript), and
-kitty or Ghostty (optionally inside tmux). Run `:checkhealth pdf-view`.
+kitty or Ghostty (optionally inside tmux, or zellij 0.45+). Run
+`:checkhealth pdf-view`.
 
 ==============================================================================
 USAGE                                                      *pdf-view-usage*
@@ -111,6 +114,7 @@ CONFIGURATION                                              *pdf-view-config*
       mutool = "mutool",
       transmission = "auto",   -- "auto" | "file" | "direct"
       tmux_passthrough = true, -- tmux set -p allow-passthrough on
+      placement = "auto",      -- "auto" | "placeholders" | "positioned"
       force = false,           -- skip terminal detection
       max_pixels = 4096,       -- cap for either side of a fitted page
       zoom_step = 1.25,        -- factor of one zoom step
@@ -124,6 +128,26 @@ CONFIGURATION                                              *pdf-view-config*
 <
 
 Unknown or mistyped options raise an error.
+
+==============================================================================
+ZELLIJ                                                     *pdf-view-zellij*
+
+zellij 0.45 implements the Kitty graphics protocol itself, but not Unicode
+placeholders. Inside zellij (`$ZELLIJ` is set) the buffer is left blank and
+the page is placed at the screen position of its window. It is cut around
+floating windows and the popup menu, taken away while its window is hidden
+or in another tab page, and placed again after Neovim redraws the window. A
+page that zellij forgot (scrolled away by a long message, say) is sent again.
+'termguicolors' is not needed.
+
+Differences: page turns are slower, because zellij forwards images as raw
+pixels; only one window shows the page when the same PDF is in several
+windows of a tab page; and text that the page is not cut around shows on top
+of it. In zellij 0.45.1 the page is sent again whenever a float over it moves
+or changes size.
+
+`placement` chooses explicitly: "placeholders" (the default outside zellij)
+or "positioned" (the default inside it).
 
 ==============================================================================
 SNACKS.NVIM                                              *pdf-view-snacks*

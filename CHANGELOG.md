@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- zellij support. zellij 0.45 implements the Kitty graphics protocol itself but not Unicode placeholders, so inside
+  zellij no page appeared. There the buffer is now left blank and the page is placed at the screen position of its
+  window. It is cut around floating windows and the popup menu, taken away while its window is hidden, and placed or
+  sent again when a redraw, a long message or a suspend moves it or makes zellij forget it. The new `placement`
+  option (`"placeholders"` or `"positioned"`) overrides the choice. `:checkhealth pdf-view` reports zellij's version
+  and which kind of placement is used.
+
 ### Fixed
 
 - `gg`, `G` and a bookmark picked with `gO` did nothing on a zoomed or fitted page when their page was the one already

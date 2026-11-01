@@ -73,6 +73,39 @@ function M.place(id, cols, rows)
   return M.sequence({ a = "p", U = 1, i = id, C = 1, c = cols, r = rows, q = 2 })
 end
 
+---@class PdfView.Crop
+---@field x integer left edge of the part of the image to show, in image pixels
+---@field y integer top edge
+---@field w integer width in image pixels
+---@field h integer height
+---@field cols? integer cells to scale the part to; without them it is shown at one image pixel per screen pixel
+---@field rows? integer
+
+--- Command that shows part of image `id` at the cursor, as placement `placement`. Placing the same id and placement
+--- again moves it. The cursor stays where it is, and the image is drawn under the text so that text over it (a
+--- message, a floating window) stays readable.
+---@param id integer
+---@param placement integer
+---@param crop PdfView.Crop
+---@param quiet? integer 2 (the default) silences errors too, 1 only the acknowledgements
+---@return string
+function M.place_at(id, placement, crop, quiet)
+  local keys = { a = "p", i = id, p = placement, x = crop.x, y = crop.y, w = crop.w, h = crop.h, C = 1, z = -1 }
+  keys.q = quiet or 2
+  if crop.cols then
+    keys.c, keys.r = crop.cols, crop.rows
+  end
+  return M.sequence(keys)
+end
+
+--- Command that removes placement `placement` of image `id`, or all of its placements, and keeps the image.
+---@param id integer
+---@param placement? integer
+---@return string
+function M.unplace(id, placement)
+  return M.sequence({ a = "d", d = "i", i = id, p = placement, q = 2 })
+end
+
 --- Command that removes image `id` and frees its data.
 ---@param id integer
 ---@return string
