@@ -324,6 +324,13 @@ positioned.rerender = function(s)
   show(s)
 end
 
+-- pages already sent by path never showed: send them again, now as bytes
+terminal.on_fallback = function()
+  for _, s in pairs(sessions) do
+    show(s)
+  end
+end
+
 M.show = show
 M.relayout = relayout
 M.schedule_relayout = schedule_relayout
