@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
   back, on the same page.
 - A password-protected PDF failed with `cannot draw '<file>'`. It now says the PDF is password-protected, and other
   `mutool` failures show mutool's error instead of its closing summary line.
+- A failed render left an empty PNG in Neovim's temp dir, and live reload retries a failed render several times, so
+  a long compile-watch session piled them up. A failed render's file is now removed, and an empty image counts as a
+  failed render.
 
 ## [0.3.0] - 2026-11-01
 

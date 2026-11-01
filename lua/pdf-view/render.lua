@@ -270,6 +270,7 @@ local function show(s, page, opts)
       end
       s.job = nil
       if render_err then
+        os.remove(out) -- `mutool draw` leaves an empty file behind when it fails
         return fail(render_err)
       end
       remember(s, cache_key, out)

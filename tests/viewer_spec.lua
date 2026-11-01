@@ -1368,6 +1368,28 @@ describe("viewer robustness", function()
     eq(1, vim.fn.winsaveview().topline)
   end)
 
+  it("removes the image of a render that failed", function()
+    reset()
+    local s = open(make("failed-render", pages(2)))
+    local broken = dir .. "/broken.pdf"
+    local file = assert(io.open(broken, "wb"))
+    file:write("%PDF-1.4\n1 0 obj<<")
+    file:close()
+    local render, outs = mupdf.render, {}
+    -- the page geometry is read from the good file; drawing the broken one fails and leaves an empty PNG behind
+    with_stub(mupdf, "render", function(_, page, width, height, out, cb)
+      outs[#outs + 1] = out
+      return render(broken, page, width, height, out, cb)
+    end, function()
+      press("j")
+      wait_for(function()
+        return s.job == nil and vim.api.nvim_buf_get_lines(0, 0, 1, false)[1]:find("pdf%-view:") ~= nil
+      end, "the failed render")
+    end)
+    eq(1, #outs)
+    eq(nil, vim.uv.fs_stat(outs[1]), "the failed render's PNG is removed")
+  end)
+
   it("asks Neovim for its temp dir every time, in case it was cleaned away", function()
     reset()
     local s = open(make("temp-dir", pages(2)))

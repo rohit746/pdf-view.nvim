@@ -66,7 +66,7 @@ local function run(cmd, cb)
   return { kill = function() end }
 end
 
---- Completion handler shared by the renderers: an error, or success once the PNG exists.
+--- Completion handler shared by the renderers: an error, or success once a non-empty PNG exists.
 ---@param out string
 ---@param cb fun(err?: string, notes?: string) `notes` is what the script printed, e.g. "highlights: multiply"
 ---@return fun(result: vim.SystemCompleted)
@@ -76,7 +76,8 @@ local function rendered(out, cb)
     if err then
       return cb(err)
     end
-    if not vim.uv.fs_stat(out) then
+    local stat = vim.uv.fs_stat(out)
+    if not stat or stat.size == 0 then
       return cb("mutool did not produce an image")
     end
     cb(nil, vim.trim(result.stdout or ""))
