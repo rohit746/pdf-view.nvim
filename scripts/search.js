@@ -10,6 +10,21 @@
 // measured from the top-left corner of the displayed page: the space `worker.js` draws highlights in. The
 // search ignores case. If there are more than <max hits> hits, a final line "truncated" is printed.
 var doc = Document.openDocument(scriptArgs[0]);
+// a password-protected document is unlocked with the first line of standard input, which `ps` does not show
+if (doc.needsPassword()) {
+  var password = "";
+  try {
+    password = readline();
+  } catch (e) {
+    password = "";
+  }
+  if (!password) {
+    throw new Error("this PDF is password-protected");
+  }
+  if (!doc.authenticatePassword(password)) {
+    throw new Error("wrong password");
+  }
+}
 // a reflowable document is laid out as worker.js lays it out, so that the pages are the same
 if (scriptArgs.length >= 6 && doc.isReflowable()) {
   doc.layout(parseFloat(scriptArgs[3]), parseFloat(scriptArgs[4]), parseFloat(scriptArgs[5]));

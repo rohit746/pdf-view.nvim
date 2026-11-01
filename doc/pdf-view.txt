@@ -43,6 +43,12 @@ restarted: the last 100 are kept in
 `stdpath("state")/pdf-view/positions.json`. Set `remember_position = false`
 to always start on the first page.
 
+A password-protected PDF asks for its password with |inputsecret()| when it
+opens. The password is kept until Neovim exits, so reopening the PDF does
+not ask again, and it reaches `mutool` on standard input, never on a command
+line. Cancel the prompt (or give an empty password) to leave the PDF locked;
+|:edit| asks again.
+
 `:w` never overwrites the PDF. |:w| {file} and |:saveas| {file} save a copy
 of it; after |:saveas| the viewer shows the copy. A range or |:w_a| is
 refused.

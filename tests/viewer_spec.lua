@@ -2728,3 +2728,91 @@ describe("viewer page turns", function()
     setup()
   end)
 end)
+
+describe("viewer password-protected documents", function()
+  setup()
+
+  --- A copy of a fresh PDF of `count` pages locked with the password "secret".
+  local function locked(name, count)
+    local plain = make(name .. "-plain", pages(count))
+    local path = dir .. "/" .. name .. ".pdf"
+    local made = vim
+      .system({ "mutool", "clean", "-E", "aes-256", "-U", "secret", "-O", "owner", plain, path }, { text = true })
+      :wait()
+    assert(made.code == 0, made.stderr)
+    return path
+  end
+
+  --- Answer the password prompts with `answers` in turn, and record the prompts.
+  local function answer(answers)
+    local prompts = {}
+    vim.fn.inputsecret = function(prompt) ---@diagnostic disable-line: duplicate-set-field
+      prompts[#prompts + 1] = prompt
+      return table.remove(answers, 1) or ""
+    end
+    return prompts
+  end
+
+  local function text()
+    return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
+  end
+
+  it("asks for the password, shows the pages, and remembers it for the session", function()
+    reset()
+    local path = locked("asked", 3)
+    local prompts = answer({ "secret" })
+    local s = open(path)
+    eq({ "Password for asked.pdf: " }, prompts)
+    eq(3, s.count)
+    truthy(s.slot ~= 0, "the page is not on screen")
+    press("j")
+    on_page(s, 2)
+
+    -- the search reads the document in a process of its own, which is given the password too
+    local input = vim.ui.input
+    vim.ui.input = function(_, cb) ---@diagnostic disable-line: duplicate-set-field
+      cb("Page")
+    end
+    press("/")
+    vim.ui.input = input
+    wait_for(function()
+      return s.search ~= nil and s.search_job == nil
+    end, "search")
+    eq(3, #s.search.matches)
+
+    -- reopened, it is not asked for again
+    reset()
+    s = open(path)
+    eq(1, #prompts, "asked again")
+    truthy(s.slot ~= 0, "the page is not on screen")
+    vim.fn.inputsecret = nil
+  end)
+
+  it("asks again after a wrong password", function()
+    reset()
+    local prompts = answer({ "nope", "secret" })
+    local s = open(locked("wrong", 2))
+    eq({ "Password for wrong.pdf: ", "Wrong password for wrong.pdf, try again: " }, prompts)
+    eq(2, s.count)
+    truthy(s.slot ~= 0, "the page is not on screen")
+    vim.fn.inputsecret = nil
+  end)
+
+  it("says so when the prompt is cancelled, and asks again on :edit", function()
+    reset()
+    local prompts = answer({ "" })
+    local s = open(locked("cancelled", 2))
+    eq(1, #prompts)
+    eq(0, s.slot)
+    truthy(text():find("pdf-view: cancelled.pdf is password-protected", 1, true), text())
+
+    answer({ "secret" })
+    vim.cmd.edit()
+    s = viewer.sessions[vim.api.nvim_get_current_buf()]
+    wait_for(function()
+      return s.slot ~= 0
+    end, "the page after :edit")
+    eq(2, s.count)
+    vim.fn.inputsecret = nil
+  end)
+end)

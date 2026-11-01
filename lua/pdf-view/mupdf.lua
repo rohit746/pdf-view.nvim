@@ -61,9 +61,10 @@ end
 --- Run a command asynchronously. Calls `cb` on the main loop, even when the process cannot be started.
 ---@param cmd string[]
 ---@param cb fun(result: vim.SystemCompleted)
+---@param stdin? string written to the command's standard input
 ---@return PdfView.Job
-local function run(cmd, cb)
-  local started, job = pcall(vim.system, cmd, { text = true }, vim.schedule_wrap(cb))
+local function run(cmd, cb, stdin)
+  local started, job = pcall(vim.system, cmd, { text = true, stdin = stdin }, vim.schedule_wrap(cb))
   if started then
     return job
   end
@@ -103,6 +104,10 @@ local workers = {}
 --- The layout of each document, as set by `set_layout()`: every request about the document carries it.
 ---@type table<string, PdfView.Layout>
 local layouts = {}
+--- The password of each password-protected document, as set by `set_password()`, for the rest of the Neovim
+--- session. It reaches mutool on standard input, never as an argument, where `ps` would show it.
+---@type table<string, string>
+local passwords = {}
 local next_request = 0
 
 -- longest line `worker.js` is sent: its readline() reads at most 255 bytes
@@ -305,6 +310,7 @@ local function ask(path, request, cb)
     workers[path] = w
   end
   next_request = next_request + 1
+  table.insert(request, 1, passwords[path] or vim.NIL)
   table.insert(request, 1, layouts[path] or vim.NIL)
   table.insert(request, 1, next_request)
   ---@type PdfView.Request
@@ -353,6 +359,37 @@ function M.release(path)
   for _, request in ipairs(queue) do
     finish(request, "mutool was killed (signal 15)")
   end
+end
+
+--- Unlock `path` with `password` from the next request on; nil forgets it. It is kept until Neovim exits, also after
+--- `release()`, so that the document opens again without asking.
+---@param path string
+---@param password? string
+function M.set_password(path, password)
+  passwords[path] = password
+end
+
+-- what the scripts fail with without a password, and with one that does not unlock the document
+M.LOCKED = "this PDF is password-protected"
+M.WRONG_PASSWORD = "wrong password"
+
+--- Whether `err`, from any request about a document, means that it needs a password: "missing" when none was
+--- given, "wrong" when the one given does not unlock it.
+---@param err? string
+---@return "missing"|"wrong"|nil
+function M.password_error(err)
+  if err == M.LOCKED then
+    return "missing"
+  elseif err == M.WRONG_PASSWORD then
+    return "wrong"
+  end
+end
+
+--- The password of `path` as the standard input of a script, nil without one.
+---@param path string
+---@return string?
+local function password_input(path)
+  return passwords[path] and (passwords[path] .. "\n") or nil
 end
 
 --- Lay `path` out with `layout` from the next request on, if it is a reflowable document. Other documents ignore it.
@@ -499,7 +536,7 @@ function M.search(path, needle, limit, cb)
     end
     local matches, truncated = require("pdf-view.search").parse(result.stdout)
     cb(nil, matches, truncated)
-  end)
+  end, password_input(path))
 end
 
 ---@class PdfView.OutlineEntry
@@ -532,7 +569,7 @@ function M.outline(path, cb)
       return cb(err)
     end
     cb(nil, M.parse_outline(result.stdout))
-  end)
+  end, password_input(path))
 end
 
 return M

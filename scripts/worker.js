@@ -3,7 +3,7 @@
 //
 // Usage: mutool run worker.js <file>
 //
-// A request is a JSON array, [<id>, <layout>, <command>, <arguments>...], sent as lines of at most 200 bytes (readline() reads
+// A request is a JSON array, [<id>, <layout>, <password>, <command>, <arguments>...], sent as lines of at most 200 bytes (readline() reads
 // at most 255): every line but the last starts with "+", the last with ":". The answer is one line,
 // "@<id> ok <result>" or "@<id> error <message>". print() does not flush standard output, so every answer is followed
 // by a line of padding longer than the stdio buffer, which pushes the answer out of it. The worker exits at the end
@@ -12,6 +12,10 @@
 // <layout> is [<width>, <height>, <em>] or null. A reflowable document (EPUB, FB2, MOBI) is laid out on pages of
 // <width> x <height> points with <em> point text before the command runs, and again whenever the layout changes; its
 // page count and every page change with it. Other documents ignore it. null keeps MuPDF's own layout.
+//
+// <password> unlocks a password-protected document, the first time it is opened; null or "" for none. It comes on
+// standard input rather than as an argument, where `ps` would show it. Without the right one, every command fails
+// with "this PDF is password-protected" (none given) or "wrong password".
 //
 // Commands:
 //
@@ -57,11 +61,20 @@ var doc = null;
 var kept = [];
 var laidOut = "";
 
+// The password of the latest request.
+var password = null;
+
 function openDocument() {
   if (!doc) {
     var opened = Document.openDocument(path);
     if (opened.needsPassword()) {
-      throw new Error("this PDF is password-protected");
+      if (!password) {
+        throw new Error("this PDF is password-protected");
+      }
+      // false or 0 for a wrong password, a number saying what it unlocked otherwise
+      if (!opened.authenticatePassword(password)) {
+        throw new Error("wrong password");
+      }
     }
     doc = opened;
   }
@@ -232,8 +245,9 @@ function render(number, scaleX, scaleY, x, y, width, height, out, highlights) {
 }
 
 function answer(request) {
+  password = request[2];
   layout(request[1]);
-  request = [request[0]].concat(request.slice(2));
+  request = [request[0]].concat(request.slice(3));
   switch (request[1]) {
     case "info":
       return info(request[2], request[3], request[4]);

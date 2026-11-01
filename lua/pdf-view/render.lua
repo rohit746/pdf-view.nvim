@@ -315,6 +315,36 @@ local function prefetch(s, stamp, cols, rows, cell)
   step()
 end
 
+--- Ask for the password of a password-protected document, which mutool would not open without one (`why` is
+--- "missing") or with the one it was given ("wrong"), and call `retry` with it set. Cancelling the prompt, or an
+--- empty answer, leaves a message in the window instead.
+---@param s PdfView.Session
+---@param win integer
+---@param why "missing"|"wrong"
+---@param retry fun()
+local function unlock(s, win, why, retry)
+  if s.unlocking then
+    return -- the prompt is open already, and shows the page again once it is answered
+  end
+  local name = vim.fn.fnamemodify(s.path, ":t")
+  local prompt = why == "wrong" and ("Wrong password for %s, try again: "):format(name)
+    or ("Password for %s: "):format(name)
+  s.unlocking = true
+  local ok, password = pcall(vim.fn.inputsecret, prompt)
+  s.unlocking = false
+  -- clear the prompt from the command line: it would stay there until something else is shown
+  vim.api.nvim_echo({ { "" } }, false, {})
+  if s.closed then
+    return
+  end
+  if not ok or password == "" then
+    mupdf.set_password(s.path, nil) -- a wrong one is not tried again on :edit
+    return display_message(s, win, ("pdf-view: %s is password-protected. :edit to enter the password"):format(name))
+  end
+  mupdf.set_password(s.path, password)
+  retry()
+end
+
 ---@param s PdfView.Session
 ---@param page? integer defaults to the current page
 ---@param opts? { retries?: integer, keep?: boolean } `retries`: attempts left after a failure; `keep`: on failure leave the old page on screen
@@ -375,6 +405,12 @@ local function show(s, page, opts)
   local function fail(message)
     if gen ~= s.gen then
       return
+    end
+    local locked = mupdf.password_error(message)
+    if locked then
+      return unlock(s, win, locked, function()
+        show(s, page, opts)
+      end)
     end
     if (opts.retries or 0) > 0 then
       -- most likely a PDF that is still being written

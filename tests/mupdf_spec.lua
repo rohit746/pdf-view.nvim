@@ -545,6 +545,72 @@ done
         mupdf.render(locked, 1, 40, 40, dir .. "/locked.png", cb)
       end)
       eq("this PDF is password-protected", err)
+      eq("missing", mupdf.password_error(err))
+    end)
+
+    it("says a wrong password is wrong", function()
+      mupdf.release(locked)
+      mupdf.set_password(locked, "nope")
+      local err = await(function(cb)
+        mupdf.info(locked, 1, cb)
+      end)
+      eq("wrong password", err)
+      eq("wrong", mupdf.password_error(err))
+      local search_err = await(function(cb)
+        mupdf.search(locked, "Page", 10, cb)
+      end)
+      eq("wrong password", search_err)
+      mupdf.set_password(locked, nil)
+    end)
+
+    it("is read, drawn, searched and outlined with its password, which never goes on a command line", function()
+      mupdf.release(locked)
+      local commands = {}
+      local system = vim.system
+      vim.system = function(cmd, ...) ---@diagnostic disable-line: duplicate-set-field
+        commands[#commands + 1] = table.concat(cmd, " ")
+        return system(cmd, ...)
+      end
+      local ok, problem = pcall(function()
+        -- the worker may already be running from a request without a password: the next one unlocks it
+        local err = await(function(cb)
+          mupdf.info(locked, 1, cb)
+        end)
+        eq("this PDF is password-protected", err)
+        mupdf.set_password(locked, "secret")
+        local info_err, info = await(function(cb)
+          mupdf.info(locked, 2, cb)
+        end)
+        eq(nil, info_err)
+        eq({ count = 3, page = 2, width = 400, height = 300, reflowable = false }, info)
+
+        local png = dir .. "/unlocked.png"
+        local render_err = await(function(cb)
+          mupdf.render(locked, 1, 40, 50, png, cb)
+        end)
+        eq(nil, render_err)
+        eq({ 40, 50 }, { png_size(png) })
+
+        local search_err, matches = await(function(cb)
+          mupdf.search(locked, "Page", 10, cb)
+        end)
+        eq(nil, search_err)
+        eq(3, #matches)
+
+        local outline_err, entries = await(function(cb)
+          mupdf.outline(locked, cb)
+        end)
+        eq(nil, outline_err)
+        eq({}, entries)
+      end)
+      vim.system = system
+      mupdf.set_password(locked, nil)
+      mupdf.release(locked)
+      assert(ok, problem)
+      truthy(#commands >= 3, "mutool was not run: " .. vim.inspect(commands))
+      for _, command in ipairs(commands) do
+        eq(nil, command:find("secret", 1, true), "the password is on a command line: " .. command)
+      end
     end)
   end)
 

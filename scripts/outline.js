@@ -5,6 +5,21 @@
 // One line per entry: "<depth>\t<page>\t<title>", with depth 0 for top-level entries and page 1-based. Entries
 // that do not point at a page of the document are skipped. A document without an outline prints nothing.
 var doc = Document.openDocument(scriptArgs[0]);
+// a password-protected document is unlocked with the first line of standard input, which `ps` does not show
+if (doc.needsPassword()) {
+  var password = "";
+  try {
+    password = readline();
+  } catch (e) {
+    password = "";
+  }
+  if (!password) {
+    throw new Error("this PDF is password-protected");
+  }
+  if (!doc.authenticatePassword(password)) {
+    throw new Error("wrong password");
+  }
+}
 // a reflowable document is laid out as worker.js lays it out, so that the pages are the same
 if (scriptArgs.length >= 4 && doc.isReflowable()) {
   doc.layout(parseFloat(scriptArgs[1]), parseFloat(scriptArgs[2]), parseFloat(scriptArgs[3]));
