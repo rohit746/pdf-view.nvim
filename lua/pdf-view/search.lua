@@ -86,25 +86,26 @@ end
 ---@param page integer
 ---@param dir 1|-1
 ---@return integer? index nil when there are no matches
+---@return boolean wrapped whether no match lay that way, so it wrapped around the document
 function M.start(search, page, dir)
   local matches = search.matches
   if #matches == 0 then
-    return nil
+    return nil, false
   end
   if dir > 0 then
     for index, match in ipairs(matches) do
       if match.page >= page then
-        return index
+        return index, false
       end
     end
-    return 1
+    return 1, true
   end
   for index = #matches, 1, -1 do
     if matches[index].page <= page then
-      return index
+      return index, false
     end
   end
-  return #matches
+  return #matches, true
 end
 
 --- The match after (`dir` 1) or before (`dir` -1) `current`, wrapping around the document.
