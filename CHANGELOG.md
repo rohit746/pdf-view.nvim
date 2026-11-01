@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `gg`, `G`, `{count}G`, outline picks and search jumps could not be undone. Each viewer now keeps a jump list:
+  `<C-o>` and `<C-i>` go back and forward through it, and `''` swaps with the position before the latest jump.
+  `m{a-z}` marks the page with its fit, zoom and view, and `'{a-z}` or `` `{a-z} `` goes back to it. The
+  `jump_back`, `jump_forward`, `mark` and `goto_mark` keymaps set the keys.
 - Papers with wide margins showed small text. `c` fits the content of the page to the window and crops the margins:
   everything that is not white counts, text, images and figures alike. Each page is cropped to its own content, and
   zooming scrolls over the content only. The `fit_content` keymap sets the key.

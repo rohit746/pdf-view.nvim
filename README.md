@@ -131,6 +131,9 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `n` `N`                      | next / previous match (`n` repeats the direction of the search; takes a count)  |
 | `<Esc>`                      | remove the search highlights                                                    |
 | `gO`                         | pick a bookmark from the document's outline and go to its page                  |
+| `<C-o>` `<C-i>` `<Tab>`      | back / forward through the jump list (takes a count)                            |
+| `m{a-z}`                     | mark the page, with its fit, zoom and view                                      |
+| `'{a-z}` `` `{a-z} ``        | go to a mark; `''` goes back to where the latest jump started                   |
 | `r`                          | re-render the current page                                                      |
 | `q`                          | close the viewer (never quits Neovim)                                           |
 | `g?`                         | show this list                                                                  |
@@ -178,6 +181,15 @@ a translucent fill instead, which dulls the text under a match a little). The co
 
 `gO` lists the document's bookmarks, indented by depth, through `vim.ui.select` (a picker such as snacks.nvim's if you
 use one) and jumps to the chosen page. Documents without bookmarks say so.
+
+### Jumps and marks
+
+`gg`, `G`, `{count}G`, outline picks, search matches (`/`, `?`, `n`, `N`) and marks are jumps: each viewer keeps a jump
+list of where they started, as Vim does for lines. `<C-o>` goes back through it and `<C-i>` (or `<Tab>`) forward, and
+`''` swaps with the position before the latest jump. Page turns and scrolling are not jumps.
+
+`m{a-z}` marks where the viewer is: the page, its fit, zoom and the centre of the view. `'{a-z}` or `` `{a-z} `` goes
+back to it, as it was. Marks and the jump list belong to the viewer, and they stay through `:edit`.
 
 ## Configuration
 
@@ -228,6 +240,10 @@ require("pdf-view").setup({
     search_prev = { "N" },
     search_clear = { "<Esc>" },
     outline = { "gO" },
+    jump_back = { "<C-o>" },
+    jump_forward = { "<C-i>", "<Tab>" },
+    mark = { "m" },       -- then a to z
+    goto_mark = { "'", "`" }, -- then a to z, or ' for the latest jump
     reload = { "r" },
     close = { "q" },
     help = { "g?" },

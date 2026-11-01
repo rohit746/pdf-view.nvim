@@ -50,6 +50,9 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field search? PdfView.Search the active search, whose matches are highlighted
 ---@field search_job? PdfView.Job in-flight search
 ---@field search_again? fun() starts the in-flight search over, for when the file changes under it
+---@field jumps PdfView.Position[] where jumps (`gg`, `G`, bookmarks, searches, marks) started, oldest first
+---@field jump_index integer the entry of `jumps` that `<C-o>` and `<C-i>` are at: `#jumps + 1` after a new jump
+---@field marks table<string, PdfView.Position> `m{a-z}` marks, and `'` for where the latest jump started
 ---@field outline? { stamp: string, entries: PdfView.OutlineEntry[] } bookmarks of the file as of `stamp`
 ---@field cx number centre of the viewport as a fraction of the page width (only matters while zoomed)
 ---@field cy number centre of the viewport as a fraction of the page height
