@@ -104,10 +104,16 @@ describe("mupdf", function()
   end)
 
   it("reports an empty image as a failure", function()
-    -- a mutool that exits 0 after creating an empty output file
+    -- a mutool whose worker answers every request without drawing anything
     local fake = dir .. "/empty-mutool"
     local file = assert(io.open(fake, "w"))
-    file:write('#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && : > "$2"; shift; done\nexit 0\n')
+    file:write([[#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    :*) echo "@$(printf '%s' "$line" | sed 's/^:\[\([0-9]*\),.*/\1/') ok" ;;
+  esac
+done
+]])
     file:close()
     vim.uv.fs_chmod(fake, 493) -- 0755
     config.setup({ mutool = fake })
@@ -116,8 +122,63 @@ describe("mupdf", function()
       mupdf.render(pdf, 1, 10, 10, out, cb)
     end)
     config.setup()
-    eq(0, vim.uv.fs_stat(out).size, "the fake mutool made an empty file")
+    eq(nil, vim.uv.fs_stat(out), "the fake mutool made no image")
     eq("mutool did not produce an image", err)
+  end)
+
+  it("keeps the document open between requests, and opens it again once it changed", function()
+    local changing = dir .. "/changing.pdf"
+    fixture.write(changing, { { w = 100, h = 100 } })
+    local _, before = await(function(cb)
+      mupdf.info(changing, 1, cb)
+    end)
+    eq(1, before.count)
+    truthy(mupdf.has_worker(changing), "a worker is left running")
+    fixture.write(changing, { { w = 100, h = 100 }, { w = 200, h = 300 } })
+    local _, after = await(function(cb)
+      mupdf.info(changing, 2, cb)
+    end)
+    eq({ count = 2, page = 2, width = 200, height = 300 }, after)
+    mupdf.release(changing)
+    eq(false, mupdf.has_worker(changing))
+  end)
+
+  it("answers requests in order, with requests longer than a line", function()
+    local results = {}
+    local long = ("1,1,2,2,ffe14d;"):rep(60) .. "1,1,2,2,ffe14d"
+    for index = 1, 3 do
+      local clip = { scale_x = 1, scale_y = 1, x = 0, y = 0, width = 10 * index, height = 10, highlights = long }
+      mupdf.render_clip(pdf, 1, clip, ("%s/long-%d.png"):format(dir, index), function(err, notes)
+        results[#results + 1] = { index, err, (notes or ""):match("^highlights: ") ~= nil }
+      end)
+    end
+    wait_for(function()
+      return #results == 3
+    end, "three renders")
+    eq({ { 1, nil, true }, { 2, nil, true }, { 3, nil, true } }, results)
+    eq({ 30, 10 }, { png_size(dir .. "/long-3.png") })
+  end)
+
+  it("drops a waiting request that is killed, and starts over after killing the one in progress", function()
+    local errors = {}
+    local function record(name)
+      return function(err)
+        errors[name] = err or false
+      end
+    end
+    local first = mupdf.info(pdf, 1, record("first"))
+    local second = mupdf.info(pdf, 2, record("second"))
+    mupdf.info(pdf, 3, record("third"))
+    second:kill(15)
+    vim.wait(0) -- the first request is handed to the worker
+    truthy(mupdf.has_worker(pdf), "the first request is in progress")
+    first:kill(15)
+    wait_for(function()
+      return errors.first ~= nil and errors.second ~= nil and errors.third ~= nil
+    end, "every request answered")
+    truthy(tostring(errors.first):find("killed", 1, true), tostring(errors.first))
+    truthy(tostring(errors.second):find("killed", 1, true), tostring(errors.second))
+    eq(false, errors.third, "the request after them is answered by a new worker")
   end)
 
   describe("render_clip", function()
@@ -419,11 +480,11 @@ describe("mupdf", function()
       eq("this PDF is password-protected", err)
     end)
 
-    it("reports mutool's error rather than its closing summary", function()
+    it("is reported as such when it is drawn", function()
       local err = await(function(cb)
         mupdf.render(locked, 1, 40, 40, dir .. "/locked.png", cb)
       end)
-      eq("cannot authenticate password: " .. locked, err)
+      eq("this PDF is password-protected", err)
     end)
   end)
 

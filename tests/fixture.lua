@@ -178,7 +178,7 @@ function M.highlight_mode()
   end, 10)
   assert(
     notes and notes:find("highlights: ", 1, true),
-    "render-clip.js did not report a highlight mode: " .. tostring(notes)
+    "the worker did not report a highlight mode: " .. tostring(notes)
   )
   M._highlight_mode = notes:find("multiply", 1, true) and "multiply" or "translucent"
   return M._highlight_mode

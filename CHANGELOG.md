@@ -21,6 +21,13 @@ All notable changes to this project are documented here. The format follows
   now kept in `stdpath("state")/pdf-view/positions.json`, and a PDF opens where it was left. `remember_position =
   false` turns this off.
 
+### Changed
+
+- Turning to a page that was not cached started `mutool` twice, and each run opened and parsed the document again;
+  on a 756-page PDF that took about 200 ms. A worker process per viewer now keeps the document open and does all the
+  rendering, the next and previous pages are rendered in the background while you read, and turning back to one of
+  the last four pages shown does not upload its image to the terminal again, which saves the most over SSH.
+
 ### Fixed
 
 - With `auto_open = false`, `:edit` in a viewer left an empty buffer whose keys did nothing. The viewer now comes

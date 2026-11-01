@@ -201,18 +201,6 @@ describe("viewer", function()
     eq("2 / 3", pdf_view.status())
   end)
 
-  it("reuses rendered pages instead of rendering them again", function()
-    reset()
-    local s = open(make("cache", pages(3)))
-    local first = transmitted()[1]
-    press("j")
-    on_page(s, 2)
-    truthy(transmitted()[2] ~= first)
-    press("k")
-    on_page(s, 1)
-    eq(first, transmitted()[3])
-  end)
-
   it("keeps window options for the viewer only", function()
     reset()
     vim.o.number = true
@@ -384,6 +372,13 @@ local function settle(s)
   wait_for(function()
     return s.job == nil and s.target == nil
   end, "the render to settle")
+end
+
+--- Wait until the pages next to the one on screen have been rendered ahead of time too.
+local function idle(s)
+  wait_for(function()
+    return s.job == nil and s.target == nil and s.prefetch == nil and next(s.rendering) == nil
+  end, "the renders ahead of time")
 end
 
 local function text_rows()
@@ -754,9 +749,16 @@ describe("viewer fit modes", function()
     local clips, asked = {}, {}
     local info, render_clip = mupdf.info, mupdf.render_clip
 
-    --- The part of the page the last render showed, in points.
+    --- The part of the page on screen the last render of it showed, in points. The page next to it is rendered
+    --- ahead of time too.
     local function shown()
-      local clip = clips[#clips]
+      local clip
+      for index = #clips, 1, -1 do
+        if clips[index].page == s.page then
+          clip = clips[index].clip
+          break
+        end
+      end
       return {
         clip.x / clip.scale_x,
         clip.y / clip.scale_y,
@@ -776,7 +778,7 @@ describe("viewer fit modes", function()
       return info(file, page, cb, content)
     end, function()
       with_stub(mupdf, "render_clip", function(file, page, clip, out, cb)
-        clips[#clips + 1] = clip
+        clips[#clips + 1] = { page = page, clip = clip }
         return render_clip(file, page, clip, out, cb)
       end, function()
         press("c")
@@ -790,7 +792,7 @@ describe("viewer fit modes", function()
         inside(box, rect, "the fitted content")
         local cols, rows = placement()
         truthy(cols == text_cols() or rows == text_rows(), "the content fills the window one way")
-        truthy(clips[#clips].scale_x > 3 * (text_rows() * 20 / 792), "much larger than the fitted page")
+        truthy(clips[#clips].clip.scale_x > 3 * (text_rows() * 20 / 792), "much larger than the fitted page")
 
         press("++++")
         settle(s)
@@ -2046,7 +2048,11 @@ describe("viewer robustness", function()
       settle(s)
       press("j") -- scrolls the zoomed page
       settle(s)
-      eq({ 2 }, asked, "only the page that had not been shown yet")
+      local seen = {}
+      for _, page in ipairs(asked) do
+        truthy(page ~= 1 and not seen[page], "asked once for each page not shown yet: " .. vim.inspect(asked))
+        seen[page] = true
+      end
 
       fixture.write(path, pages(5))
       wait_for(function()
@@ -2100,7 +2106,9 @@ describe("viewer in tmux", function()
       local s = open(make("tmux-reattach", pages(2)))
       attach("100", "xterm-kitty") -- whatever the client was before this test, it is this one now
       on_page(s, 1)
-      local path = s.cache[next(s.cache)]
+      idle(s)
+      local path = s.images[s.ids[s.slot]]
+      local renders = vim.tbl_count(s.cache)
       eq("kitty", terminal.detect().name)
 
       writes = {}
@@ -2113,7 +2121,8 @@ describe("viewer in tmux", function()
         return #transmitted() == 1
       end, "the page sent again")
       eq({ path }, transmitted(), "the PNG that was already rendered")
-      eq(1, vim.tbl_count(s.cache), "nothing rendered again")
+      idle(s)
+      eq(renders, vim.tbl_count(s.cache), "nothing rendered again")
       eq(true, s.slot ~= slot, "placed under the other image id")
       eq("ghostty", terminal.detect().name, "the new terminal is detected again")
     end)
@@ -2408,4 +2417,136 @@ describe("viewer in zellij", function()
   end
 
   setup()
+end)
+
+describe("viewer page turns", function()
+  setup()
+
+  it("reuses rendered pages instead of rendering them again", function()
+    reset()
+    local s = open(make("cache", pages(30)))
+    idle(s)
+    local first = transmitted()[1]
+    for _, keys in ipairs({ "10G", "20G", "30G", "5G" }) do -- more pages than the terminal keeps
+      press(keys)
+      idle(s)
+    end
+    local renders = vim.tbl_count(s.cache)
+    writes = {}
+    press("gg")
+    on_page(s, 1)
+    eq({ first }, transmitted(), "the same PNG is sent again")
+    idle(s)
+    eq(renders, vim.tbl_count(s.cache), "nothing was rendered again")
+  end)
+
+  it("renders the next and the previous page ahead of time", function()
+    reset()
+    local s = open(make("prefetch", pages(7)))
+    press("5G")
+    on_page(s, 5)
+    idle(s)
+    local drawn = {}
+    local render = mupdf.render
+    with_stub(mupdf, "render", function(file, page, width, height, out, cb)
+      drawn[#drawn + 1] = page
+      return render(file, page, width, height, out, cb)
+    end, function()
+      press("j")
+      on_page(s, 6)
+      eq({}, drawn, "page 6 was already rendered")
+      idle(s)
+      eq({ 7 }, drawn, "then page 7 is, and page 5 is still there")
+      press("k")
+      press("k")
+      on_page(s, 4)
+      idle(s)
+      eq({ 7, 3 }, drawn, "page 3 is rendered ahead of time once 4 is shown")
+    end)
+  end)
+
+  it("waits for the page being rendered ahead of time instead of rendering it again", function()
+    reset()
+    local s = open(make("prefetch-wait", pages(3)))
+    idle(s)
+    local drawn, finish = {}, {}
+    local render = mupdf.render
+    with_stub(mupdf, "render", function(file, page, width, height, out, cb)
+      drawn[#drawn + 1] = page
+      -- held back until the test lets it finish
+      return render(file, page, width, height, out, function(...)
+        local args = { ... }
+        finish[#finish + 1] = function()
+          cb(unpack(args))
+        end
+      end)
+    end, function()
+      press("j")
+      on_page(s, 2)
+      wait_for(function()
+        return #drawn == 1 and s.rendering ~= nil and next(s.rendering) ~= nil
+      end, "page 3 being rendered ahead of time")
+      eq({ 3 }, drawn)
+      press("j")
+      vim.wait(100)
+      eq({ 3 }, drawn, "page 3 is not rendered twice")
+      eq(2, s.page, "page 3 is not on screen before its render is done")
+      wait_for(function()
+        return #finish == 1
+      end, "the render")
+      finish[1]()
+      on_page(s, 3)
+    end)
+  end)
+
+  it("shows a page it turns back to without sending it to the terminal again", function()
+    reset()
+    local s = open(make("terminal-cache", pages(3)))
+    local first, first_id = transmitted()[1], s.ids[s.slot]
+    press("j")
+    on_page(s, 2)
+    local second_id = s.ids[s.slot]
+    truthy(second_id ~= first_id, "the next page has another id")
+    eq(2, #transmitted())
+    writes = {}
+    press("k")
+    on_page(s, 1)
+    eq({}, transmitted(), "the terminal still has page 1")
+    eq(first_id, s.ids[s.slot])
+    truthy(sent(kitty.place(first_id, placement())), "placed again")
+    press("j")
+    on_page(s, 2)
+    eq({}, transmitted(), "and page 2")
+    eq(second_id, s.ids[s.slot])
+    eq(first, s.images[first_id])
+
+    -- `r` sends the page again, in case the terminal dropped it
+    press("r")
+    settle(s)
+    eq(1, #transmitted())
+  end)
+
+  it("sends the bytes of a page only once over SSH", function()
+    reset()
+    setup({ transmission = "direct" })
+    local s = open(make("terminal-cache-direct", pages(2)))
+    local function uploads()
+      local count = 0
+      for _, data in ipairs(writes) do
+        if data:find("\27_Ga=t,f=100,") then
+          count = count + 1
+        end
+      end
+      return count
+    end
+    eq(1, uploads())
+    press("j")
+    on_page(s, 2)
+    press("k")
+    on_page(s, 1)
+    press("j")
+    on_page(s, 2)
+    eq(2, uploads(), "each page is uploaded once")
+    setup()
+  end)
 end)

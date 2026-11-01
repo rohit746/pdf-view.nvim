@@ -7,7 +7,7 @@
 //   <page> <hit> <page width> <page height> <x0,y0,x1,y1>;<x0,y0,x1,y1>...
 //
 // <page> is 1-based. A hit that wraps over several lines has one rectangle per line. Rectangles are in points,
-// measured from the top-left corner of the displayed page: the space `render-clip.js` draws highlights in. The
+// measured from the top-left corner of the displayed page: the space `worker.js` draws highlights in. The
 // search ignores case. If there are more than <max hits> hits, a final line "truncated" is printed.
 var doc = Document.openDocument(scriptArgs[0]);
 var needle = scriptArgs[1];

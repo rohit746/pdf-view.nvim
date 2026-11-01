@@ -3,12 +3,15 @@
 local config = require("pdf-view.config")
 local cursor = require("pdf-view.cursor")
 local kitty = require("pdf-view.kitty")
+local mupdf = require("pdf-view.mupdf")
 local positioned = require("pdf-view.positioned")
 local search = require("pdf-view.search")
 
 local M = {}
 
 local CACHE_LIMIT = 16
+-- image ids per viewer: the terminal keeps this many of the latest pages, so turning back to one sends nothing
+local IMAGE_IDS = 4
 
 local uv = vim.uv
 local ns = vim.api.nvim_create_namespace("pdf-view")
@@ -60,8 +63,13 @@ local NO_HIGHLIGHT = "PdfViewNone"
 --- content (`PdfView.PageInfo.content`) once that was read
 ---@field gen integer incremented by every render request
 ---@field job? PdfView.Job in-flight mutool process
----@field ids integer[] two Kitty image ids, used alternately so a page swap never shows a blank frame
+---@field ids integer[] Kitty image ids: a new page goes to one that is not on screen, so a page swap never shows a
+--- blank frame
 ---@field slot integer which of `ids` is on screen (0 = none yet)
+---@field images table<integer, string> the PNG the terminal holds under each id, to show it again without sending it
+---@field image_used table<integer, integer> when each id was last put on screen, to reuse the oldest one
+---@field rendering table<string, { waiters: fun(err?: string, png?: string)[] }> renders in progress, by cache key
+---@field prefetch? { stopped: boolean } the pages next to the one on screen being rendered ahead of time
 ---@field win? integer window the layout was computed for
 ---@field cache table<string, string> render cache: key -> PNG path
 ---@field cache_order string[]
@@ -87,16 +95,19 @@ M.sessions = sessions
 
 local next_image_id
 
---- Two ids per session, drawn from the middle of the 24-bit range to stay clear of other graphics users.
+--- `IMAGE_IDS` ids per session, drawn from the middle of the 24-bit range to stay clear of other graphics users.
 ---@return integer[]
 local function allocate_ids()
   next_image_id = next_image_id or (uv.hrtime() % 0xC00000 + 0x100000)
   if next_image_id > 0xFFFFF0 then
     next_image_id = 0x100000
   end
-  local first = next_image_id
-  next_image_id = next_image_id + 2
-  return { first, first + 1 }
+  local ids = {}
+  for index = 1, IMAGE_IDS do
+    ids[index] = next_image_id + index - 1
+  end
+  next_image_id = next_image_id + IMAGE_IDS
+  return ids
 end
 
 --- The image id is carried by the foreground colour of the placeholder cells.
@@ -105,7 +116,7 @@ local function define_highlight(id)
   vim.api.nvim_set_hl(0, "PdfViewImage" .. id, { fg = id, bg = "NONE", nocombine = true })
 end
 
---- Search highlight colours as the `rrggbb` strings `render-clip.js` takes.
+--- Search highlight colours as the `rrggbb` strings `worker.js` takes.
 ---@return { match: string, current: string }
 local function match_colors()
   local highlight = config.options.highlight
@@ -160,6 +171,7 @@ local function purge_cache(s)
   end
   s.cache, s.cache_order = {}, {}
   s.info = nil
+  s.images = {} -- sent again, in case the terminal dropped one
 end
 
 --- The geometry of `page`, if it was already read from the file as of `stamp`.
@@ -351,6 +363,7 @@ local function destroy(s)
   if s.search_job then
     s.search_job:kill(15)
   end
+  mupdf.release(s.path)
   if s.watcher then
     s.watcher.stop()
   end
