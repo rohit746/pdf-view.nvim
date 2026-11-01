@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- With `auto_open = false`, `:edit` in a viewer left an empty buffer whose keys did nothing. The viewer now comes
+  back, on the same page.
+
 ## [0.3.0] - 2026-11-01
 
 ### Added
