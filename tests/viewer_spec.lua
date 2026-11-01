@@ -1387,6 +1387,29 @@ describe("viewer robustness", function()
     eq({ 3, "width", 4 }, { again.page, again.mode, again.count })
   end)
 
+  it("comes back after :edit when auto_open is off", function()
+    reset()
+    setup({ auto_open = false })
+    local buf = pdf_view.open(make("re-edit-manual", pages(4)))
+    local s = viewer.sessions[buf]
+    wait_for(function()
+      return s.slot ~= 0
+    end, "first render")
+    press("3G")
+    on_page(s, 3)
+    vim.cmd("edit")
+    local again = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(again and again ~= s, "a fresh session")
+    eq("nofile", vim.bo.buftype)
+    wait_for(function()
+      return again.slot ~= 0 and again.job == nil
+    end, "the render after :edit")
+    eq({ 3, 4 }, { again.page, again.count })
+    press("j")
+    on_page(again, 4)
+    setup()
+  end)
+
   it("reads a page's geometry once, until the file changes", function()
     reset()
     local path = make("geometry-once", pages(3))

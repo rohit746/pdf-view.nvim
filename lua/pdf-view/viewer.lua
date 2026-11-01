@@ -25,6 +25,10 @@ local RELOAD_RETRIES = 8
 ---@type table<integer, { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }>
 local resume = {}
 
+--- Holds each viewer's own `BufReadCmd`, which outlives the session (`destroy` clears only `augroup`) so `:edit`
+--- re-attaches the buffer even when `auto_open` is off and no `*.pdf` handler exists.
+local reread = vim.api.nvim_create_augroup("PdfViewReread", { clear = true })
+
 M.sessions = sessions
 M.reload = actions.reload
 
@@ -166,6 +170,18 @@ function M.attach(buf)
         resume[buf] = { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
       end
       destroy(s)
+    end,
+  })
+
+  vim.api.nvim_clear_autocmds({ group = reread, buffer = buf })
+  vim.api.nvim_create_autocmd("BufReadCmd", {
+    group = reread,
+    buffer = buf,
+    desc = "Re-attach the PDF viewer after :edit",
+    callback = function()
+      if not sessions[buf] then -- the `auto_open` handler may have re-attached it already
+        M.read(buf)
+      end
     end,
   })
 
