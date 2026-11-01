@@ -16,6 +16,9 @@ All notable changes to this project are documented here. The format follows
   failed render.
 - `:w {file}` wrote the viewer's placeholder text to a file named `.pdf`. It now saves a copy of the PDF, and
   `:saveas {file}` saves a copy and views it. Writing a range or appending is refused.
+- Inside tmux without truecolor (`RGB`) for the attached terminal, pages did not show and nothing said why: tmux
+  reduced the image id colours to 256. `:checkhealth pdf-view` now reports it and gives the `terminal-features` line
+  to add.
 
 ## [0.3.0] - 2026-11-01
 

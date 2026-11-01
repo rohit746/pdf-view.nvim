@@ -42,9 +42,11 @@ LaTeX or Typst build, say — the page refreshes by itself.
   `brew install mupdf` · `apt install mupdf-tools` · `pacman -S mupdf-tools`
 - A terminal with Kitty graphics **and** Unicode placeholder support: [kitty](https://sw.kovidgoyal.net/kitty/) or
   [Ghostty](https://ghostty.org). WezTerm and iTerm2 do not implement placeholders.
-- Inside tmux (3.3a or newer): nothing to configure, the plugin runs `tmux set -p allow-passthrough on` for its own
-  pane. To manage it yourself, set `tmux_passthrough = false` and add `set -g allow-passthrough on` to `tmux.conf`.
-- Inside zellij (0.45 or newer): nothing to configure either. See [zellij](#zellij) for how it differs.
+- Inside tmux (3.3a or newer): the plugin runs `tmux set -p allow-passthrough on` for its own pane. To manage it
+  yourself, set `tmux_passthrough = false` and add `set -g allow-passthrough on` to `tmux.conf`. tmux must also pass
+  24-bit colour on: if `:checkhealth pdf-view` says it doesn't, add `set -as terminal-features ',xterm-kitty:RGB'`
+  (with your outer `$TERM`) to `tmux.conf`.
+- Inside zellij (0.45 or newer): nothing to configure. See [zellij](#zellij) for how it differs.
 
 > [!TIP]
 > Run `:checkhealth pdf-view` to verify all of this.
