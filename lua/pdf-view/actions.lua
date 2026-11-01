@@ -15,6 +15,14 @@ local show = render.show
 local stamp_of, purge_cache, window_for, text_area, uses_viewport =
   session.stamp_of, session.purge_cache, session.window_for, session.text_area, session.uses_viewport
 
+---@param s PdfView.Session
+local function refresh_winbar(s)
+  local win = not s.closed and window_for(s)
+  if win then
+    session.update_winbar(s, win)
+  end
+end
+
 --- Stop the search that is running, if any. It reports nothing.
 ---@param s PdfView.Session
 local function cancel_search(s)
@@ -22,6 +30,10 @@ local function cancel_search(s)
     s.search_job:kill(15)
   end
   s.search_job, s.search_again = nil, nil
+  if s.searching then
+    s.searching = nil
+    refresh_winbar(s)
+  end
 end
 
 --- Search the document for `needle`, in place of a search that is still running. `done` is only called for a search
@@ -29,7 +41,8 @@ end
 ---@param s PdfView.Session
 ---@param needle string
 ---@param done fun(err?: string, matches?: PdfView.Match[], truncated?: boolean)
-local function start_search(s, needle, done)
+---@param waited? boolean the user is waiting for it, so the winbar says "searching…" until it finishes
+local function start_search(s, needle, done, waited)
   cancel_search(s)
   local job
   job = mupdf.search(s.path, needle, config.options.search_limit, function(...)
@@ -37,11 +50,19 @@ local function start_search(s, needle, done)
       return
     end
     s.search_job, s.search_again = nil, nil
+    if s.searching then
+      s.searching = nil
+      refresh_winbar(s)
+    end
     done(...)
   end)
   s.search_job = job
   s.search_again = function()
-    start_search(s, needle, done)
+    start_search(s, needle, done, waited)
+  end
+  if waited then
+    s.searching = needle
+    refresh_winbar(s)
   end
 end
 
@@ -211,8 +232,15 @@ local function set_zoom(s, zoom)
     return
   end
   if (s.mode == "page" or s.mode == "content") and s.zoom == 1 then
-    -- the fitted page is centred, wherever an earlier page turn left the stored centre
-    s.cx, s.cy = 0.5, 0.5
+    -- the fitted page is centred, wherever an earlier page turn left the stored centre; zooming in on a page with the
+    -- current search match goes towards the match instead
+    local found = s.search
+    local match = found and found.current and found.matches[found.current]
+    if match and match.page == (s.target or s.page) then
+      s.cx, s.cy = match.cx, match.cy
+    else
+      s.cx, s.cy = 0.5, 0.5
+    end
   end
   s.zoom = zoom
   show(s)
@@ -361,14 +389,21 @@ local function run_search(s, needle, dir)
     if truncated then
       notify(("stopped at the first %d matches"):format(#matches), vim.log.levels.WARN)
     end
-  end)
+  end, true)
 end
 
+--- Prompt for text and search for it. The text goes into the search history (`:history /`); an empty answer searches
+--- again for the last text searched in this viewer, as `/<CR>` does in Vim.
 ---@param s PdfView.Session
 ---@param dir 1|-1
 local function prompt_search(s, dir)
   vim.ui.input({ prompt = dir > 0 and "/" or "?" }, function(input)
+    if input == "" then
+      input = s.last_needle
+    end
     if input and input ~= "" then
+      s.last_needle = input
+      vim.fn.histadd("search", input)
       run_search(s, input, dir)
     end
   end)

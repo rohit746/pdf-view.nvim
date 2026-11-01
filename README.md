@@ -168,10 +168,14 @@ margins out. A page with a coloured background has no margins to crop, so it is 
 
 `/` prompts for text (through `vim.ui.input`, so you get the same prompt as the rest of your config), searches the whole
 document ignoring case, and jumps to the first match on or after the current page. Every match on the page is
-highlighted, the current one in a different colour, and the winbar shows `/needle 3/17`. `n` and `N` move between
-matches across pages, wrapping around the document; zoomed or width-fitted views scroll to a match only if it is not
-already on screen. `?` searches backward, and `n` then keeps going backward. `<Esc>` removes the highlights. The search
-runs again by itself when the file changes.
+highlighted, the current one in a different colour, and the winbar shows `/needle 3/17` (`/needle searching…` while
+the search runs). `n` and `N` move between matches across pages, wrapping around the document; zoomed or width-fitted
+views scroll to a match only if it is not already on screen, and `+` on a fitted page zooms in towards the current
+match. `?` searches backward, and `n` then keeps going backward. `<Esc>` removes the highlights. The search runs again
+by itself when the file changes.
+
+Searches go into Vim's search history (`:history /`). An empty answer to the prompt searches again for the last text
+searched in that viewer, as `/<CR>` does in Vim.
 
 Highlights are drawn into the page image, multiplied onto it so text stays readable (on MuPDF older than 1.27 they are
 a translucent fill instead, which dulls the text under a match a little). The colours are configurable

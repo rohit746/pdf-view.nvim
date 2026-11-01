@@ -100,11 +100,16 @@ the content only. A page with a coloured background is shown whole.
                                                               *pdf-view-search*
 `/` and `?` prompt (via |vim.ui.input()|) for text and search the whole
 document, ignoring case. Every match on the page is highlighted, the current
-one in another colour (see `highlight`), and the winbar shows "/text 3/17".
-`n` and `N` step between matches across pages, wrapping around; a zoomed or
-fitted view scrolls only when the match is not already on screen. `<Esc>`
-clears the highlights. At most `search_limit` matches are collected. The
-search repeats itself when the file changes.
+one in another colour (see `highlight`), and the winbar shows "/text 3/17"
+("/text searching…" while the search runs). `n` and `N` step between matches
+across pages, wrapping around; a zoomed or fitted view scrolls only when the
+match is not already on screen, and `+` on a fitted page zooms in towards the
+current match. `<Esc>` clears the highlights. At most `search_limit` matches
+are collected. The search repeats itself when the file changes.
+
+Searches are added to the search history (|:history| /). An empty answer to
+the prompt searches again for the last text searched in that viewer, like
+`/<CR>` in Vim.
 
                                                             *pdf-view-outline*
 `gO` lists the document's bookmarks through |vim.ui.select()|, indented by

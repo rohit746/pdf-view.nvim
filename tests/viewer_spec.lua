@@ -1215,6 +1215,86 @@ describe("viewer search", function()
     truthy(s.cx > 0.55, "the third match is far right, so the view moved there, cx = " .. s.cx)
   end)
 
+  it("says searching in the winbar until the search finishes", function()
+    reset()
+    local s = open(search_doc("progress"))
+    holding_searches(function(calls)
+      answering("alpha", function()
+        press("/")
+      end)
+      truthy(vim.wo.winbar:find("/alpha searching…", 1, true), vim.wo.winbar)
+      calls[1].finish(nil, matches_on(1), false)
+      searched(s)
+      truthy(vim.wo.winbar:find("/alpha 1/1", 1, true), vim.wo.winbar)
+
+      answering("zzzz", function()
+        press("/")
+      end)
+      truthy(vim.wo.winbar:find("/zzzz searching…", 1, true), vim.wo.winbar)
+      press(vim.api.nvim_replace_termcodes("<Esc>", true, false, true))
+      eq(false, vim.wo.winbar:find("searching", 1, true) ~= nil, "<Esc> stops it: " .. vim.wo.winbar)
+    end)
+  end)
+
+  it("keeps a search history and searches again for the last text on an empty prompt", function()
+    reset()
+    local s = open(search_doc("history"))
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    eq("alpha", vim.fn.histget("search", -1))
+    press(vim.api.nvim_replace_termcodes("<Esc>", true, false, true))
+    settle(s)
+    eq(nil, s.search)
+    press("3G")
+    on_page(s, 3)
+    answering("", function()
+      press("?")
+      searched(s)
+    end)
+    eq({ "alpha", 3, 3 }, { s.search.needle, s.search.current, s.page }, "an empty ? searches backward for alpha")
+  end)
+
+  it("zooms a fitted page towards the current match", function()
+    reset()
+    local s = open(make("zoom-to-match", {
+      {
+        w = 612,
+        h = 792,
+        color = { 1, 1, 1 },
+        label = "start",
+        texts = { { x = 480, y = 40, text = "omega" } },
+      },
+    }))
+    answering("omega", function()
+      press("/")
+      searched(s)
+    end)
+    local match = s.search.matches[1]
+    truthy(
+      match.cx > 0.8 and match.cy > 0.9,
+      ("the match is near the bottom-right corner: %.2f %.2f"):format(match.cx, match.cy)
+    )
+    press("++++")
+    settle(s)
+    local paths = transmitted()
+    local png = paths[#paths]
+    local width, height = fixture.png_size(png)
+    local points = {}
+    for x = 1, width - 1, 5 do
+      for y = 1, height - 1, 5 do
+        points[#points + 1] = { x, y }
+      end
+    end
+    local found = false
+    for _, rgb in ipairs(fixture.pixels(png, points)) do
+      -- the current match's colour on white paper, which `classify` cannot tell apart from black text
+      found = found or (rgb[1] >= 230 and rgb[2] >= 100 and rgb[2] <= 180 and rgb[3] <= 80)
+    end
+    truthy(found, "the current match is still on screen after zooming in")
+  end)
+
   it("keeps the highlights when the page is zoomed and scrolled", function()
     reset()
     local s = open(search_doc("zoomed-highlight"))
