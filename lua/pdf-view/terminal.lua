@@ -191,4 +191,20 @@ function M.tmux_passthrough()
     or "off"
 end
 
+--- Whether tmux sends 24-bit colours to the attached client as they are. Without its `RGB` feature tmux reduces them
+--- to the 256-colour palette, which destroys the image ids carried in placeholder colours.
+---@return boolean? rgb nil outside tmux or when there is no attached client to ask about
+---@return string? termname the attached client's $TERM
+function M.tmux_rgb()
+  if not M.in_tmux() then
+    return nil
+  end
+  local out = capture({ "tmux", "display-message", "-p", "#{client_termname}\t#{client_termfeatures}" })
+  local termname, features = (out or ""):match("^([^\t]*)\t?(.*)$")
+  if not termname or termname == "" then
+    return nil
+  end
+  return vim.tbl_contains(vim.split(features, ",", { trimempty = true }), "RGB"), termname
+end
+
 return M

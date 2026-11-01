@@ -175,6 +175,15 @@ local function check_terminal()
         { "Image ids travel in 24-bit foreground colours: `:set termguicolors`." }
       )
     end
+    local rgb, termname = terminal.tmux_rgb()
+    if rgb then
+      vim.health.ok("tmux sends 24-bit colours to this client (RGB)")
+    elseif rgb == false then
+      vim.health.error(("tmux reduces colours to 256 for this client (TERM=%s has no RGB feature)"):format(termname), {
+        "Image ids travel in 24-bit foreground colours, so pages would not show. Add this to tmux.conf and restart tmux:",
+        ("`set -as terminal-features ',%s:RGB'`"):format(termname),
+      })
+    end
     if vim.o.ambiwidth ~= "single" then
       vim.health.warn("'ambiwidth' is not \"single\"; the placeholder character may be drawn two cells wide")
     end
