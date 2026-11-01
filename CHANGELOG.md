@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The text of a page could only be read off the image. `y` yanks it into the register given (`"+y` for the
+  clipboard), linewise, and `t` shows it in a scratch split next to the viewer, to quote from or search with Neovim's
+  own tools. The `yank_text` and `show_text` keymaps set the keys.
 - A password-protected PDF could not be opened. It now asks for the password with `inputsecret()` and keeps it until
   Neovim exits; a wrong one asks again. The password reaches `mutool` on standard input, so `ps` never shows it.
 - EPUB, FB2 and MOBI books showed on small fixed pages of MuPDF's default layout. They are now laid out to fill the

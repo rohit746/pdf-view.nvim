@@ -515,6 +515,59 @@ done
     end)
   end)
 
+  describe("text", function()
+    local texts = dir .. "/texts.pdf"
+    fixture.write(texts, {
+      { w = 612, h = 792, label = "Page 1" },
+      {
+        w = 612,
+        h = 792,
+        label = "Page 2",
+        texts = { { x = 72, y = 600, text = "Second line" }, { x = 72, y = 200, text = "Far below" } },
+      },
+      { w = 612, h = 792, label = "" },
+    })
+
+    it("reads a page's text in reading order, a block after another", function()
+      local err, text = await(function(cb)
+        mupdf.text(texts, 2, cb)
+      end)
+      eq(nil, err)
+      eq("Page 2\n\nSecond line\n\nFar below\n\n", text)
+    end)
+
+    it("clamps the page to the document", function()
+      local _, first = await(function(cb)
+        mupdf.text(texts, -3, cb)
+      end)
+      eq("Page 1\n\n", first)
+    end)
+
+    it("is empty for a page without text", function()
+      local err, text = await(function(cb)
+        mupdf.text(texts, 3, cb)
+      end)
+      eq(nil, err)
+      eq("", text)
+    end)
+
+    it("reads the pages of a reflowable document as laid out", function()
+      local book = dir .. "/text.fb2"
+      fixture.write_fb2(book, { "One", "Two" }, 30)
+      mupdf.set_layout(book, { 300, 200, 12 })
+      local _, small = await(function(cb)
+        mupdf.text(book, 2, cb)
+      end)
+      mupdf.set_layout(book, { 600, 400, 12 })
+      local _, large = await(function(cb)
+        mupdf.text(book, 2, cb)
+      end)
+      truthy(small:find("lorem", 1, true), small)
+      truthy(#large > #small, "a larger page holds more text")
+      mupdf.release(book)
+    end)
+  end)
+
   it("reports an unreadable document", function()
     local broken = dir .. "/broken.pdf"
     local file = assert(io.open(broken, "wb"))
@@ -602,6 +655,12 @@ done
         end)
         eq(nil, outline_err)
         eq({}, entries)
+
+        local text_err, text = await(function(cb)
+          mupdf.text(locked, 1, cb)
+        end)
+        eq(nil, text_err)
+        eq("Page 1\n\n", text)
       end)
       vim.system = system
       mupdf.set_password(locked, nil)

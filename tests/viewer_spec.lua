@@ -1548,6 +1548,108 @@ describe("viewer outline", function()
   end)
 end)
 
+describe("viewer page text", function()
+  setup()
+
+  local function texts(name)
+    return make(name, {
+      { w = 612, h = 792, label = "Page 1" },
+      { w = 612, h = 792, label = "Page 2", texts = { { x = 72, y = 200, text = "Far below" } } },
+      { w = 612, h = 792, label = "" },
+    })
+  end
+
+  --- Run `body` with notifications collected instead of shown.
+  local function collecting(body)
+    local notes = {}
+    with_stub(vim, "notify", function(message)
+      notes[#notes + 1] = message
+    end, function()
+      body(notes)
+    end)
+    return notes
+  end
+
+  it("yanks the text of the page on screen, linewise, into the register given", function()
+    reset()
+    local s = open(texts("yank"))
+    press("2gg")
+    on_page(s, 2)
+    vim.fn.setreg('"', "")
+    local notes = collecting(function(notes)
+      press("y")
+      wait_for(function()
+        return #notes > 0
+      end, "the yank")
+    end)
+    eq({ "Page 2", "", "Far below" }, vim.fn.getreg('"', 1, true))
+    eq("V", vim.fn.getregtype('"'))
+    truthy(notes[1]:find("page 2: 3 lines yanked", 1, true), vim.inspect(notes))
+
+    vim.fn.setreg("a", "")
+    collecting(function()
+      press('"ay')
+      wait_for(function()
+        return vim.fn.getreg("a") ~= ""
+      end, "the yank into register a")
+    end)
+    eq("Page 2\n\nFar below\n", vim.fn.getreg("a"))
+  end)
+
+  it("shows the text of the page in a scratch split next to the viewer, and reuses it", function()
+    reset()
+    local s = open(texts("show"))
+    local viewer_win = vim.api.nvim_get_current_win()
+    press("t")
+    wait_for(function()
+      return vim.api.nvim_get_current_buf() ~= s.buf
+    end, "the text split")
+    local buf = vim.api.nvim_get_current_buf()
+    eq("pdf-view://show.pdf (page 1)", vim.api.nvim_buf_get_name(buf))
+    eq({ "Page 1" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    eq("nofile", vim.bo[buf].buftype)
+    eq("wipe", vim.bo[buf].bufhidden)
+    eq(false, vim.bo[buf].modified)
+    eq(2, #vim.api.nvim_tabpage_list_wins(0))
+    eq(s.buf, vim.api.nvim_win_get_buf(viewer_win))
+    eq("", vim.wo.winbar, "the viewer's winbar stays with the viewer")
+
+    -- the same page again: the split is filled again and focused, not opened twice
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "edited" })
+    vim.api.nvim_set_current_win(viewer_win)
+    press("t")
+    wait_for(function()
+      return vim.api.nvim_get_current_win() ~= viewer_win
+    end, "the text split again")
+    eq(buf, vim.api.nvim_get_current_buf())
+    eq({ "Page 1" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    eq(2, #vim.api.nvim_tabpage_list_wins(0))
+
+    vim.cmd.close()
+    eq(false, vim.api.nvim_buf_is_valid(buf), "closing the split wipes the scratch buffer")
+  end)
+
+  it("says so when the page has no text, and changes nothing", function()
+    reset()
+    local s = open(texts("blank"))
+    press("G")
+    on_page(s, 3)
+    vim.fn.setreg('"', "kept")
+    for _, key in ipairs({ "y", "t" }) do
+      local notes = collecting(function(notes)
+        press(key)
+        wait_for(function()
+          return #notes > 0
+        end, "the notification")
+      end)
+      truthy(notes[1]:find("page 3 has no text", 1, true), vim.inspect(notes))
+    end
+    eq("kept", vim.fn.getreg('"'))
+    eq(s.buf, vim.api.nvim_get_current_buf())
+    eq(1, #vim.api.nvim_tabpage_list_wins(0))
+  end)
+end)
+
 describe("viewer jumps and marks", function()
   setup()
 

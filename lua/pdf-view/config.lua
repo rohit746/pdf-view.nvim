@@ -25,6 +25,8 @@ local M = {}
 ---@field search_prev string[] previous match
 ---@field search_clear string[] remove the highlights
 ---@field outline string[] pick a bookmark to jump to
+---@field yank_text string[] yank the text of the page into the register given (`"+y`), linewise
+---@field show_text string[] show the text of the page in a scratch buffer in a split
 ---@field jump_back string[] back through the jump list (`gg`, `G`, bookmarks, searches and marks are jumps)
 ---@field jump_forward string[] forward through the jump list
 ---@field mark string[] followed by a to z: mark the page, fit, zoom and view
@@ -106,6 +108,8 @@ local defaults = {
     search_prev = { "N" },
     search_clear = { "<Esc>" },
     outline = { "gO" },
+    yank_text = { "y" },
+    show_text = { "t" },
     jump_back = { "<C-o>" },
     jump_forward = { "<C-i>", "<Tab>" },
     mark = { "m" },

@@ -46,6 +46,10 @@
 //     before 1.27 cannot draw that (its JavaScript blend groups draw nothing), so there they are laid over the page as
 //     a translucent fill instead. The result says which was used: "highlights: multiply" or "highlights: translucent",
 //     and is empty without highlights.
+//
+//   ["text", <page>]
+//     The text of a page, as a JSON string: a line per line of text and an empty line after each block, in reading
+//     order. <page> is 1-based and clamped to the document. Empty for a page without text, such as a scanned one.
 var path = scriptArgs[0];
 
 // Longer than any stdio buffer (glibc and macOS use the pipe's block size: 4 KiB to 64 KiB).
@@ -244,6 +248,29 @@ function render(number, scaleX, scaleY, x, y, width, height, out, highlights) {
   return notes;
 }
 
+function pageText(number) {
+  var count = openDocument().countPages();
+  number = Math.max(1, Math.min(count, number || 1));
+  var structured = doc.loadPage(number - 1).toStructuredText();
+  if (typeof structured.asText === "function") {
+    return JSON.stringify(structured.asText());
+  }
+  // MuPDF 1.23 (Ubuntu 24.04's package) has no asText(): walk the text the way it prints it
+  var out = "";
+  structured.walk({
+    onChar: function (c) {
+      out += c;
+    },
+    endLine: function () {
+      out += "\n";
+    },
+    endTextBlock: function () {
+      out += "\n";
+    },
+  });
+  return JSON.stringify(out);
+}
+
 function answer(request) {
   password = request[2];
   layout(request[1]);
@@ -268,6 +295,8 @@ function answer(request) {
         request[9],
         request[10]
       );
+    case "text":
+      return pageText(request[2]);
   }
   throw new Error("unknown command: " + request[1]);
 }
