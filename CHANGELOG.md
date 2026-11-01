@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Inside tmux with `extended-keys` on (or `always`), opening a document typed stray keys into it: the terminal's
+  answer to whether it can read the PNG files of pages came back as the keys `Gi=16777214;OK`, so the viewer jumped to
+  the last page, recoloured it, zoomed all the way in and reported `E21: Cannot make changes` and `E349: No identifier
+  under cursor`. tmux turns the answer's leading escape into the key Alt-_ once Neovim asks for extended keys, so the
+  terminal is no longer asked there and the files are sent as before; `:checkhealth pdf-view` says so.
+
 ## [0.4.0] - 2026-11-01
 
 ### Added

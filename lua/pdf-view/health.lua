@@ -133,6 +133,12 @@ local function check_transmission()
     vim.health.info("image transmission: direct (over SSH)")
   elseif probe and probe.state == "ok" then
     vim.health.ok("image transmission: file (the terminal reads the PNG files of pages)")
+  elseif probe and probe.state == "unasked" then
+    vim.health.info(
+      "image transmission: file (tmux has `extended-keys` on, which would turn the terminal's answer into typed keys, "
+        .. "so it is not asked whether it can read the files)",
+      { blank }
+    )
   elseif probe and probe.state == "silent" then
     vim.health.info("image transmission: file (the terminal did not answer whether it can read the files)", { blank })
   elseif probe then

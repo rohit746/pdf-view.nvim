@@ -223,7 +223,8 @@ local PROBE_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkY
 local PROBE_TIMEOUT = 3000
 
 ---@class PdfView.Probe
----@field state "pending"|"ok"|"failed"|"silent" "silent": no reply came, so the file medium is kept
+---@field state "pending"|"ok"|"failed"|"silent"|"unasked" "silent": no reply came, so the file medium is kept;
+--- "unasked": the reply would have arrived as typed keys (see `replies_arrive_as_keys()`), so the terminal was not asked
 ---@field error? string the terminal's reply when it failed
 
 --- Result of the check that the terminal can read the PNGs pdf-view writes, once it has been made.
@@ -250,16 +251,34 @@ function M.probe_reply(sequence)
   return false, message
 end
 
+--- Whether the terminal's replies to graphics commands would reach Neovim as typed keys instead of a TermResponse.
+--- tmux with `extended-keys` on (or always) re-encodes the reply's leading ESC _ as the key Alt-_ (`CSI 27;3;95~`
+--- or `CSI 95;3u`) once Neovim asks for extended keys, so the rest of the reply is typed into the buffer: with
+--- `Gi=16777214;OK`, `G` jumps to the last page, `i` recolours it and `=` zooms in.
+---@return boolean
+function M.replies_arrive_as_keys()
+  if not M.in_tmux() then
+    return false
+  end
+  local mode = capture({ "tmux", "show-options", "-sv", "extended-keys" })
+  return mode ~= nil and mode ~= "" and mode ~= "off"
+end
+
 --- Ask the terminal, once, whether it can read a PNG in the directory pages are rendered to. It cannot when Neovim
 --- runs in a container or as another user, or when the terminal is a flatpak, and then the page would just stay
 --- blank. The question is asked with `a=q`, which loads the image without keeping it; the answer comes back as a
---- TermResponse. Neovim 0.11 cannot read replies (they would arrive as typed keys), so it is not asked there.
+--- TermResponse. Neovim 0.11 cannot read replies (they would arrive as typed keys), so it is not asked there, and
+--- neither is a terminal behind tmux with extended keys on, whose reply would be typed keys as well.
 ---@param dir string the directory pages are rendered to
 function M.probe_file(dir)
   if M.probe or config.options.transmission ~= "auto" or over_ssh() then
     return
   end
   if vim.fn.has("nvim-0.12") == 0 or not M.ui_attached() then
+    return
+  end
+  if M.replies_arrive_as_keys() then
+    M.probe = { state = "unasked" }
     return
   end
   local path = dir .. "/pdf-view-probe.png"

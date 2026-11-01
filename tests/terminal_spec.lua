@@ -166,6 +166,63 @@ describe("terminal", function()
     end)
   end)
 
+  --- Run `body` in a pretend tmux whose `extended-keys` server option is `mode`.
+  ---@param mode string
+  ---@param body fun()
+  local function with_extended_keys(mode, body)
+    local saved_system = vim.system
+    vim.env.TMUX = "/tmp/tmux-1000/default,1,0"
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(cmd)
+      local asked = table.concat(cmd, " ")
+      assert(asked == "tmux show-options -sv extended-keys", asked)
+      return {
+        wait = function()
+          return { code = 0, stdout = mode .. "\n" }
+        end,
+      }
+    end
+    local ok, err = pcall(body)
+    vim.system = saved_system
+    if not ok then
+      error(err, 0)
+    end
+  end
+
+  it("asks nothing behind tmux with extended keys, which would type the answer into the buffer", function()
+    for _, mode in ipairs({ "on", "always" }) do
+      with_terminal(function(written)
+        with_extended_keys(mode, function()
+          eq(true, terminal.replies_arrive_as_keys())
+          terminal.probe_file(fixture.tmpdir())
+        end)
+        eq({}, written, mode)
+        eq({ state = "unasked" }, terminal.probe, mode)
+        eq("file", terminal.transmission(), mode)
+      end)
+    end
+  end)
+
+  it("asks behind tmux with extended keys off", function()
+    with_terminal(function(written)
+      with_extended_keys("off", function()
+        eq(false, terminal.replies_arrive_as_keys())
+        terminal.probe_file(fixture.tmpdir())
+      end)
+      eq(1, #written, "one probe command")
+      eq(
+        true,
+        written[1]:find("^" .. ESC .. "Ptmux;" .. ESC .. ESC .. "_Ga=q,f=100,i=16777214,t=f;") ~= nil,
+        written[1]
+      )
+      eq("pending", terminal.probe.state)
+      reply(PROBE .. ";OK" .. ESC .. "\\")
+      harness.wait_for(function()
+        return terminal.probe.state ~= "pending"
+      end, "the answer")
+    end)
+  end)
+
   it("asks nothing when the transmission is set, or over SSH", function()
     with_terminal(function(written)
       config.setup({ transmission = "file" })
