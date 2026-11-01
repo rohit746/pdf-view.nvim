@@ -29,6 +29,12 @@ local resume = {}
 --- re-attaches the buffer even when `auto_open` is off and no `*.pdf` handler exists.
 local reread = vim.api.nvim_create_augroup("PdfViewReread", { clear = true })
 
+--- Where the viewer `s` is, for `resume`.
+---@param s PdfView.Session
+local function position(s)
+  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+end
+
 M.sessions = sessions
 M.reload = actions.reload
 
@@ -167,9 +173,27 @@ function M.attach(buf)
     desc = "Release a PDF viewer",
     callback = function(args)
       if args.event == "BufUnload" and not s.closed then
-        resume[buf] = { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+        resume[buf] = position(s)
       end
       destroy(s)
+    end,
+  })
+
+  -- the buffer's text is image placeholders: writing it to another file would make a `.pdf` of them
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    group = augroup,
+    buffer = buf,
+    desc = "Save a copy of the PDF",
+    callback = function(args)
+      M.save_copy(s, args.match)
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "FileWriteCmd", "FileAppendCmd" }, {
+    group = augroup,
+    buffer = buf,
+    desc = "Refuse to write part of a PDF",
+    callback = function()
+      vim.notify("pdf-view: only the whole PDF can be written: use :w {file}", vim.log.levels.ERROR)
     end,
   })
 
@@ -200,6 +224,26 @@ function M.attach(buf)
     relayout(s)
   end)
   return s
+end
+
+--- `BufWriteCmd` handler (`:w {file}`, `:saveas {file}`): copy the PDF to `target`. Neovim has already refused a
+--- write over the PDF itself (E382) and over an existing file without `!` (E13).
+---@param s PdfView.Session
+---@param target string
+function M.save_copy(s, target)
+  local real = uv.fs_realpath(target)
+  if not (real and real == uv.fs_realpath(s.path)) then -- a link to the PDF is already a copy of it
+    local ok, err = uv.fs_copyfile(s.path, target)
+    if not ok then
+      return vim.notify(("pdf-view: cannot write `%s`: %s"):format(target, err), vim.log.levels.ERROR)
+    end
+  end
+  vim.api.nvim_echo({ { ('"%s" written'):format(vim.fn.fnamemodify(target, ":~:.")) } }, false, {})
+  if vim.api.nvim_buf_get_name(s.buf) ~= s.path then -- :saveas has renamed the buffer: view the copy
+    resume[s.buf] = position(s)
+    destroy(s)
+    M.attach(s.buf)
+  end
 end
 
 --- `BufReadCmd` handler: take over local PDF files and leave everything else (new files, URLs) alone.

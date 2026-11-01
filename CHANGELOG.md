@@ -14,6 +14,8 @@ All notable changes to this project are documented here. The format follows
 - A failed render left an empty PNG in Neovim's temp dir, and live reload retries a failed render several times, so
   a long compile-watch session piled them up. A failed render's file is now removed, and an empty image counts as a
   failed render.
+- `:w {file}` wrote the viewer's placeholder text to a file named `.pdf`. It now saves a copy of the PDF, and
+  `:saveas {file}` saves a copy and views it. Writing a range or appending is refused.
 
 ## [0.3.0] - 2026-11-01
 

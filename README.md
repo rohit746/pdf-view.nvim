@@ -25,7 +25,7 @@ LaTeX or Typst build, say — the page refreshes by itself.
   image behaves like text: it follows splits, tabs, resizes and works inside tmux. zellij has no placeholders, so
   there the page is placed at its window's position instead ([zellij](#zellij)).
 - No dependency on other plugins, ImageMagick or Ghostscript.
-- Opening a PDF never reads its bytes into a buffer, and `:w` can never overwrite it.
+- Opening a PDF never reads its bytes into a buffer, and `:w` can never overwrite it. `:w {file}` saves a copy.
 
 <div align="center">
 

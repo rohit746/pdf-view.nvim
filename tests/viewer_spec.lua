@@ -92,6 +92,17 @@ local function make(name, pages)
   return path
 end
 
+---@return string? bytes of the file, nil when it does not exist
+local function slurp(path)
+  local file = io.open(path, "rb")
+  if not file then
+    return nil
+  end
+  local data = file:read("*a")
+  file:close()
+  return data
+end
+
 local LETTER = { w = 612, h = 792 }
 local function pages(count, spec)
   local list = {}
@@ -1483,6 +1494,54 @@ describe("viewer robustness", function()
     press("j")
     on_page(again, 4)
     setup()
+  end)
+
+  it("saves a copy of the PDF with :w {file}, never the placeholder text", function()
+    reset()
+    local path = make("write-copy", pages(2))
+    open(path)
+    local original = slurp(path)
+    local copy = dir .. "/write-copy-out.pdf"
+    os.remove(copy)
+    vim.cmd("silent write " .. vim.fn.fnameescape(copy))
+    eq(original, slurp(copy), ":w {file}")
+
+    local ok, err = pcall(vim.cmd, "silent write " .. vim.fn.fnameescape(copy))
+    eq(false, ok)
+    truthy(tostring(err):find("E13", 1, true), tostring(err))
+    fixture.write(copy, pages(1))
+    vim.cmd("silent write! " .. vim.fn.fnameescape(copy))
+    eq(original, slurp(copy), ":w! {file}")
+
+    local part = dir .. "/write-copy-part.pdf"
+    os.remove(part)
+    for _, command in ipairs({ "1write " .. vim.fn.fnameescape(part), "write >> " .. vim.fn.fnameescape(copy) }) do
+      ok, err = pcall(vim.cmd, "silent " .. command)
+      eq(false, ok, command)
+      truthy(tostring(err):find("only the whole PDF", 1, true), tostring(err))
+    end
+    eq(nil, vim.uv.fs_stat(part), "a range is not written")
+    eq(original, slurp(copy), "nothing is appended")
+    eq(original, slurp(path), "the original is untouched")
+  end)
+
+  it("saves a copy and views it with :saveas", function()
+    reset()
+    local path = make("saveas", pages(3))
+    local s = open(path)
+    press("2G")
+    on_page(s, 2)
+    local copy = dir .. "/saveas-out.pdf"
+    os.remove(copy)
+    vim.cmd("silent saveas " .. vim.fn.fnameescape(copy))
+    eq(slurp(path), slurp(copy))
+    local again = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(again and again ~= s, "a fresh session")
+    eq(vim.uv.fs_realpath(copy), vim.uv.fs_realpath(again.path))
+    wait_for(function()
+      return again.slot ~= 0 and again.job == nil
+    end, "the render after :saveas")
+    eq(2, again.page)
   end)
 
   it("reads a page's geometry once, until the file changes", function()
