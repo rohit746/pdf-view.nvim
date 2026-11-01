@@ -1,11 +1,11 @@
---- Thin async wrapper around the `mutool` command line.
+--- Thin async wrapper around the `mutool` command line. Page geometry and rendering go to a worker per document
+--- (`scripts/worker.js`), which keeps the document open between requests; search and the outline run a script each.
 local config = require("pdf-view.config")
 
 local M = {}
 
 local ROOT = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))))
-local PAGE_INFO = vim.fs.joinpath(ROOT, "scripts", "page-info.js")
-local RENDER_CLIP = vim.fs.joinpath(ROOT, "scripts", "render-clip.js")
+local WORKER = vim.fs.joinpath(ROOT, "scripts", "worker.js")
 local SEARCH = vim.fs.joinpath(ROOT, "scripts", "search.js")
 local OUTLINE = vim.fs.joinpath(ROOT, "scripts", "outline.js")
 
@@ -72,13 +72,292 @@ local function run(cmd, cb)
   return { kill = function() end }
 end
 
---- Completion handler shared by the renderers: an error, or success once a non-empty PNG exists.
+---@class PdfView.Request
+---@field id integer
+---@field lines string[] the request as `worker.js` reads it
+---@field cb fun(err?: string, result?: string)
+---@field done? boolean
+
+---@class PdfView.WorkerProcess
+---@field system? vim.SystemObj
+---@field current? PdfView.Request the request it is working on
+---@field stdout string what it printed that is not a whole line yet
+---@field stderr string the end of what it printed on stderr, for the reason it failed
+---@field gone? boolean stopped on purpose: what it still says is not listened to
+
+---@class PdfView.Worker
+---@field path string
+---@field stamp? string the file as of when the running process opened it
+---@field exe? string the mutool it runs
+---@field queue PdfView.Request[] requests waiting for the process
+---@field process? PdfView.WorkerProcess
+
+--- One worker per document: a `mutool run worker.js` that keeps the document open between requests.
+---@type table<string, PdfView.Worker>
+local workers = {}
+local next_request = 0
+
+-- longest line `worker.js` is sent: its readline() reads at most 255 bytes
+local LINE = 200
+-- what is kept of a worker's stderr
+local STDERR_LIMIT = 4096
+
+---@param path string
+---@return string
+local function file_stamp(path)
+  local stat = vim.uv.fs_stat(path)
+  return stat and ("%d.%09d:%d"):format(stat.mtime.sec, stat.mtime.nsec, stat.size) or ""
+end
+
+--- A request as lines of at most `LINE` bytes, cut between characters: "+" starts every line but the last, ":" the
+--- last.
+---@param request any[]
+---@return string[]
+local function encode(request)
+  local json = vim.json.encode(request)
+  local lines, position = {}, 1
+  while true do
+    local stop = position + LINE - 1
+    if stop >= #json then
+      lines[#lines + 1] = ":" .. json:sub(position) .. "\n"
+      return lines
+    end
+    while stop > position and json:byte(stop + 1) >= 0x80 and json:byte(stop + 1) < 0xC0 do
+      stop = stop - 1 -- the next byte continues a character
+    end
+    lines[#lines + 1] = "+" .. json:sub(position, stop) .. "\n"
+    position = stop + 1
+  end
+end
+
+---@param request PdfView.Request
+---@param err? string
+---@param result? string
+local function finish(request, err, result)
+  if request.done then
+    return
+  end
+  request.done = true
+  request.cb(err, result)
+end
+
+local pump
+
+---@param w PdfView.Worker
+---@param process PdfView.WorkerProcess
+---@param line string
+local function on_answer(w, process, line)
+  local request = process.current
+  local id, status, rest = line:match("^@(%d+) (%a+) ?(.*)$")
+  if process.gone or not request or tonumber(id) ~= request.id then
+    return
+  end
+  process.current = nil
+  if status == "ok" then
+    finish(request, nil, rest)
+  else
+    finish(request, (rest:gsub("^%a* ?[Ee]rror: ", "")))
+  end
+  pump(w)
+end
+
+---@param w PdfView.Worker
+---@param process PdfView.WorkerProcess
+---@param result vim.SystemCompleted
+local function on_exit(w, process, result)
+  if w.process == process then
+    w.process = nil
+  end
+  if process.gone then
+    return
+  end
+  process.gone = true
+  local request = process.current
+  process.current = nil
+  if request then
+    local why = result.signal ~= 0 and ("mutool was killed (signal %d)"):format(result.signal) or nil
+    finish(request, process.stderr:match("%S") and reason(process.stderr) or why or "mutool exited")
+  end
+  pump(w)
+end
+
+--- Start the process of `w`.
+---@param w PdfView.Worker
+---@return PdfView.WorkerProcess? process
+---@return string? err why it could not be started
+local function spawn(w)
+  ---@type PdfView.WorkerProcess
+  local process = { stdout = "", stderr = "" }
+  local function on_stdout(_, data)
+    if not data then
+      return
+    end
+    local text = process.stdout .. data
+    local start = 1
+    while true do
+      local newline = text:find("\n", start, true)
+      if not newline then
+        break
+      end
+      if text:byte(start) == 64 then -- "@": an answer; the rest is padding
+        local line = text:sub(start, newline - 1)
+        vim.schedule(function()
+          on_answer(w, process, line)
+        end)
+      end
+      start = newline + 1
+    end
+    -- padding needs no keeping, only the start of a line that may be an answer
+    local rest = text:sub(start)
+    process.stdout = rest:byte(1) == 64 and rest or ""
+  end
+  local function on_stderr(_, data)
+    if data then
+      process.stderr = (process.stderr .. data):sub(-STDERR_LIMIT)
+    end
+  end
+  w.stamp, w.exe = file_stamp(w.path), config.options.mutool
+  local cmd = { w.exe, "run", WORKER, w.path }
+  local started, system = pcall(vim.system, cmd, {
+    stdin = true,
+    stdout = on_stdout,
+    stderr = on_stderr,
+  }, function(result)
+    vim.schedule(function()
+      on_exit(w, process, result)
+    end)
+  end)
+  if not started then
+    return nil, ("cannot run `%s`: %s"):format(cmd[1], system)
+  end
+  process.system = system
+  return process
+end
+
+--- Stop the process of `w`, failing the request it is working on.
+---@param w PdfView.Worker
+---@param why string
+local function stop(w, why)
+  local process = w.process
+  if not process then
+    return
+  end
+  w.process, process.gone = nil, true
+  pcall(process.system.kill, process.system, 15)
+  local request = process.current
+  process.current = nil
+  if request then
+    finish(request, why)
+  end
+end
+
+--- Hand the next request to the process of `w`, starting one first if needed.
+---@param w PdfView.Worker
+pump = function(w)
+  if w.process and w.process.current then
+    return
+  end
+  local request = table.remove(w.queue, 1)
+  if not request then
+    return
+  end
+  -- a worker that has the file open as it was, or runs another mutool, is replaced
+  if w.process and (w.stamp ~= file_stamp(w.path) or w.exe ~= config.options.mutool) then
+    stop(w, "the file changed")
+  end
+  if not w.process then
+    local process, err = spawn(w)
+    if not process then
+      finish(request, err)
+      return pump(w)
+    end
+    w.process = process
+  end
+  w.process.current = request
+  local ok, err = pcall(function()
+    for _, line in ipairs(request.lines) do
+      w.process.system:write(line)
+    end
+  end)
+  if not ok then
+    stop(w, "cannot talk to mutool: " .. tostring(err))
+    pump(w)
+  end
+end
+
+--- Ask the worker of `path` for something. `cb` is called on the main loop, also when the request is killed.
+---@param path string
+---@param request any[] command and arguments, as `worker.js` takes them
+---@param cb fun(err?: string, result?: string)
+---@return PdfView.Job
+local function ask(path, request, cb)
+  local w = workers[path]
+  if not w then
+    w = { path = path, queue = {} }
+    workers[path] = w
+  end
+  next_request = next_request + 1
+  table.insert(request, 1, next_request)
+  ---@type PdfView.Request
+  local entry = { id = next_request, lines = encode(request), cb = cb }
+  w.queue[#w.queue + 1] = entry
+  vim.schedule(function()
+    pump(w)
+  end)
+  return {
+    --- A waiting request is dropped; one that is being worked on stops its worker, so that a page that is slow to
+    --- draw does not hold up the next one, and the next request starts another worker.
+    kill = function()
+      if entry.done then
+        return
+      end
+      for index, queued in ipairs(w.queue) do
+        if queued == entry then
+          table.remove(w.queue, index)
+          return vim.schedule(function()
+            finish(entry, "mutool was killed (signal 15)")
+          end)
+        end
+      end
+      if w.process and w.process.current == entry then
+        stop(w, "mutool was killed (signal 15)")
+        vim.schedule(function()
+          pump(w)
+        end)
+      end
+    end,
+  }
+end
+
+--- Stop the worker of `path`, if it has one, and drop what it was asked. The next request starts another.
+---@param path string
+function M.release(path)
+  local w = workers[path]
+  if not w then
+    return
+  end
+  workers[path] = nil
+  local queue = w.queue
+  w.queue = {}
+  stop(w, "mutool was killed (signal 15)")
+  for _, request in ipairs(queue) do
+    finish(request, "mutool was killed (signal 15)")
+  end
+end
+
+--- Whether `path` has a worker process running, for tests.
+---@param path string
+---@return boolean
+function M.has_worker(path)
+  return workers[path] ~= nil and workers[path].process ~= nil
+end
+
+--- What a render request answers with: an error, or success once a non-empty PNG exists.
 ---@param out string
----@param cb fun(err?: string, notes?: string) `notes` is what the script printed, e.g. "highlights: multiply"
----@return fun(result: vim.SystemCompleted)
+---@param cb fun(err?: string, notes?: string) `notes` is what the worker said, e.g. "highlights: multiply"
+---@return fun(err?: string, result?: string)
 local function rendered(out, cb)
-  return function(result)
-    local err = failure(result)
+  return function(err, result)
     if err then
       return cb(err)
     end
@@ -86,7 +365,7 @@ local function rendered(out, cb)
     if not stat or stat.size == 0 then
       return cb("mutool did not produce an image")
     end
-    cb(nil, vim.trim(result.stdout or ""))
+    cb(nil, vim.trim(result or ""))
   end
 end
 
@@ -97,16 +376,12 @@ end
 ---@param content? boolean also find the part of the page that has content (`info.content`), which renders the page
 ---@return PdfView.Job
 function M.info(path, page, cb, content)
-  local cmd = { config.options.mutool, "run", PAGE_INFO, path, ("%d"):format(math.min(math.max(page, 1), MAX_PAGE)) }
-  if content then
-    cmd[#cmd + 1] = "content"
-  end
-  return run(cmd, function(result)
-    local err = failure(result)
+  local request = { "info", math.min(math.max(math.floor(page), 1), MAX_PAGE), content == true }
+  return ask(path, request, function(err, result)
     if err then
       return cb(err)
     end
-    local fields = vim.split(vim.trim(result.stdout or ""), "%s+")
+    local fields = vim.split(vim.trim(result or ""), "%s+")
     local count, resolved, width, height =
       tonumber(fields[1]), tonumber(fields[2]), tonumber(fields[3]), tonumber(fields[4])
     if not count or count < 1 or not resolved or not width or not height or width <= 0 or height <= 0 then
@@ -129,32 +404,6 @@ function M.info(path, page, cb, content)
   end)
 end
 
---- Render one page to a PNG of exactly `width` x `height` pixels.
----@param path string
----@param page integer
----@param width integer
----@param height integer
----@param out string destination PNG
----@param cb fun(err?: string)
----@return PdfView.Job
-function M.render(path, page, width, height, out, cb)
-  local cmd = {
-    config.options.mutool,
-    "draw",
-    "-q",
-    "-o",
-    out,
-    "-w",
-    ("%d"):format(width),
-    "-h",
-    ("%d"):format(height),
-    "-f",
-    path,
-    ("%d"):format(page),
-  }
-  return run(cmd, rendered(out, cb))
-end
-
 ---@class PdfView.Clip
 ---@field scale_x number device pixels per point, horizontally
 ---@field scale_y number device pixels per point, vertically (equal to `scale_x` unless a page is stretched to cells)
@@ -173,24 +422,34 @@ end
 ---@param cb fun(err?: string, notes?: string) `notes` says how highlights were drawn: "highlights: multiply" or "highlights: translucent"
 ---@return PdfView.Job
 function M.render_clip(path, page, clip, out, cb)
-  local cmd = {
-    config.options.mutool,
-    "run",
-    RENDER_CLIP,
-    path,
-    ("%d"):format(page),
-    ("%.6f"):format(clip.scale_x),
-    ("%.6f"):format(clip.scale_y),
-    ("%d"):format(clip.x),
-    ("%d"):format(clip.y),
-    ("%d"):format(clip.width),
-    ("%d"):format(clip.height),
+  local request = {
+    "render",
+    page,
+    clip.scale_x,
+    clip.scale_y,
+    math.floor(clip.x),
+    math.floor(clip.y),
+    math.floor(clip.width),
+    math.floor(clip.height),
     out,
+    clip.highlights or "",
   }
-  if clip.highlights and clip.highlights ~= "" then
-    cmd[#cmd + 1] = clip.highlights
-  end
-  return run(cmd, rendered(out, cb))
+  return ask(path, request, rendered(out, cb))
+end
+
+--- Render one page to a PNG of exactly `width` x `height` pixels.
+---@param path string
+---@param page integer
+---@param width integer
+---@param height integer
+---@param out string destination PNG
+---@param cb fun(err?: string)
+---@return PdfView.Job
+function M.render(path, page, width, height, out, cb)
+  local done = rendered(out, function(err)
+    cb(err)
+  end)
+  return ask(path, { "draw", page, math.floor(width), math.floor(height), out }, done)
 end
 
 --- Find every occurrence of `needle` in the document (ignoring case).

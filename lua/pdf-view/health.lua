@@ -46,7 +46,7 @@ local function check_mutool()
   local mupdf = require("pdf-view.mupdf")
 
   local advice = {
-    "pdf-view drives mutool's JavaScript engine for page geometry, zoom, search and bookmarks. Use a mutool built",
+    "pdf-view drives mutool's JavaScript engine for page geometry, rendering, search and bookmarks. Use a mutool built",
     "with it and recent enough to have the drawing API (the Homebrew and distro mupdf packages are; try upgrading).",
   }
 
@@ -75,11 +75,11 @@ local function check_mutool()
   report("page geometry (`mutool run`)", info, geometry or "")
 
   report(
-    "rendering (`mutool draw`)",
+    "rendering",
     await(function(cb)
       mupdf.render(file, 1, 40, 40, png, cb)
     end),
-    "`mutool draw` works"
+    "rendering works"
   )
   os.remove(png)
 
@@ -112,6 +112,7 @@ local function check_mutool()
     "bookmark reading works"
   )
 
+  mupdf.release(file)
   os.remove(file)
 end
 

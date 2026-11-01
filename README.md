@@ -291,8 +291,10 @@ Set `placement = "placeholders"` once your zellij supports Unicode placeholders
 
 ## How it works
 
-1. `mutool run` reports the page count and the exact size of the page (rotation, crop box and `UserUnit` applied).
-2. The page is fitted to the window in whole terminal cells and rendered by `mutool draw` to a PNG of exactly
+1. A `mutool run` worker, one per open PDF, reports the page count and the exact size of the page (rotation, crop box
+   and `UserUnit` applied). It keeps the document open between requests, so a page turn does not start mutool and
+   parse the document again; it is restarted when the file changes on disk.
+2. The page is fitted to the window in whole terminal cells and rendered by the worker to a PNG of exactly
    `cols × cell_width` by `rows × cell_height` pixels, so the terminal maps pixels to cells one to one.
 3. The PNG is uploaded to the terminal (`a=t`) and a virtual placement is created (`a=p,U=1`).
 4. The buffer is filled with `U+10EEEE` placeholder cells whose foreground colour is the image id; the terminal paints
@@ -301,44 +303,17 @@ Set `placement = "placeholders"` once your zellij supports Unicode placeholders
 In zellij, steps 3 and 4 differ. The buffer stays blank, and the image is placed (`a=p`) at the screen position of the
 window, under the text, after moving the cursor there; see [zellij](#zellij).
 
-When zoomed, step 2 renders only the rectangle of the enlarged page that is on screen (a small script run by
-`mutool run`), so a window-sized PNG is all that is ever drawn and uploaded, however deep the zoom, and scrolling costs
-the same as turning a page.
+When zoomed, step 2 renders only the rectangle of the enlarged page that is on screen, so a window-sized PNG is all
+that is ever drawn and uploaded, however deep the zoom, and scrolling costs the same as turning a page.
 
-Search runs `mutool run` over the whole document once per query and keeps the match rectangles; highlights are
-drawn by the same clip script, which then also renders unzoomed pages whenever the page has matches. The outline is read
-the same way and cached until the file changes.
+Search runs `mutool run` over the whole document once per query and keeps the match rectangles; the worker draws the
+highlights onto the pages that have matches. The outline is read the same way and cached until the file changes.
 
-Two image ids are used per viewer alternately, so changing page never shows a blank frame. Rendered pages and
-scroll positions are cached.
-
-## Troubleshooting
-
-| Symptom                                          | Fix                                                                                                   |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| The buffer shows an error instead of a page      | Read it; `:checkhealth pdf-view` explains most causes.                                                |
-| Garbage characters instead of an image           | The terminal lacks Unicode placeholders, or tmux blocks passthrough (see Requirements).               |
-| Image is blurry                                  | The terminal did not report its pixel size; set `cell_size = { width, height }`.                      |
-| Image vanished after detaching/re-attaching tmux | Pages are sent again when the Neovim pane gets focus; if one stays blank, press `r`.                  |
-| The PDF opens as binary text                     | The plugin loaded too late. Use `lazy = false` and make sure nothing else owns `BufReadCmd *.pdf`.    |
-| Blank page in a container, flatpak, other user   | The terminal cannot read the PNGs: 0.12 sends bytes instead, on 0.11 set `transmission = "direct"`.   |
-| Over SSH nothing appears                         | Use a terminal that supports the protocol; images are then sent inline (`transmission = "direct"`).   |
-| Nothing appears inside zellij                    | Use zellij 0.45 or newer, without `support_kitty_graphics_protocol false`, in kitty or Ghostty.       |
-
-## Limitations
-
-- Terminals: kitty and Ghostty, on their own or inside tmux or zellij (Unicode placeholders are required outside
-  zellij; WezTerm and iTerm2 do not implement them).
-- Search is literal and ignores case; there is no regex or case-sensitive mode. It only finds text that is in the PDF,
-  so scanned pages without an OCR layer have no matches.
-- A buffer shown in two windows has one layout, computed for the window you are in; the other shows the same cells.
-- Only `*.pdf` files are opened automatically.
-
-## Compatibility
-
-Developed against Neovim 0.12, MuPDF 1.28, tmux 3.7 and zellij 0.45.1. The test suite passes on Neovim 0.11.0 and 0.12 and on MuPDF
-1.23.10, 1.24, 1.25, 1.26, 1.27 and 1.28 (older MuPDF is untested), and CI runs it on Linux and macOS.
-`:checkhealth pdf-view` tells you whether your `mutool` supports everything the plugin needs.
+Once a page is on screen, the next and the previous page are rendered in the background, so turning to them shows
+them at once. Rendered pages and scroll positions are cached. Each viewer has four image ids, and a new page goes to
+one that is not on screen, so changing page never shows a blank frame. The terminal keeps the last pages shown under
+their ids, and turning back to one of them only places it again instead of uploading the PNG (which over SSH means
+sending all of its bytes). In zellij, which forgets an image once nothing shows it, every page is uploaded.
 
 ## Development
 
@@ -353,14 +328,14 @@ lua/pdf-view/
   cursor.lua      hiding the cursor while a viewer is focused
   layout.lua      fitting a page into whole terminal cells; zoomed viewports (pure)
   search.lua      search results: parsing, stepping, highlight strings (pure)
-  mupdf.lua       async wrapper around mutool
+  mupdf.lua       async wrapper around mutool, and the worker that keeps a document open
   kitty.lua       graphics protocol encoding, tmux passthrough
   placeholder.lua Unicode placeholder text
   positioned.lua  zellij: the page placed at its window's position, kept in step with floats and redraws
   terminal.lua    terminal detection, cell size, tmux
   watch.lua       file watching
   health.lua      :checkhealth pdf-view
-scripts/          JavaScript run by `mutool run`: page geometry, clipped rendering, search, outline
+scripts/          JavaScript run by `mutool run`: the worker (page geometry, rendering), search, outline
 tests/            headless suite (`make test`)
 ```
 

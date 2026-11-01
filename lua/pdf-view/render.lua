@@ -1,6 +1,6 @@
 --- Showing a page: ask mutool for its size, render the page (or the part of it that is on screen), hand the PNG
---- to the terminal and redraw the placeholder cells. Always latest-wins: every request bumps `session.gen`, and
---- results from older generations are dropped.
+--- to the terminal and redraw the placeholder cells, then render the pages next to it ahead of time. Always
+--- latest-wins: every request bumps `session.gen`, and results from older generations are dropped.
 local config = require("pdf-view.config")
 local kitty = require("pdf-view.kitty")
 local layout = require("pdf-view.layout")
@@ -32,6 +32,33 @@ local display_message = session.display_message
 local RELOAD_RETRY_DELAY = 300
 local RESIZE_DELAY = 60
 local png_counter = 0
+local image_counter = 0
+
+--- Which of the session's image ids to show `png` with, and whether the terminal already holds it there. The id on
+--- screen is never chosen, so the page on screen stays until the next one is placed. In zellij the pages alternate
+--- between two ids and are always sent; elsewhere the terminal keeps the latest pages, and the least recently shown
+--- one makes room.
+---@param s PdfView.Session
+---@param png string
+---@return integer slot, boolean held
+local function choose_image(s, png)
+  if terminal.placement() == "positioned" then
+    return s.slot == 1 and 2 or 1, false
+  end
+  local on_screen = s.ids[s.slot]
+  local oldest
+  for slot, id in ipairs(s.ids) do
+    if id ~= on_screen then
+      if s.images[id] == png then
+        return slot, true
+      end
+      if not oldest or (s.image_used[id] or 0) < (s.image_used[s.ids[oldest]] or 0) then
+        oldest = slot
+      end
+    end
+  end
+  return oldest, false
+end
 
 --- Neovim's own temp dir, which it removes on exit. Asked for every time: when a cleaner has deleted the directory
 --- under a long-running Neovim, `tempname()` makes a new one.
@@ -51,14 +78,22 @@ local function present(s, win, png, info, fit, rows)
     return
   end
 
-  local slot = s.slot == 1 and 2 or 1
+  local slot, held = choose_image(s, png)
   local id = s.ids[slot]
-  local sent, commands = pcall(kitty.transmit, id, png, terminal.transmission())
-  if not sent then
-    return display_message(s, win, "pdf-view: " .. tostring(commands))
+  if held then
+    kitty.send(kitty.unplace(id)) -- the terminal still has the page: only its placement is made again
+  else
+    local sent, commands = pcall(kitty.transmit, id, png, terminal.transmission())
+    if not sent then
+      return display_message(s, win, "pdf-view: " .. tostring(commands))
+    end
+    kitty.send(kitty.delete(id)) -- drop the page this id held before
+    kitty.send(commands)
+    -- zellij forgets an image once nothing shows it, so only a terminal with placeholders keeps pages for later
+    s.images[id] = terminal.placement() ~= "positioned" and png or nil
   end
-  kitty.send(kitty.delete(id)) -- drop whatever this id held two pages ago
-  kitty.send(commands)
+  image_counter = image_counter + 1
+  s.image_used[id] = image_counter
   s.win = win
 
   if terminal.placement() == "positioned" then
@@ -117,6 +152,168 @@ local function present(s, win, png, info, fit, rows)
   pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
 end
 
+--- How page `info` is drawn into a window of `cols` x `rows` cells, with the centre of a zoomed view at (`cx`, `cy`):
+--- how the image maps onto cells, the render cache key, and the render.
+---@param s PdfView.Session
+---@param info PdfView.PageInfo
+---@param stamp string
+---@param cols integer
+---@param rows integer
+---@param cell { w: number, h: number }
+---@param cx number
+---@param cy number
+---@return PdfView.Fit|PdfView.Viewport fit
+---@return string cache_key
+---@return fun(out: string, cb: fun(err?: string)): PdfView.Job render
+local function plan(s, info, stamp, cols, rows, cell, cx, cy)
+  local highlights, highlights_key = nil, ""
+  if s.search then
+    highlights, highlights_key = search.highlights(s.search, info.page, match_colors())
+  end
+
+  -- A whole fitted page is stretched to its cells. A zoomed or width/height-fitted page renders just the part that is
+  -- on screen. Highlights are drawn by the same render.
+  if uses_viewport(s) then
+    local view =
+      layout.viewport(info.width, info.height, cols, rows, cell.w, cell.h, s.zoom, cx, cy, s.mode, info.content)
+    local cache_key = table.concat({
+      stamp,
+      info.page,
+      ("%.5f"):format(view.scale),
+      view.x,
+      view.y,
+      view.width,
+      view.height,
+      highlights_key,
+    }, ":")
+    return view,
+      cache_key,
+      function(out, cb)
+        local clip = {
+          scale_x = view.scale,
+          scale_y = view.scale,
+          x = view.x,
+          y = view.y,
+          width = view.width,
+          height = view.height,
+          highlights = highlights,
+        }
+        return mupdf.render_clip(s.path, info.page, clip, out, cb)
+      end
+  end
+
+  local fit = layout.fit(info.width, info.height, cols, rows, cell.w, cell.h, config.options.max_pixels)
+  local cache_key = table.concat({ stamp, info.page, fit.width, fit.height, highlights_key }, ":")
+  return fit,
+    cache_key,
+    function(out, cb)
+      if highlights then
+        local clip = {
+          scale_x = fit.width / info.width,
+          scale_y = fit.height / info.height,
+          x = 0,
+          y = 0,
+          width = fit.width,
+          height = fit.height,
+          highlights = highlights,
+        }
+        return mupdf.render_clip(s.path, info.page, clip, out, cb)
+      end
+      return mupdf.render(s.path, info.page, fit.width, fit.height, out, cb)
+    end
+end
+
+--- Render into the render cache under `key`, calling `done` and whoever waits on `s.rendering[key]` when it is done.
+---@param s PdfView.Session
+---@param key string
+---@param render fun(out: string, cb: fun(err?: string)): PdfView.Job
+---@param done fun(err?: string, png?: string)
+---@return PdfView.Job
+local function start_render(s, key, render, done)
+  png_counter = png_counter + 1
+  local out = ("%s/pdf-view-%d-%d.png"):format(temp_dir(), s.buf, png_counter)
+  local entry = { waiters = { done } }
+  s.rendering[key] = entry
+  local job = render(out, function(err)
+    if s.rendering[key] == entry then
+      s.rendering[key] = nil
+    end
+    if err or s.closed then
+      os.remove(out) -- a failed render can leave an empty file behind
+    else
+      remember(s, key, out)
+    end
+    for _, waiter in ipairs(entry.waiters) do
+      waiter(err or (s.closed and "closed" or nil), out)
+    end
+  end)
+  return {
+    kill = function()
+      if s.rendering[key] == entry then
+        s.rendering[key] = nil -- nobody else may wait on it now
+      end
+      job:kill(15)
+    end,
+  }
+end
+
+-- the pages drawn ahead of time after a page is shown: the next one first, starting at its top as a page turn
+-- does, then the previous one, at its bottom
+local NEIGHBOURS = { { 1, 0 }, { -1, 1 } }
+
+--- Render the pages next to the one on screen into the render cache, one after the other, so that turning to them
+--- shows them at once. A newer `show()` stops this before it asks for anything (`s.prefetch.stopped`); what is being
+--- rendered then is still finished and kept, and `show()` waits for it when it wants that page.
+---@param s PdfView.Session
+---@param stamp string
+---@param cols integer
+---@param rows integer
+---@param cell { w: number, h: number }
+local function prefetch(s, stamp, cols, rows, cell)
+  local run = { stopped = false }
+  s.prefetch = run
+  local todo = {}
+  for _, neighbour in ipairs(NEIGHBOURS) do
+    local page = s.page + neighbour[1]
+    if page >= 1 and page <= (s.count or 0) then
+      todo[#todo + 1] = { page = page, cy = neighbour[2] }
+    end
+  end
+  local content = s.mode == "content"
+
+  local function step()
+    local next_page = table.remove(todo, 1)
+    if run.stopped or s.closed or not next_page then
+      if s.prefetch == run then
+        s.prefetch = nil
+      end
+      return
+    end
+    local function on_info(err, info)
+      if info and not err and not s.closed then
+        remember_info(s, stamp, info) -- even when stopped: the geometry is read once
+      end
+      if run.stopped or s.closed or err or not info then
+        return step()
+      end
+      local _, key, render = plan(s, info, stamp, cols, rows, cell, s.cx, next_page.cy)
+      local cached = s.cache[key]
+      if s.rendering[key] or (cached and uv.fs_stat(cached)) then
+        return step()
+      end
+      start_render(s, key, render, function()
+        step()
+      end)
+    end
+    local known = known_info(s, stamp, next_page.page)
+    if known and (known.content or not content) then
+      return on_info(nil, known)
+    end
+    mupdf.info(s.path, next_page.page, on_info, content)
+  end
+  step()
+end
+
 ---@param s PdfView.Session
 ---@param page? integer defaults to the current page
 ---@param opts? { retries?: integer, keep?: boolean } `retries`: attempts left after a failure; `keep`: on failure leave the old page on screen
@@ -161,6 +358,10 @@ local function show(s, page, opts)
     s.job:kill(15)
     s.job = nil
   end
+  if s.prefetch then
+    s.prefetch.stopped = true -- what it is rendering now is kept; it asks for nothing more
+    s.prefetch = nil
+  end
 
   local cols, rows = text_area(win)
   local cell = terminal.cell_size()
@@ -203,80 +404,52 @@ local function show(s, page, opts)
     end
     remember_info(s, stamp, info)
 
-    local highlights, highlights_key = nil, ""
-    if s.search then
-      highlights, highlights_key = search.highlights(s.search, info.page, match_colors())
-    end
+    local fit, cache_key, render = plan(s, info, stamp, cols, rows, cell, s.cx, s.cy)
 
-    -- A whole fitted page is drawn by `mutool draw`, which is the fastest route. A zoomed or width/height-fitted
-    -- page renders just the part that is on screen, and highlights are drawn by the same script.
-    local fit, cache_key, render
-    if uses_viewport(s) then
-      local view =
-        layout.viewport(info.width, info.height, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, info.content)
-      fit = view
-      cache_key = table.concat({
-        stamp,
-        info.page,
-        ("%.5f"):format(view.scale),
-        view.x,
-        view.y,
-        view.width,
-        view.height,
-        highlights_key,
-      }, ":")
-      render = function(out, cb)
-        local clip = {
-          scale_x = view.scale,
-          scale_y = view.scale,
-          x = view.x,
-          y = view.y,
-          width = view.width,
-          height = view.height,
-          highlights = highlights,
-        }
-        return mupdf.render_clip(s.path, info.page, clip, out, cb)
-      end
-    else
-      fit = layout.fit(info.width, info.height, cols, rows, cell.w, cell.h, config.options.max_pixels)
-      cache_key = table.concat({ stamp, info.page, fit.width, fit.height, highlights_key }, ":")
-      render = function(out, cb)
-        if highlights then
-          local clip = {
-            scale_x = fit.width / info.width,
-            scale_y = fit.height / info.height,
-            x = 0,
-            y = 0,
-            width = fit.width,
-            height = fit.height,
-            highlights = highlights,
-          }
-          return mupdf.render_clip(s.path, info.page, clip, out, cb)
-        end
-        return mupdf.render(s.path, info.page, fit.width, fit.height, out, cb)
+    local function shown(png)
+      present(s, win, png, info, fit, rows)
+      if s.page == info.page and not s.closed then
+        prefetch(s, stamp, cols, rows, cell)
       end
     end
 
-    local cached = s.cache[cache_key]
-    if cached and uv.fs_stat(cached) then
-      return present(s, win, cached, info, fit, rows)
-    end
-
-    png_counter = png_counter + 1
-    local out = ("%s/pdf-view-%d-%d.png"):format(temp_dir(), s.buf, png_counter)
-    s.job = render(out, function(render_err)
+    ---@param render_err? string
+    ---@param png? string
+    local function rendered(render_err, png)
       if gen ~= s.gen then
-        os.remove(out)
         return
       end
       s.job = nil
       if render_err then
-        os.remove(out) -- `mutool draw` leaves an empty file behind when it fails
         return fail(render_err)
       end
-      remember(s, cache_key, out)
-      present(s, win, out, info, fit, rows)
-    end)
+      shown(png)
+    end
+
+    local cached = s.cache[cache_key]
+    if cached and uv.fs_stat(cached) then
+      return shown(cached)
+    end
+
+    local pending = s.rendering[cache_key]
+    if pending then
+      -- the page is being drawn ahead of time: wait for that
+      local waiters = pending.waiters
+      waiters[#waiters + 1] = rendered
+      s.job = {
+        kill = function()
+          for index, waiter in ipairs(waiters) do
+            if waiter == rendered then
+              table.remove(waiters, index)
+              break
+            end
+          end
+        end,
+      }
+      return
+    end
+
+    s.job = start_render(s, cache_key, render, rendered)
   end
 
   -- a page's geometry only changes with the file, so mutool is asked for it once, and for where its content is
@@ -330,6 +503,7 @@ end
 -- pages already sent by path never showed: send them again, now as bytes
 terminal.on_fallback = function()
   for _, s in pairs(sessions) do
+    s.images = {}
     show(s)
   end
 end
@@ -337,6 +511,7 @@ end
 -- tmux was attached from another terminal, which has none of the pages: send them again, from the render cache
 terminal.on_reattach = function()
   for _, s in pairs(sessions) do
+    s.images = {}
     s.requested_key = nil -- a viewer in no window is sent again when a window shows it (BufWinEnter)
     relayout(s)
   end

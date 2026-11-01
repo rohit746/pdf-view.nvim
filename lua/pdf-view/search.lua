@@ -128,7 +128,7 @@ function M.step(search, current, dir)
   return index, false
 end
 
---- Highlight rectangles for the matches on `page`, in the form `scripts/render-clip.js` takes.
+--- Highlight rectangles for the matches on `page`, in the form `scripts/worker.js` takes.
 ---@param search PdfView.Search
 ---@param page integer
 ---@param colors { match: string, current: string } hex colours without the leading `#`
