@@ -135,6 +135,7 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `n` `N`                      | next / previous match (`n` repeats the direction of the search; takes a count)  |
 | `<Esc>`                      | remove the search highlights                                                    |
 | `gO`                         | pick a bookmark from the document's outline and go to its page                  |
+| `f`                          | pick a link on the page: go to its page, or open its address                    |
 | `y`                          | yank the page's text, linewise (`"+y`: to the clipboard)                        |
 | `t`                          | show the page's text in a scratch split                                         |
 | `<C-o>` `<C-i>` `<Tab>`      | back / forward through the jump list (takes a count)                            |
@@ -192,6 +193,12 @@ a translucent fill instead, which dulls the text under a match a little). The co
 
 `gO` lists the document's bookmarks, indented by depth, through `vim.ui.select` (a picker such as snacks.nvim's if you
 use one) and jumps to the chosen page. Documents without bookmarks say so.
+
+### Links
+
+`f` lists the links on the page on screen, top to bottom, with the text under each and where it leads, through
+`vim.ui.select`. A link to a page of the document goes there (a jump, so `<C-o>` comes back); a web address or an e-mail
+opens with `vim.ui.open()`. A page without links says so.
 
 ### Page text
 
@@ -274,6 +281,7 @@ require("pdf-view").setup({
     search_prev = { "N" },
     search_clear = { "<Esc>" },
     outline = { "gO" },
+    follow_link = { "f" },
     yank_text = { "y" },
     show_text = { "t" },
     jump_back = { "<C-o>" },
@@ -369,7 +377,7 @@ lua/pdf-view/
   viewer.lua      a PDF buffer's lifecycle: attach, open, file watching, cleanup
   session.lua     per-buffer state and the helpers that touch windows, the winbar and the render cache
   render.lua      showing a page: mutool -> PNG -> terminal -> placeholder cells, latest request wins
-  actions.lua     what the keys do: page turns, scrolling, zoom, fit modes, search, outline, page text
+  actions.lua     what the keys do: page turns, scrolling, zoom, fit modes, search, outline, links, page text
   cursor.lua      hiding the cursor while a viewer is focused
   layout.lua      fitting a page into whole terminal cells; zoomed viewports (pure)
   search.lua      search results: parsing, stepping, highlight strings (pure)
@@ -380,7 +388,7 @@ lua/pdf-view/
   terminal.lua    terminal detection, cell size, tmux
   watch.lua       file watching
   health.lua      :checkhealth pdf-view
-scripts/          JavaScript run by `mutool run`: the worker (page geometry, rendering, page text), search, outline
+scripts/          JavaScript run by `mutool run`: the worker (page geometry, rendering, page text, links), search, outline
 tests/            headless suite (`make test`)
 ```
 

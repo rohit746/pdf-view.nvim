@@ -85,6 +85,7 @@ between matches accept a count.
   n N                     next / previous match ({count} matches)
   <Esc>                   remove the search highlights
   gO                      pick a bookmark and go to its page
+  f                       pick a link on the page and follow it
   y                       yank the page's text, linewise, into the register
                           given (`"+y` for the clipboard)
   t                       show the page's text in a scratch split
@@ -137,6 +138,12 @@ the prompt searches again for the last text searched in that viewer, like
                                                             *pdf-view-outline*
 `gO` lists the document's bookmarks through |vim.ui.select()|, indented by
 depth, and goes to the chosen page.
+
+                                                             *pdf-view-links*
+`f` lists the links on the page on screen, top to bottom, with the text
+under each and where it leads, through |vim.ui.select()|. A link to a page
+of the document goes there (a jump, so `<C-o>` comes back); a web address or
+an e-mail opens with |vim.ui.open()|. A page without links says so.
 
                                                               *pdf-view-text*
 `y` yanks the text of the page on screen into the register given (`"+y` for

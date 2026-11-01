@@ -1,5 +1,5 @@
---- Thin async wrapper around the `mutool` command line. Page geometry, rendering and page text go to a worker per
---- document (`scripts/worker.js`), which keeps the document open between requests; search and the outline run a
+--- Thin async wrapper around the `mutool` command line. Page geometry, rendering, page text and links go to a worker
+--- per document (`scripts/worker.js`), which keeps the document open between requests; search and the outline run a
 --- script each.
 local config = require("pdf-view.config")
 
@@ -541,6 +541,29 @@ function M.text(path, page, cb)
       return cb("could not read the text of the page")
     end
     cb(nil, text)
+  end)
+end
+
+---@class PdfView.Link
+---@field text string the text under the link, "" for an image
+---@field page? integer 1-based page of the document it leads to
+---@field uri? string where it leads otherwise: a web address, an e-mail
+
+--- The links on one page, top to bottom, then left to right. Links that lead nowhere are left out.
+---@param path string
+---@param page integer 1-based; clamped to the document
+---@param cb fun(err?: string, links?: PdfView.Link[])
+---@return PdfView.Job
+function M.links(path, page, cb)
+  return ask(path, { "links", math.min(math.max(math.floor(page), 1), MAX_PAGE) }, function(err, result)
+    if err then
+      return cb(err)
+    end
+    local ok, links = pcall(vim.json.decode, result or "")
+    if not ok or type(links) ~= "table" then
+      return cb("could not read the links of the page")
+    end
+    cb(nil, links)
   end)
 end
 

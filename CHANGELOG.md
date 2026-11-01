@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Links in a document could not be followed. `f` lists the links on the page, with the text under each, through
+  `vim.ui.select`: a link to a page of the document jumps there (`<C-o>` comes back), a web address or an e-mail opens
+  with `vim.ui.open()`. The `follow_link` keymap sets the key.
 - Pages were always black on white, glaring next to a dark colorscheme. `i` recolours them: `recolor = "invert"`
   inverts their brightness but keeps their hues, and `recolor = "colorscheme"` draws them in the colours of the `Normal`
   highlight, drawing them again when the colorscheme changes. `recolor` also says whether pages start out recoloured,

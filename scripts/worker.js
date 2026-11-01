@@ -55,6 +55,12 @@
 //   ["text", <page>]
 //     The text of a page, as a JSON string: a line per line of text and an empty line after each block, in reading
 //     order. <page> is 1-based and clamped to the document. Empty for a page without text, such as a scanned one.
+//
+//   ["links", <page>]
+//     The links on a page, as a JSON array in reading order (top to bottom, then left to right). A link to a page of
+//     the document is {"text": <text>, "page": <1-based page>}, any other (a web address, an e-mail) is
+//     {"text": <text>, "uri": <uri>}. <text> is the text under the link, "" for an image. Links that lead nowhere
+//     are left out. <page> is 1-based and clamped to the document.
 var path = scriptArgs[0];
 
 // Longer than any stdio buffer (glibc and macOS use the pipe's block size: 4 KiB to 64 KiB).
@@ -289,6 +295,47 @@ function pageText(number) {
   return JSON.stringify(out);
 }
 
+function pageLinks(number) {
+  var count = openDocument().countPages();
+  number = Math.max(1, Math.min(count, number || 1));
+  var page = doc.loadPage(number - 1);
+  var found = page.getLinks();
+  var structured = null;
+  var links = [];
+  for (var i = 0; i < found.length; i++) {
+    var bounds = found[i].getBounds();
+    var uri = found[i].getURI();
+    var link = { top: bounds[1], left: bounds[0] };
+    if (found[i].isExternal()) {
+      link.uri = uri;
+    } else {
+      var target = -1;
+      try {
+        target = doc.resolveLink(uri);
+      } catch (e) {
+        target = -1;
+      }
+      if (!(target >= 0 && target < count)) {
+        continue;
+      }
+      link.page = target + 1;
+    }
+    structured = structured || page.toStructuredText();
+    link.text = String(structured.copy([bounds[0], bounds[1]], [bounds[2], bounds[3]]) || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    links.push(link);
+  }
+  links.sort(function (a, b) {
+    return a.top - b.top || a.left - b.left;
+  });
+  return JSON.stringify(
+    links.map(function (link) {
+      return link.uri !== undefined ? { text: link.text, uri: link.uri } : { text: link.text, page: link.page };
+    })
+  );
+}
+
 function answer(request) {
   password = request[2];
   layout(request[1]);
@@ -316,6 +363,8 @@ function answer(request) {
       );
     case "text":
       return pageText(request[2]);
+    case "links":
+      return pageLinks(request[2]);
   }
   throw new Error("unknown command: " + request[1]);
 }
