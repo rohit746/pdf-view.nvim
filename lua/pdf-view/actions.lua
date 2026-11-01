@@ -296,13 +296,15 @@ local function step_match(s, reverse)
   if index and found.matches[index].page ~= (s.target or s.page) then
     index = nil -- the user has moved on: continue from where they are, not from the old match
   end
-  local wrapped = false
-  if index then
-    for _ = 1, vim.v.count1 do
-      index, wrapped = search.step(found, index, sign)
-    end
-  else
-    index = search.start(found, s.target or s.page, sign)
+  local wrapped, steps = false, vim.v.count1
+  if not index then
+    index, wrapped = search.start(found, s.target or s.page, sign)
+    steps = steps - 1 -- landing on the first match from here is the first step
+  end
+  for _ = 1, index and steps or 0 do
+    local w
+    index, w = search.step(found, index, sign)
+    wrapped = wrapped or w
   end
   if wrapped then
     vim.api.nvim_echo({
