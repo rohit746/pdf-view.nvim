@@ -285,7 +285,7 @@ scroll positions are cached.
 | The buffer shows an error instead of a page      | Read it; `:checkhealth pdf-view` explains most causes.                                                |
 | Garbage characters instead of an image           | The terminal lacks Unicode placeholders, or tmux blocks passthrough (see Requirements).               |
 | Image is blurry                                  | The terminal did not report its pixel size; set `cell_size = { width, height }`.                      |
-| Image vanished after detaching/re-attaching tmux | Press `r`: the new terminal never received the image.                                                 |
+| Image vanished after detaching/re-attaching tmux | Pages are sent again when the Neovim pane gets focus; if one stays blank, press `r`.                  |
 | The PDF opens as binary text                     | The plugin loaded too late. Use `lazy = false` and make sure nothing else owns `BufReadCmd *.pdf`.    |
 | Blank page in a container, flatpak, other user   | The terminal cannot read the PNGs: 0.12 sends bytes instead, on 0.11 set `transmission = "direct"`.   |
 | Over SSH nothing appears                         | Use a terminal that supports the protocol; images are then sent inline (`transmission = "direct"`).   |

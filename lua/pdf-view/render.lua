@@ -331,6 +331,14 @@ terminal.on_fallback = function()
   end
 end
 
+-- tmux was attached from another terminal, which has none of the pages: send them again, from the render cache
+terminal.on_reattach = function()
+  for _, s in pairs(sessions) do
+    s.requested_key = nil -- a viewer in no window is sent again when a window shows it (BufWinEnter)
+    relayout(s)
+  end
+end
+
 M.show = show
 M.relayout = relayout
 M.schedule_relayout = schedule_relayout
