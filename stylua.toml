@@ -1,3 +1,4 @@
+# StyLua 2.6.0, the version CI checks with (.github/workflows/ci.yml)
 indent_type = "Spaces"
 indent_width = 2
 column_width = 120

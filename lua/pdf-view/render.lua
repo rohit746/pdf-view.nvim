@@ -441,9 +441,9 @@ local function show(s, page, opts)
   if not stat then
     return fail("file not found: " .. s.path)
   end
-  s.requested_key, s.requested_stamp = key, stamp_of(stat)
   -- what the page geometry and the renders are kept under: the file, and the layout of a reflowable one
-  local stamp = s.requested_stamp
+  local stamp = stamp_of(stat)
+  s.requested_key, s.requested_stamp = key, stamp
   if s.reflowable then
     stamp = stamp .. "@" .. reflow_key
   end
@@ -566,11 +566,13 @@ local function schedule_relayout()
   end, RESIZE_DELAY)
 end
 
+---@diagnostic disable-next-line: duplicate-set-field (a hook the module leaves empty)
 positioned.rerender = function(s)
   show(s)
 end
 
 -- pages already sent by path never showed: send them again, now as bytes
+---@diagnostic disable-next-line: duplicate-set-field (a hook the module leaves empty)
 terminal.on_fallback = function()
   for _, s in pairs(sessions) do
     s.images = {}
@@ -579,6 +581,7 @@ terminal.on_fallback = function()
 end
 
 -- tmux was attached from another terminal, which has none of the pages: send them again, from the render cache
+---@diagnostic disable-next-line: duplicate-set-field (a hook the module leaves empty)
 terminal.on_reattach = function()
   for _, s in pairs(sessions) do
     s.images = {}
@@ -589,9 +592,8 @@ end
 
 --- Called when a reflowable document is laid out again, which moves its text to other pages. `actions` searches
 --- again here.
----@param s PdfView.Session
----@diagnostic disable-next-line: unused-local
-M.on_reflow = function(s) end
+---@type fun(s: PdfView.Session)
+M.on_reflow = function() end
 
 M.show = show
 M.relayout = relayout

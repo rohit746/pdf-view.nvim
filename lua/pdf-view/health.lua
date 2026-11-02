@@ -18,7 +18,7 @@ trailer<</Root 1 0 R>>
 local function await(start)
   local results
   start(function(...)
-    results = { n = select("#", ...), ... }
+    results = vim.F.pack_len(...)
   end)
   vim.wait(10000, function()
     return results ~= nil
@@ -136,17 +136,17 @@ local function check_transmission()
   elseif probe and probe.state == "unasked" then
     vim.health.info(
       "image transmission: file (tmux has `extended-keys` on, which would turn the terminal's answer into typed keys, "
-        .. "so it is not asked whether it can read the files)",
-      { blank }
+        .. "so it is not asked whether it can read the files). "
+        .. blank
     )
   elseif probe and probe.state == "silent" then
-    vim.health.info("image transmission: file (the terminal did not answer whether it can read the files)", { blank })
+    vim.health.info("image transmission: file (the terminal did not answer whether it can read the files). " .. blank)
   elseif probe then
     vim.health.info("image transmission: file (still asking the terminal whether it can read the files)")
   elseif vim.fn.has("nvim-0.12") == 0 then
-    vim.health.info("image transmission: file (Neovim 0.11 cannot ask the terminal whether it can read the files)", {
-      blank,
-    })
+    vim.health.info(
+      "image transmission: file (Neovim 0.11 cannot ask the terminal whether it can read the files). " .. blank
+    )
   else
     vim.health.info("image transmission: file (the terminal is asked whether it can read the files on the first page)")
   end

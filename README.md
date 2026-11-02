@@ -394,7 +394,9 @@ tests/            headless suite (`make test`)
 
 ```sh
 make test      # headless suite: protocol encoding, layout, mutool, and the whole viewer with a stubbed UI
-make format    # stylua
+make typecheck # lua-language-server --check, with the types of Neovim's runtime
+make lint      # selene
+make format    # stylua (2.6.0, as in CI)
 ```
 
 ## License

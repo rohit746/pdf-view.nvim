@@ -28,6 +28,7 @@ local CONTENT_MARGIN = 8
 ---@field reflowable boolean the document is laid out to a page size (EPUB, FB2, MOBI), so its pages follow the layout
 ---@field content? number[] `{ x0, y0, x1, y1 }`: the part of the page with something drawn on it, in points from the
 --- page's top-left corner, with a margin of `CONTENT_MARGIN` (the whole page when it is blank). Only read when asked for
+---@field layout? string the layout a reflowable document was laid out to (set by `render`, not by mutool)
 
 --- The line of mutool's stderr that says why it failed: the last error, or else the last line. mutool ends with a
 --- summary such as "cannot draw 'file.pdf'" that does not say why, and a script's exception is followed by its stack.
@@ -68,7 +69,7 @@ end
 local function run(cmd, cb, stdin)
   local started, job = pcall(vim.system, cmd, { text = true, stdin = stdin }, vim.schedule_wrap(cb))
   if started then
-    return job
+    return job --[[@as PdfView.Job]]
   end
   vim.schedule(function()
     cb({ code = -1, signal = 0, stdout = "", stderr = ("cannot run `%s`: %s"):format(cmd[1], job) })

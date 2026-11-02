@@ -22,7 +22,7 @@ end
 function M.placement()
   local mode = config.options.placement
   if mode ~= "auto" then
-    return mode
+    return mode --[[@as "placeholders"|"positioned"]]
   end
   return M.in_zellij() and "positioned" or "placeholders"
 end
@@ -64,7 +64,7 @@ local function window_pixels()
     )
   end
   local request = vim.fn.has("linux") == 1 and 0x5413 or 0x40087468 -- TIOCGWINSZ
-  local size = ffi.new("pdfview_winsize")
+  local size = ffi.new("pdfview_winsize") --[[@as { row: integer, col: integer, xpixel: integer, ypixel: integer }]]
   for _, fd in ipairs({ 1, 2, 0 }) do
     local called, rc = pcall(function()
       return ffi.C.ioctl(fd, request, size)
@@ -207,7 +207,7 @@ end
 function M.transmission()
   local mode = config.options.transmission
   if mode ~= "auto" then
-    return mode
+    return mode --[[@as "file"|"direct"]]
   end
   if over_ssh() or (M.probe and M.probe.state == "failed") then
     return "direct"
@@ -318,7 +318,7 @@ function M.probe_file(dir)
       end
     end,
   })
-  timer = vim.uv.new_timer()
+  timer = assert(vim.uv.new_timer())
   timer:start(PROBE_TIMEOUT, 0, function()
     vim.schedule(function()
       finish("silent")
