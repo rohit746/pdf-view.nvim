@@ -322,7 +322,7 @@ end
 
 --- Ask for the password of a password-protected document, which mutool would not open without one (`why` is
 --- "missing") or with the one it was given ("wrong"), and call `retry` with it set. Cancelling the prompt, or an
---- empty answer, leaves a message in the window instead.
+--- empty answer, leaves a message in the window instead, which stays there without asking again until `reload`.
 ---@param s PdfView.Session
 ---@param win integer
 ---@param why "missing"|"wrong"
@@ -332,6 +332,10 @@ local function unlock(s, win, why, retry)
     return -- the prompt is open already, and shows the page again once it is answered
   end
   local name = vim.fn.fnamemodify(s.path, ":t")
+  local message = ("pdf-view: %s is password-protected. :edit to enter the password"):format(name)
+  if s.locked then
+    return display_message(s, win, message)
+  end
   local prompt = why == "wrong" and ("Wrong password for %s, try again: "):format(name)
     or ("Password for %s: "):format(name)
   s.unlocking = true
@@ -344,7 +348,8 @@ local function unlock(s, win, why, retry)
   end
   if not ok or password == "" then
     mupdf.set_password(s.path, nil) -- a wrong one is not tried again on :edit
-    return display_message(s, win, ("pdf-view: %s is password-protected. :edit to enter the password"):format(name))
+    s.locked = true
+    return display_message(s, win, message)
   end
   mupdf.set_password(s.path, password)
   retry()

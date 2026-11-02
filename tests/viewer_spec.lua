@@ -3004,13 +3004,24 @@ describe("viewer password-protected documents", function()
     vim.fn.inputsecret = nil
   end)
 
-  it("says so when the prompt is cancelled, and asks again on :edit", function()
+  it("says so when the prompt is cancelled, and asks again on :edit only", function()
     reset()
     local prompts = answer({ "" })
     local s = open(locked("cancelled", 2))
     eq(1, #prompts)
     eq(0, s.slot)
     truthy(text():find("pdf-view: cancelled.pdf is password-protected", 1, true), text())
+
+    -- a resized window shows the page again, which keeps the message and does not ask
+    local before = s.requested_key
+    vim.cmd("vsplit")
+    wait_for(function()
+      return s.requested_key ~= before and s.job == nil
+    end, "re-layout after the split")
+    eq(1, #prompts, "asked again after a resize")
+    eq(0, s.slot)
+    truthy(text():find("password-protected", 1, true), text()) -- wrapped to the narrower window
+    vim.cmd("only")
 
     answer({ "secret" })
     vim.cmd.edit()
