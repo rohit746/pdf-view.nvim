@@ -8,7 +8,12 @@ local terminal = require("pdf-view.terminal")
 local function checkhealth()
   vim.cmd("silent checkhealth pdf-view")
   local buf = vim.api.nvim_get_current_buf()
-  local report = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+  local report = ""
+  -- Neovim 0.13 runs the checks asynchronously and fills the buffer when they are done
+  vim.wait(10000, function()
+    report = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+    return (report:find("image transmission:", 1, true) or report:find("Failed to run healthcheck", 1, true)) ~= nil
+  end, 10)
   if #vim.api.nvim_list_tabpages() > 1 then
     vim.cmd("tabclose") -- the report has a tab of its own unless the editor was empty
   end
