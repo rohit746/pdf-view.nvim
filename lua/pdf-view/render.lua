@@ -254,11 +254,12 @@ local function start_render(s, key, render, done)
     end
   end)
   return {
+    --- A render the worker is busy with may be left to finish (see `mupdf`): it is still kept in the render cache,
+    --- and `done` is still called. One that is stopped is no longer waited on.
     kill = function()
-      if s.rendering[key] == entry then
+      if job:kill(15) and s.rendering[key] == entry then
         s.rendering[key] = nil -- nobody else may wait on it now
       end
-      job:kill(15)
     end,
   }
 end

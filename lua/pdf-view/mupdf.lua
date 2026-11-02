@@ -17,7 +17,8 @@ local MAX_PAGE = 2 ^ 31 - 1
 local CONTENT_MARGIN = 8
 
 ---@class PdfView.Job
----@field kill fun(self: PdfView.Job, signal?: integer)
+---@field kill fun(self: PdfView.Job, signal?: integer): boolean? true when the job stopped, so that its callback gets
+--- an error; a request the worker is busy with may be left to finish instead (see `ask()`)
 
 ---@class PdfView.PageInfo
 ---@field count integer pages in the document
@@ -80,6 +81,7 @@ end
 ---@field lines string[] the request as `worker.js` reads it
 ---@field cb fun(err?: string, result?: string)
 ---@field done? boolean
+---@field started? number when the worker was handed it, from `vim.uv.hrtime()`
 
 ---@class PdfView.WorkerProcess
 ---@field system? vim.SystemObj
@@ -115,6 +117,10 @@ local next_request = 0
 local LINE = 200
 -- what is kept of a worker's stderr
 local STDERR_LIMIT = 4096
+
+--- Milliseconds a request may have been worked on before killing it stops its worker. A request killed sooner is
+--- left to finish: starting another worker opens and parses the document again, which costs more than most renders.
+M.kill_after = 1000
 
 ---@param path string
 ---@return string
@@ -287,7 +293,7 @@ pump = function(w)
     end
     w.process = process
   end
-  w.process.current = request
+  w.process.current, request.started = request, vim.uv.hrtime()
   local ok, err = pcall(function()
     for _, line in ipairs(request.lines) do
       w.process.system:write(line)
@@ -321,26 +327,34 @@ local function ask(path, request, cb)
     pump(w)
   end)
   return {
-    --- A waiting request is dropped; one that is being worked on stops its worker, so that a page that is slow to
-    --- draw does not hold up the next one, and the next request starts another worker.
+    --- A waiting request is dropped. One that is being worked on is left to finish, and `cb` gets its result, unless
+    --- it has run for `M.kill_after` milliseconds: then its worker is stopped, so that a page that is slow to draw does
+    --- not hold up the next one, and the next request starts another worker.
+    ---@return boolean killed
     kill = function()
       if entry.done then
-        return
+        return false
       end
       for index, queued in ipairs(w.queue) do
         if queued == entry then
           table.remove(w.queue, index)
-          return vim.schedule(function()
+          vim.schedule(function()
             finish(entry, "mutool was killed (signal 15)")
           end)
+          return true
         end
       end
       if w.process and w.process.current == entry then
+        if (vim.uv.hrtime() - entry.started) / 1e6 < M.kill_after then
+          return false
+        end
         stop(w, "mutool was killed (signal 15)")
         vim.schedule(function()
           pump(w)
         end)
+        return true
       end
+      return false
     end,
   }
 end

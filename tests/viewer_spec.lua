@@ -519,6 +519,35 @@ describe("viewer zoom", function()
     truthy(s.cy < 0.3, "the next page starts at its top, cy = " .. s.cy)
   end)
 
+  it("keeps the worker when a zoomed page is scrolled faster than it renders", function()
+    reset()
+    local s = open(make("zoom-fast", pages(2)))
+    press("4+")
+    idle(s)
+    local started = 0
+    local system = vim.system
+    vim.system = function(cmd, ...)
+      if tostring(cmd[3]):match("worker%.js$") then
+        started = started + 1
+      end
+      return system(cmd, ...)
+    end
+    local ok, err = pcall(function()
+      press("j")
+      vim.wait(0) -- the worker is drawing this scroll when the next one comes
+      press("j")
+      press("j")
+      idle(s)
+    end)
+    vim.system = system
+    if not ok then
+      error(err, 0)
+    end
+    eq(0, started, "no mutool worker started again")
+    truthy(s.cy > 0.5, "scrolled down")
+    eq(1, s.page)
+  end)
+
   it("turns to the end of the previous page when scrolling up past the top", function()
     reset()
     local s = open(make("zoom-up", pages(3)))
