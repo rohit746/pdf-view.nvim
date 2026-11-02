@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Cancelling the password prompt of a password-protected PDF only held until the page was shown again: resizing the
+  window, a split next to it, or the file changing on disk asked for the password again. The PDF now stays locked with
+  its message until `:edit` (or `r`) asks again.
+
 ## [0.4.1] - 2026-11-02
 
 ### Fixed

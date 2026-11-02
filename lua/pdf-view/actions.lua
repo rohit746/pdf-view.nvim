@@ -194,6 +194,7 @@ function M.reload(s)
   purge_cache(s)
   s.outline = nil
   s.requested_key, s.requested_stamp = nil, nil
+  s.locked = nil -- the password prompt was cancelled: ask again
   show(s)
   rescan(s)
 end
