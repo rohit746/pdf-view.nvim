@@ -317,6 +317,28 @@ describe("viewer", function()
     setup()
   end)
 
+  it("refuses :read of a PDF instead of inserting the raw bytes", function()
+    reset()
+    setup()
+    local pdf = make("read-cmd", pages(1))
+    vim.cmd.edit(vim.fn.fnameescape(dir .. "/scratch.txt"))
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "keep me" })
+    local notices = {}
+    local notify = vim.notify
+    vim.notify = function(message)
+      notices[#notices + 1] = message
+    end
+    vim.cmd.read(vim.fn.fnameescape(pdf))
+    vim.notify = notify
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    eq({ "keep me" }, lines, ":read must not insert PDF bytes")
+    for _, line in ipairs(lines) do
+      eq(false, line:find("%PDF", 1, true) ~= nil, "binary content leaked into the buffer")
+    end
+    truthy(vim.inspect(notices):find("cannot :read a PDF", 1, true), "error names :PdfView")
+    setup()
+  end)
+
   it("opens CBZ files and extensions in any case", function()
     reset()
     local pdf = make("comic", { { w = 612, h = 792 }, { w = 400, h = 300 } })
