@@ -8,7 +8,7 @@ local ESC = "\27"
 local CHUNK_SIZE = 4096
 
 --- One APC graphics command. Keys are emitted in sorted order so the output is deterministic.
----@param keys table<string, string|number>
+---@param keys table<string, string|number|nil>
 ---@param payload? string
 ---@return string
 function M.sequence(keys, payload)

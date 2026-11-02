@@ -430,7 +430,7 @@ local function step_match(s, reverse)
   end
   for _ = 1, index and steps or 0 do
     local w
-    index, w = search.step(found, index, sign)
+    index, w = search.step(found, index --[[@as integer]], sign)
     wrapped = wrapped or w
   end
   if wrapped then
@@ -906,7 +906,6 @@ ACTIONS.help = {
   end,
 }
 
----@param s PdfView.Session
 --- Map the keys of `config.options.keymaps` in the viewer's buffer, replacing the ones mapped before (`setup()` may
 --- have changed them since).
 ---@param s PdfView.Session

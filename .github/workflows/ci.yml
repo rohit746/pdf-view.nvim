@@ -12,11 +12,18 @@ jobs:
   test:
     name: Neovim ${{ matrix.neovim }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.neovim == 'nightly' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # the Ubuntu releases are pinned for the MuPDF they package: 24.04 has 1.23, which scripts/ works around,
+        # and 26.04 has 1.27. macOS gets Homebrew's latest release.
+        os: [ubuntu-24.04, ubuntu-26.04, macos-latest]
         neovim: [v0.11.0, stable]
+        include:
+          # catches API changes before they reach a release; allowed to fail
+          - os: ubuntu-24.04
+            neovim: nightly
 
     steps:
       - uses: actions/checkout@v5
@@ -45,6 +52,40 @@ jobs:
       - name: Run the test suite
         run: make test
 
+  lint:
+    name: Type check and lint
+    runs-on: ubuntu-24.04
+    env:
+      LUA_LS_VERSION: 3.19.2
+      SELENE_VERSION: 0.32.0
+    steps:
+      - uses: actions/checkout@v5
+
+      # the type check reads the annotations of this Neovim's runtime
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: v0.12.6
+
+      - name: Install lua-language-server and selene
+        run: |
+          mkdir -p "$RUNNER_TEMP/luals" "$RUNNER_TEMP/bin"
+          curl -fsSL "https://github.com/LuaLS/lua-language-server/releases/download/$LUA_LS_VERSION/lua-language-server-$LUA_LS_VERSION-linux-x64.tar.gz" \
+            | tar xz -C "$RUNNER_TEMP/luals"
+          curl -fsSL -o "$RUNNER_TEMP/selene.zip" \
+            "https://github.com/Kampfkarren/selene/releases/download/$SELENE_VERSION/selene-$SELENE_VERSION-linux.zip"
+          unzip -q "$RUNNER_TEMP/selene.zip" -d "$RUNNER_TEMP/bin"
+          chmod +x "$RUNNER_TEMP/bin/selene"
+          echo "$RUNNER_TEMP/luals/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Type check
+        run: make typecheck
+
+      - name: Lint
+        run: make lint
+
   style:
     name: Formatting
     runs-on: ubuntu-latest
@@ -53,5 +94,5 @@ jobs:
       - uses: JohnnyMorganz/stylua-action@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          version: latest
+          version: 2.6.0 # keep in step with stylua.toml
           args: --check lua plugin tests
