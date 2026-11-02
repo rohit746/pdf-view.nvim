@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 - Cancelling the password prompt of a password-protected PDF only held until the page was shown again: resizing the
   window, a split next to it, or the file changing on disk asked for the password again. The PDF now stays locked with
   its message until `:edit` (or `r`) asks again.
+- Scrolling or zooming quickly with the trackpad, the mouse wheel or a held `j`/`k` started a new `mutool` for almost
+  every step, which opened the document again, and nothing showed until the input stopped. A page that is being drawn
+  is now finished and kept, and only the steps still waiting are dropped; `mutool` is stopped only for a page that has
+  been drawing for over a second.
 
 ## [0.4.1] - 2026-11-02
 

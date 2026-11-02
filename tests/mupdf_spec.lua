@@ -219,7 +219,7 @@ done
     eq({ 30, 10 }, { png_size(dir .. "/long-3.png") })
   end)
 
-  it("drops a waiting request that is killed, and starts over after killing the one in progress", function()
+  it("drops a waiting request that is killed, and lets the one in progress finish", function()
     local errors = {}
     local function record(name)
       return function(err)
@@ -229,16 +229,38 @@ done
     local first = mupdf.info(pdf, 1, record("first"))
     local second = mupdf.info(pdf, 2, record("second"))
     mupdf.info(pdf, 3, record("third"))
-    second:kill(15)
+    eq(true, second:kill(15), "the waiting request is dropped")
     vim.wait(0) -- the first request is handed to the worker
     truthy(mupdf.has_worker(pdf), "the first request is in progress")
-    first:kill(15)
+    eq(false, first:kill(15), "the request in progress is left to finish")
     wait_for(function()
       return errors.first ~= nil and errors.second ~= nil and errors.third ~= nil
     end, "every request answered")
-    truthy(tostring(errors.first):find("killed", 1, true), tostring(errors.first))
+    eq(false, errors.first, "the request in progress is answered, by the same worker")
     truthy(tostring(errors.second):find("killed", 1, true), tostring(errors.second))
-    eq(false, errors.third, "the request after them is answered by a new worker")
+    eq(false, errors.third)
+  end)
+
+  it("starts over after killing a request that has been in progress too long", function()
+    local errors = {}
+    local function record(name)
+      return function(err)
+        errors[name] = err or false
+      end
+    end
+    local kill_after = mupdf.kill_after
+    mupdf.kill_after = 0
+    local first = mupdf.info(pdf, 1, record("first"))
+    mupdf.info(pdf, 2, record("second"))
+    vim.wait(0) -- the first request is handed to the worker
+    local killed = first:kill(15)
+    mupdf.kill_after = kill_after
+    eq(true, killed)
+    wait_for(function()
+      return errors.first ~= nil and errors.second ~= nil
+    end, "every request answered")
+    truthy(tostring(errors.first):find("killed", 1, true), tostring(errors.first))
+    eq(false, errors.second, "the request after it is answered by a new worker")
   end)
 
   describe("render_clip", function()
