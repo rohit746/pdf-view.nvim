@@ -1365,8 +1365,9 @@ describe("viewer search", function()
     end
     local found = false
     for _, rgb in ipairs(fixture.pixels(png, points)) do
-      -- the current match's colour on white paper, which `classify` cannot tell apart from black text
-      found = found or (rgb[1] >= 230 and rgb[2] >= 100 and rgb[2] <= 180 and rgb[3] <= 80)
+      -- the current match's colour on white paper, which `classify` cannot tell apart from black text: 255,140,26
+      -- multiplied (MuPDF 1.27+) or 255,203,153 laid over translucently (older); yellow and text fall outside
+      found = found or (rgb[1] >= 230 and rgb[2] >= 100 and rgb[2] <= 215 and rgb[3] <= rgb[2] - 30)
     end
     truthy(found, "the current match is still on screen after zooming in")
   end)
