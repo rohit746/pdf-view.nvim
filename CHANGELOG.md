@@ -14,6 +14,8 @@ All notable changes to this project are documented here. The format follows
   every step, which opened the document again, and nothing showed until the input stopped. A page that is being drawn
   is now finished and kept, and only the steps still waiting are dropped; `mutool` is stopped only for a page that has
   been drawing for over a second.
+- `:read file.pdf` (or `.cbz`, `.epub`, ...) inserted the raw bytes of the file into the buffer. It is now refused
+  with a message that points to `:PdfView`.
 
 ## [0.4.1] - 2026-11-02
 

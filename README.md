@@ -316,7 +316,8 @@ require("pdf-view").setup({
 
 Unknown or mistyped options raise an error immediately. A keymap list replaces the default list for that action.
 
-With `auto_open = false` only `:PdfView` and `require("pdf-view").open()` open PDFs.
+With `auto_open = false` only `:PdfView` and `require("pdf-view").open()` open PDFs. With it on, `:read` of these files
+is refused, since it would insert the file's bytes: use `:PdfView` to open them.
 
 Comic book archives (`.cbz`) and XPS documents open like PDFs, since MuPDF reads them too. `require("pdf-view").open()`
 and `:PdfView {file}` take any file MuPDF can open, whatever its extension.

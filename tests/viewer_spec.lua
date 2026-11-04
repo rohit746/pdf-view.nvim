@@ -317,6 +317,39 @@ describe("viewer", function()
     setup()
   end)
 
+  it("refuses :read of a PDF instead of inserting the raw bytes", function()
+    reset()
+    setup()
+    local pdf = make("read-cmd", pages(1))
+    vim.cmd.edit(vim.fn.fnameescape(dir .. "/scratch.txt"))
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "keep me" })
+    local comic = dir .. "/read-cmd.CBZ"
+    vim.fn.writefile({ "not a PDF" }, comic)
+    ---@param path string
+    ---@return string[] notices
+    local function read(path)
+      local notices = {}
+      local notify = vim.notify
+      vim.notify = function(message)
+        notices[#notices + 1] = message
+      end
+      local ok, err = pcall(vim.cmd.read, vim.fn.fnameescape(path))
+      vim.notify = notify
+      assert(ok, err)
+      return notices
+    end
+    for _, path in ipairs({ pdf, comic }) do
+      local notices = read(path)
+      eq({ "keep me" }, vim.api.nvim_buf_get_lines(0, 0, -1, false), ":read must not insert the bytes of " .. path)
+      truthy(vim.inspect(notices):find(":PdfView", 1, true), "error names :PdfView")
+    end
+    local notices = read(dir .. "/missing.pdf")
+    eq({ "keep me" }, vim.api.nvim_buf_get_lines(0, 0, -1, false))
+    truthy(vim.inspect(notices):find("cannot read", 1, true), "a missing file is reported as missing")
+    eq(nil, vim.inspect(notices):find(":PdfView", 1, true), "a missing file is not refused as a PDF")
+    setup()
+  end)
+
   it("opens CBZ files and extensions in any case", function()
     reset()
     local pdf = make("comic", { { w = 612, h = 792 }, { w = 400, h = 300 } })

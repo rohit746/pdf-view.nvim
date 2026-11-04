@@ -28,16 +28,33 @@ end
 
 --- Own reads of the files with one of the `extensions` when `auto_open` is on. Re-run after the configuration changes.
 local function sync_handler()
-  vim.api.nvim_clear_autocmds({ group = group, event = "BufReadCmd" })
+  vim.api.nvim_clear_autocmds({ group = group, event = { "BufReadCmd", "FileReadCmd" } })
   if not config.options.auto_open or #config.options.extensions == 0 then
     return
   end
+  local patterns = vim.tbl_map(pattern, config.options.extensions)
   vim.api.nvim_create_autocmd("BufReadCmd", {
     group = group,
-    pattern = vim.tbl_map(pattern, config.options.extensions),
+    pattern = patterns,
     desc = "Open PDF (and CBZ, XPS, ...) files in pdf-view",
     callback = function(args)
       require("pdf-view.viewer").read(args.buf)
+    end,
+  })
+  -- `:read file.pdf` would otherwise insert the raw bytes into the current buffer (#58).
+  vim.api.nvim_create_autocmd("FileReadCmd", {
+    group = group,
+    pattern = patterns,
+    desc = "Refuse :read of PDF (and CBZ, XPS, ...) files; use :PdfView",
+    callback = function(args)
+      if args.file:match("^%a[%w+.-]*://") then -- a URL: netrw (or another plugin) reads it
+        return
+      end
+      local stat = vim.uv.fs_stat(args.file)
+      if not stat or stat.type ~= "file" then -- a typo in the path is not a PDF being refused
+        return vim.notify(("pdf-view: cannot read `%s`"):format(args.file), vim.log.levels.ERROR)
+      end
+      vim.notify("pdf-view: cannot :read this file; use :PdfView", vim.log.levels.ERROR)
     end,
   })
 end
