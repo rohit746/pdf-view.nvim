@@ -275,7 +275,7 @@ end
 ---@param pieces PdfView.Rect[]
 ---@return string
 local function key_of(s, pieces)
-  local parts = { s.picture.id }
+  local parts = { tostring(s.picture.id) }
   for _, piece in ipairs(pieces) do
     parts[#parts + 1] = ("%d,%d,%d,%d"):format(piece.row, piece.col, piece.rows, piece.cols)
   end
@@ -293,7 +293,8 @@ function M.refresh(s)
   -- zellij 0.45.1 draws a part of an image from the image's top-left corner, wherever the part starts, unless the part
   -- is scaled to a size in cells. It keeps one scaled copy per size and image: the parts of a page cut around a float
   -- get sizes of their own, and the page is sent again when they change, to drop the copies cut for the last float.
-  local cut = #pieces > 1 or (#pieces == 1 and (pieces[1].row ~= image.row or pieces[1].col ~= image.col))
+  local cut = #pieces > 1
+    or (#pieces == 1 and image ~= nil and (pieces[1].row ~= image.row or pieces[1].col ~= image.col))
   if cut then
     pieces = M.distinct(pieces)
   end
@@ -308,7 +309,7 @@ function M.refresh(s)
   -- as one placement, and when the same id goes on to show a different image (a piece cut around a float, then the
   -- whole page) it places the new one without removing the old one there. A fresh id is a fresh placement.
   local base = 0
-  if before > 0 then
+  if placed and before > 0 then
     base = placed.key == key and placed.base or (placed.base == 0 and PLACEMENT_RANGE or 0)
   end
 
@@ -352,7 +353,7 @@ function M.refresh(s)
   parts[#parts + 1] = ESC .. "8"
   kitty.send(table.concat(parts))
   -- the previous placements go after the new ones are up, so nothing flickers
-  if before > 0 then
+  if placed and before > 0 then
     local first = placed.base == base and base + #pieces + 1 or placed.base + 1
     for id = first, placed.base + before do
       kitty.send(kitty.unplace(pic.id, id))

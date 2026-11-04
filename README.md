@@ -29,7 +29,7 @@ LaTeX or Typst build, say — the page refreshes by itself.
 
 <div align="center">
 
-<img src="assets/screenshot-ghostty.png" width="800" alt="pdf-view.nvim rendering a PDF in Ghostty">
+<img src="assets/demo.gif" width="800" alt="pdf-view.nvim in Ghostty: turning pages, fitting the width, zooming, searching, the outline, links, dark mode and live reload of a Typst document">
 
 </div>
 
@@ -182,6 +182,12 @@ views scroll to a match only if it is not already on screen, and `+` on a fitted
 match. `?` searches backward, and `n` then keeps going backward. `<Esc>` removes the highlights. The search runs again
 by itself when the file changes.
 
+<div align="center">
+
+<img src="assets/screenshot-search.png" width="800" alt="Every match of a search highlighted on a width-fitted page, the current one in orange">
+
+</div>
+
 Searches go into Vim's search history (`:history /`). An empty answer to the prompt searches again for the last text
 searched in that viewer, as `/<CR>` does in Vim.
 
@@ -193,6 +199,12 @@ a translucent fill instead, which dulls the text under a match a little). The co
 
 `gO` lists the document's bookmarks, indented by depth, through `vim.ui.select` (a picker such as snacks.nvim's if you
 use one) and jumps to the chosen page. Documents without bookmarks say so.
+
+<div align="center">
+
+<img src="assets/screenshot-outline.png" width="800" alt="The document's outline in a picker">
+
+</div>
 
 ### Links
 
@@ -219,6 +231,12 @@ recoloured:
   its background, so the page blends in with the colorscheme. The pages are drawn again when the colorscheme changes.
 
 Search highlights are recoloured with the page.
+
+<div align="center">
+
+<img src="assets/screenshot-dark.png" width="800" alt="A page recoloured with recolor = invert">
+
+</div>
 
 ### Jumps and marks
 
@@ -315,6 +333,12 @@ current page is re-rendered, staying on the same page number. A file that is mid
 is retried for a few seconds while the previous page stays on screen. A PDF opened through a symbolic link is followed
 to the file the link points to. `:edit` re-reads the file by hand and stays on the same page too.
 
+<div align="center">
+
+<img src="assets/screenshot-live-reload.png" width="800" alt="A Typst source next to its PDF, which updated when the source was saved and recompiled">
+
+</div>
+
 On NFS, SMB, sshfs and WSL's `/mnt/c` (detected on Linux), and wherever the directory cannot be watched, the file is
 checked for changes every 500 ms instead. If even that cannot be set up, a notice says live reload is off.
 
@@ -394,7 +418,9 @@ tests/            headless suite (`make test`)
 
 ```sh
 make test      # headless suite: protocol encoding, layout, mutool, and the whole viewer with a stubbed UI
-make format    # stylua
+make typecheck # lua-language-server --check, with the types of Neovim's runtime
+make lint      # selene
+make format    # stylua (2.6.0, as in CI)
 ```
 
 ## License
