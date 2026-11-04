@@ -46,8 +46,15 @@ local function sync_handler()
     group = group,
     pattern = patterns,
     desc = "Refuse :read of PDF (and CBZ, XPS, ...) files; use :PdfView",
-    callback = function()
-      vim.notify("pdf-view: cannot :read a PDF; use :PdfView", vim.log.levels.ERROR)
+    callback = function(args)
+      if args.file:match("^%a[%w+.-]*://") then -- a URL: netrw (or another plugin) reads it
+        return
+      end
+      local stat = vim.uv.fs_stat(args.file)
+      if not stat or stat.type ~= "file" then -- a typo in the path is not a PDF being refused
+        return vim.notify(("pdf-view: cannot read `%s`"):format(args.file), vim.log.levels.ERROR)
+      end
+      vim.notify("pdf-view: cannot :read this file; use :PdfView", vim.log.levels.ERROR)
     end,
   })
 end

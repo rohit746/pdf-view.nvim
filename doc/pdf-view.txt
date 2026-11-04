@@ -23,6 +23,8 @@ USAGE                                                      *pdf-view-usage*
 
 With |pdf-view-config| `auto_open` (the default) every `*.pdf` that is read
 (`:edit`, `nvim file.pdf`, |:split|, ...) becomes a viewer.
+|:read| of such a file is refused, since it would insert the file's bytes
+into the buffer: use |:PdfView| to open it.
 
 Comic book archives (`*.cbz`), XPS documents (`*.xps`) and e-books (`*.epub`,
 `*.fb2`, `*.mobi`) open the same way, and the extension is matched in any
