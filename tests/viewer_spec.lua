@@ -1449,6 +1449,32 @@ describe("viewer search", function()
     end, "the search to be repeated on the new file", 8000)
     eq(2, s.count)
   end)
+
+  it("searches a hidden viewer again only when a window shows it", function()
+    reset()
+    local path = search_doc("search-hidden")
+    local s = open(path)
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    vim.cmd.enew()
+    holding_searches(function(calls)
+      fixture.write(path, {
+        { w = 612, h = 792, color = { 1, 1, 1 }, label = "alpha alpha" },
+        { w = 612, h = 792, color = { 1, 1, 1 }, label = "alpha" },
+      })
+      vim.wait(600, function() -- live reload waits 50 ms after the write
+        return #calls > 0
+      end)
+      eq({ 0, true }, { #calls, s.search_stale }, "no search while the viewer is in no window")
+      vim.cmd.buffer(s.buf)
+      eq({ 1, "alpha" }, { #calls, calls[1] and calls[1].needle })
+      calls[1].finish(nil, matches_on(1, 2), false)
+    end)
+    searched(s)
+    eq({ 2, nil }, { #s.search.matches, s.search_stale })
+  end)
 end)
 
 describe("viewer reflowable documents", function()

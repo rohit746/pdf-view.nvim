@@ -58,6 +58,7 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field searching? string the needle of the in-flight search, for the winbar
 ---@field last_needle? string the text last searched for, which an empty `/` prompt searches for again
 ---@field search_again? fun() starts the in-flight search over, for when the file changes under it
+---@field search_stale? boolean the file changed while the viewer was in no window: search again when one shows it
 ---@field jumps PdfView.Position[] where jumps (`gg`, `G`, bookmarks, searches, marks) started, oldest first
 ---@field jump_index integer the entry of `jumps` that `<C-o>` and `<C-i>` are at: `#jumps + 1` after a new jump
 ---@field marks table<string, PdfView.Position> `m{a-z}` marks, and `'` for where the latest jump started

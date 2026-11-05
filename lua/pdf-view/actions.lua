@@ -67,8 +67,15 @@ local function start_search(s, needle, done, waited)
 end
 
 --- Search the document again for the active search, after the file changed: pages, text and positions may differ.
+--- A viewer in no window only notes that its search is stale, and searches again when a window shows it
+--- (`BufWinEnter`): a document rebuilt on every save would otherwise be searched whole each time for nothing.
 ---@param s PdfView.Session
 local function rescan(s)
+  if not window_for(s) then
+    s.search_stale = s.search_again ~= nil or s.search ~= nil
+    return
+  end
+  s.search_stale = nil
   if s.search_again then
     return s.search_again() -- a search is still running: it read the old file, so it starts over
   end

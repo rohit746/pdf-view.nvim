@@ -210,6 +210,9 @@ function M.attach(buf)
     callback = function()
       apply_window_options(s, vim.api.nvim_get_current_win())
       relayout(s)
+      if s.search_stale then
+        rescan(s)
+      end
     end,
   })
   vim.api.nvim_create_autocmd("BufEnter", {

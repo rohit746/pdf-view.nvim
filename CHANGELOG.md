@@ -16,6 +16,9 @@ All notable changes to this project are documented here. The format follows
   been drawing for over a second.
 - `:read file.pdf` (or `.cbz`, `.epub`, ...) inserted the raw bytes of the file into the buffer. It is now refused
   with a message that points to `:PdfView`.
+- With a search active, live reload searched the whole document again on every change of the file even when its
+  viewer was in no window (`:bnext` away from it, say), which for a LaTeX or Typst build that writes the PDF on every
+  save meant a full search per save. A hidden viewer now searches again once, when a window shows it.
 
 ## [0.4.1] - 2026-11-02
 
