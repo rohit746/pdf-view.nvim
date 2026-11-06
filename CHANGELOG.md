@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Restoring a saved viewer position now clamps zoom to the configured maximum and its viewport centre to the page.
 - Cancelling the password prompt of a password-protected PDF only held until the page was shown again: resizing the
   window, a split next to it, or the file changing on disk asked for the password again. The PDF now stays locked with
   its message until `:edit` (or `r`) asks again.
