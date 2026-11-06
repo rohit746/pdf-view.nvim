@@ -2438,9 +2438,9 @@ describe("viewer robustness", function()
 
     reset()
     local other = make("remembered-below-range", pages(2))
-    positions.set(other, { page = 1, mode = "page", zoom = 0.25, cx = -2, cy = 3 })
+    positions.set(other, { page = 2, mode = "page", zoom = 0.25, cx = -2, cy = 3 })
     local restored = open(other)
-    eq({ 1, 0, 1 }, { restored.zoom, restored.cx, restored.cy })
+    eq({ 2, 1, 0, 1 }, { restored.page, restored.zoom, restored.cx, restored.cy })
     setup()
   end)
 
