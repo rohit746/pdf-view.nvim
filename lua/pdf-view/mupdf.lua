@@ -540,6 +540,22 @@ function M.render(path, page, width, height, out, cb, recolor)
   return ask(path, { "draw", page, math.floor(width), math.floor(height), out, recolor or "" }, done)
 end
 
+--- Copy a rectangle of the PNG `png` (a page rendered before), in its pixels, to the PNG `out`. It runs in the
+--- worker of `path`, which needs not open the document for it.
+---@param path string the document the PNG is a page of
+---@param png string
+---@param crop { x: integer, y: integer, w: integer, h: integer }
+---@param out string destination PNG
+---@param cb fun(err?: string)
+---@return PdfView.Job
+function M.crop(path, png, crop, out, cb)
+  local done = rendered(out, function(err)
+    cb(err)
+  end)
+  local request = { "crop", png, math.floor(crop.x), math.floor(crop.y), math.floor(crop.w), math.floor(crop.h), out }
+  return ask(path, request, done)
+end
+
 --- The text of one page: a line per line of text and an empty line after each block, in reading order. Empty for a
 --- page without text, such as a scanned one.
 ---@param path string

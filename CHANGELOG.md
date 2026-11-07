@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
   sent as bytes. Inside tmux the page is placed at the position of Neovim's pane and taken off the screen while its
   tmux window is not shown (with tmux's `focus-events` on). `placement = "positioned"` no longer needs `force = true`
   as well: any terminal that answers the Kitty graphics query is accepted.
+- iTerm2 and VS Code's terminal, which have no Kitty graphics, show pages as iTerm2 inline images (OSC 1337). They are
+  recognised by `$TERM_PROGRAM` (iTerm2 also by `$LC_TERMINAL`, and inside tmux by the name it gave tmux). The page is
+  printed at its window's position, in parts cut out by mutool around floats and the popup menu, and printed again
+  after Neovim draws over it or a message scrolls the screen; what it leaves behind is erased. The new `protocol`
+  option (`"auto"`, `"kitty"` or `"iterm2"`) chooses the image protocol by hand.
 
 ### Fixed
 

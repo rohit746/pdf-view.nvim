@@ -465,6 +465,21 @@ done
       end)
       eq("string", type(err))
     end)
+
+    it("cuts a rectangle out of a rendered page, pixel for pixel", function()
+      -- the right edge of the page: columns 0..11 are red page, 12..39 white outside it
+      local page = clip(red, 1, 1, 600, 0, 40, 30)
+      local out = dir .. "/crop.png"
+      local err = await(function(cb)
+        mupdf.crop(red, page, { x = 5, y = 10, w = 20, h = 15 }, out, cb)
+      end)
+      eq(nil, err)
+      eq({ 20, 15 }, { png_size(out) })
+      eq(
+        { { 255, 0, 0 }, { 255, 0, 0 }, { 255, 255, 255 }, { 255, 255, 255 } },
+        fixture.pixels(out, { { 0, 0 }, { 6, 14 }, { 7, 0 }, { 19, 14 } })
+      )
+    end)
   end)
 
   describe("search", function()

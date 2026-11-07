@@ -244,6 +244,7 @@ local TERMINAL_VARS = {
   "GHOSTTY_RESOURCES_DIR",
   "WEZTERM_EXECUTABLE",
   "KONSOLE_VERSION",
+  "LC_TERMINAL",
   "TMUX",
   "ZELLIJ",
 }
@@ -306,6 +307,65 @@ describe("terminal.detect", function()
     end)
   end)
 
+  it("sends iTerm2 inline images to iTerm2 and VS Code, at the window's position", function()
+    config.setup()
+    with_env({ TERM = "xterm-256color", TERM_PROGRAM = "iTerm.app" }, function()
+      eq({ name = "iterm2", term = "iterm.app", placeholders = false }, terminal.detect())
+      eq("iterm2", terminal.protocol())
+      eq("positioned", terminal.placement())
+    end)
+    with_env({ TERM = "xterm-256color", LC_TERMINAL = "iTerm2" }, function()
+      eq("iterm2", terminal.detect().name, "by $LC_TERMINAL, which ssh passes on")
+      eq("iterm2", terminal.protocol())
+    end)
+    with_env({ TERM = "xterm-256color", TERM_PROGRAM = "vscode" }, function()
+      eq("vscode", terminal.detect().name)
+      eq("iterm2", terminal.protocol())
+      eq("positioned", terminal.placement())
+    end)
+    for _, vars in ipairs({
+      { TERM = "xterm-kitty", KITTY_WINDOW_ID = "1" },
+      { TERM_PROGRAM = "WezTerm" },
+      { KONSOLE_VERSION = "251203" },
+      { TERM = "xterm-256color" },
+    }) do
+      with_env(vars, function()
+        eq("kitty", terminal.protocol(), vim.inspect(vars))
+      end)
+    end
+    with_env({ TERM_PROGRAM = "iTerm.app", ZELLIJ = "0" }, function()
+      eq("kitty", terminal.protocol(), "zellij draws Kitty graphics itself")
+    end)
+  end)
+
+  it("recognises iTerm2 behind tmux by the name the client gave", function()
+    config.setup()
+    with_env({ TERM = "tmux-256color", TERM_PROGRAM = "tmux" }, function()
+      in_tmux("xterm-256color iTerm2 3.5.14\n", function()
+        eq("iterm2", terminal.detect().name)
+        eq("iterm2", terminal.protocol())
+      end)
+    end)
+    with_env({ TERM = "tmux-256color", TERM_PROGRAM = "tmux" }, function()
+      in_tmux("xterm-kitty kitty(0.45.0)\n", function()
+        eq("kitty", terminal.detect().name)
+      end)
+    end)
+  end)
+
+  it("lets the protocol option win", function()
+    config.setup({ protocol = "iterm2" })
+    with_env({ TERM = "xterm-kitty", KITTY_WINDOW_ID = "1" }, function()
+      eq("iterm2", terminal.protocol())
+      eq("positioned", terminal.placement(), "iTerm2 images have no placeholders")
+    end)
+    config.setup({ protocol = "kitty" })
+    with_env({ TERM_PROGRAM = "iTerm.app" }, function()
+      eq("kitty", terminal.protocol())
+    end)
+    config.setup()
+  end)
+
   it("lets the placement option win", function()
     config.setup({ placement = "placeholders" })
     with_env({ TERM_PROGRAM = "WezTerm" }, function()
@@ -335,6 +395,30 @@ describe("terminal.check", function()
         local ok, reason = terminal.check()
         eq(false, ok)
         truthy(reason:find("wezterm has no Unicode placeholders", 1, true), reason)
+      end)
+    end)
+  end)
+
+  it("accepts iTerm2 and VS Code without asking anything", function()
+    with_terminal(function(written)
+      for _, program in ipairs({ "iTerm.app", "vscode" }) do
+        with_env({ TERM = "xterm-256color", TERM_PROGRAM = program }, function()
+          eq(true, (terminal.check()))
+          terminal.probe_file(fixture.tmpdir())
+          eq(nil, terminal.probe, "no question about files: the image travels in the sequence")
+        end)
+      end
+      eq({}, written)
+    end)
+  end)
+
+  it("says that iTerm2 images have no placeholders when they are asked for", function()
+    with_terminal(function()
+      config.setup({ placement = "placeholders" })
+      with_env({ TERM_PROGRAM = "iTerm.app" }, function()
+        local ok, reason = terminal.check()
+        eq(false, ok)
+        truthy(reason:find("iTerm2 inline images have no Unicode placeholders", 1, true), reason)
       end)
     end)
   end)

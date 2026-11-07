@@ -6,6 +6,7 @@ local kitty = require("pdf-view.kitty")
 local mupdf = require("pdf-view.mupdf")
 local positioned = require("pdf-view.positioned")
 local search = require("pdf-view.search")
+local terminal = require("pdf-view.terminal")
 
 local M = {}
 
@@ -85,8 +86,9 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field grid_key? string
 ---@field grid? PdfView.Placeholders
 ---@field picture? PdfView.Picture the image on screen, when it is placed at the window's position (zellij)
----@field placed? { id: integer, count: integer, key: string, base: integer } the placements of `picture` the
---- terminal has: ids `base + 1` to `base + count`
+---@field placed? { id: integer, count: integer, key: string, base: integer, rects?: PdfView.Rect[] } the placements
+--- of `picture` the terminal has: ids `base + 1` to `base + count`. With iTerm2 images, `rects` are where it was
+--- printed on screen
 ---@field lost? boolean the terminal no longer has `picture`: send it again before placing it
 ---@field dirty? boolean the screen may have moved or dropped the placements: place them again
 ---@field cut_key? string the last placements of `picture` that were cut around a float, since it was sent
@@ -403,7 +405,7 @@ local function destroy(s)
   if s.watcher then
     s.watcher.stop()
   end
-  if s.slot ~= 0 then
+  if s.slot ~= 0 and terminal.protocol() ~= "iterm2" then
     for _, id in ipairs(s.ids) do
       kitty.send(kitty.delete(id))
     end

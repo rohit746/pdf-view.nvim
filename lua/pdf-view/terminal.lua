@@ -17,10 +17,29 @@ function M.in_zellij()
   return (vim.env.ZELLIJ or "") ~= ""
 end
 
+--- The image protocol pages are sent with: Kitty graphics, or iTerm2 inline images (OSC 1337) for the terminals
+--- that have no Kitty graphics but draw those (iTerm2, VS Code).
+---@return "kitty"|"iterm2"
+function M.protocol()
+  local protocol = config.options.protocol
+  if protocol ~= "auto" then
+    return protocol --[[@as "kitty"|"iterm2"]]
+  end
+  if M.in_zellij() then
+    return "kitty" -- zellij draws Kitty graphics itself, whatever the terminal around it draws
+  end
+  local name = M.detect().name
+  return (name == "iterm2" or name == "vscode") and "iterm2" or "kitty"
+end
+
 --- How pages are put on screen: as Unicode placeholder cells, or as placements at the screen position of the window.
---- zellij and the terminals that have Kitty graphics but no Unicode placeholders (WezTerm, Konsole) get placements.
+--- zellij and the terminals that have Kitty graphics but no Unicode placeholders (WezTerm, Konsole) get placements,
+--- and so do iTerm2 inline images, which are printed at the window's position.
 ---@return "placeholders"|"positioned"
 function M.placement()
+  if M.protocol() == "iterm2" then
+    return "positioned"
+  end
   local mode = config.options.placement
   if mode ~= "auto" then
     return mode --[[@as "placeholders"|"positioned"]]
@@ -107,16 +126,33 @@ local detected
 ---@type integer[]?
 local pane_offset
 
--- the terminals pdf-view recognises, all with the Kitty graphics protocol, and whether they draw Unicode placeholders
-local KNOWN = { "kitty", "ghostty", "wezterm", "konsole" }
-local PLACEHOLDERS = { kitty = true, ghostty = true, wezterm = false, konsole = false }
+-- the terminals pdf-view recognises, as { what their names contain, name }: the first four with the Kitty graphics
+-- protocol, iTerm2 and VS Code with iTerm2 inline images (iTerm2 sets $TERM_PROGRAM to "iTerm.app")
+local KNOWN = {
+  { "kitty", "kitty" },
+  { "ghostty", "ghostty" },
+  { "wezterm", "wezterm" },
+  { "konsole", "konsole" },
+  { "iterm", "iterm2" },
+  { "vscode", "vscode" },
+}
+-- whether they draw Unicode placeholders
+local PLACEHOLDERS = {
+  kitty = true,
+  ghostty = true,
+  wezterm = false,
+  konsole = false,
+  iterm2 = false,
+  vscode = false,
+}
 
 ---@class PdfView.Terminal
----@field name? "kitty"|"ghostty"|"wezterm"|"konsole" nil when the terminal is not recognised
+---@field name? "kitty"|"ghostty"|"wezterm"|"konsole"|"iterm2"|"vscode" nil when the terminal is not recognised
 ---@field term? string $TERM_PROGRAM or $TERM, to name it in messages
 ---@field placeholders? boolean whether it draws Unicode placeholders; nil when it is not recognised
 
---- Identify a terminal that implements the Kitty graphics protocol, and whether it has Unicode placeholders.
+--- Identify a terminal that can show images (with the Kitty graphics protocol, or iTerm2 inline images), and whether
+--- it has Unicode placeholders.
 ---@return PdfView.Terminal
 function M.detect()
   if detected then
@@ -128,9 +164,9 @@ function M.detect()
 
   local function classify(value)
     value = (value or ""):lower()
-    for _, name in ipairs(KNOWN) do
-      if value:find(name, 1, true) then
-        return name
+    for _, known in ipairs(KNOWN) do
+      if value:find(known[1], 1, true) then
+        return known[2]
       end
     end
   end
@@ -140,11 +176,13 @@ function M.detect()
   end
 
   -- zellij passes the outer terminal's $TERM, $TERM_PROGRAM and the variables below on to its panes, so the checks
-  -- see through it. WezTerm and Konsole leave $TERM at xterm-256color; they are told by the variables they set.
+  -- see through it. WezTerm, Konsole, iTerm2 and VS Code leave $TERM at xterm-256color; they are told by the
+  -- variables they set. iTerm2 also sets $LC_TERMINAL, which ssh passes on to the remote host.
   local name
   if M.in_tmux() then
-    -- inside tmux $TERM says nothing about the outer terminal, but the attached client knows
-    name = classify(capture({ "tmux", "display-message", "-p", "#{client_termname}" }))
+    -- inside tmux $TERM says nothing about the outer terminal, but the attached client knows: its $TERM, and the
+    -- name it gave when tmux asked (e.g. "iTerm2 3.5.0", tmux 3.3 and newer)
+    name = classify(capture({ "tmux", "display-message", "-p", "#{client_termname} #{client_termtype}" }))
   end
   name = name
     or classify(term)
@@ -153,6 +191,7 @@ function M.detect()
     or (set("GHOSTTY_RESOURCES_DIR") and "ghostty")
     or (set("WEZTERM_EXECUTABLE") and "wezterm")
     or (set("KONSOLE_VERSION") and "konsole")
+    or classify(env.LC_TERMINAL)
     or nil
 
   detected = { name = name, term = program ~= "" and program or term, placeholders = PLACEHOLDERS[name] }
@@ -259,6 +298,12 @@ function M.check()
     return true
   end
   local found = M.detect()
+  if M.protocol() == "iterm2" then
+    if config.options.placement == "placeholders" then
+      return false, 'pdf-view: iTerm2 inline images have no Unicode placeholders. Remove `placement = "placeholders"`.'
+    end
+    return true -- there is no question that tells whether a terminal draws them
+  end
   if found.placeholders then
     return true
   end
@@ -288,7 +333,8 @@ function M.check()
   local needs = positioned and "Kitty graphics" or "Kitty graphics and Unicode placeholder"
   return false,
     (
-      "pdf-view: %s does not look like a terminal with %s support (kitty, Ghostty, WezTerm, Konsole). "
+      "pdf-view: %s does not look like a terminal with %s support (kitty, Ghostty, WezTerm, Konsole), "
+      .. "or with iTerm2 inline images (iTerm2, VS Code). "
       .. "Set `force = true` in setup() to try anyway."
     ):format(term ~= "" and ("`" .. term .. "`") or "this terminal", needs)
 end
@@ -423,7 +469,7 @@ end
 --- neither is a terminal behind tmux with extended keys on, whose reply would be typed keys as well.
 ---@param dir string the directory pages are rendered to
 function M.probe_file(dir)
-  if M.probe or config.options.transmission ~= "auto" or over_ssh() or M.bytes_only() then
+  if M.probe or config.options.transmission ~= "auto" or over_ssh() or M.bytes_only() or M.protocol() == "iterm2" then
     return
   end
   if vim.fn.has("nvim-0.12") == 0 or not M.ui_attached() then

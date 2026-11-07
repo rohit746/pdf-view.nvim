@@ -52,6 +52,11 @@
 //     maps black to the first colour and white to the second, the shades in between to the shades between them (a
 //     page in the colours of the editor's text and background).
 //
+//   ["crop", <in.png>, <x>, <y>, <width>, <height>, <out.png>]
+//     Copies the rectangle (<x>, <y>, <width>, <height>) of the image <in.png>, in its pixels, to the PNG <out.png>,
+//     pixel for pixel. It does not open the document: it cuts a page that was rendered already into the pieces that
+//     are not covered by a floating window, for a terminal that cannot show part of an image (iTerm2 inline images).
+//
 //   ["text", <page>]
 //     The text of a page, as a JSON string: a line per line of text and an empty line after each block, in reading
 //     order. <page> is 1-based and clamped to the document. Empty for a page without text, such as a scanned one.
@@ -272,6 +277,18 @@ function render(number, scaleX, scaleY, x, y, width, height, out, highlights, ho
   return notes;
 }
 
+function crop(file, x, y, width, height, out) {
+  var image = new Image(file);
+  var pixmap = new Pixmap(ColorSpace.DeviceRGB, [x, y, x + width, y + height], false);
+  pixmap.clear(255);
+  var device = new DrawDevice(Matrix.identity, pixmap);
+  // an image fills the unit square: scaled to its size in pixels, one image pixel lands on one pixel of the pixmap
+  device.fillImage(image, [image.getWidth(), 0, 0, image.getHeight(), 0, 0], 1);
+  device.close();
+  pixmap.saveAsPNG(out);
+  return "";
+}
+
 function pageText(number) {
   var count = openDocument().countPages();
   number = Math.max(1, Math.min(count, number || 1));
@@ -337,6 +354,10 @@ function pageLinks(number) {
 }
 
 function answer(request) {
+  if (request[3] === "crop") {
+    // needs no document, so it works the same whatever the document's password and layout
+    return crop(request[4], request[5], request[6], request[7], request[8], request[9]);
+  }
   password = request[2];
   layout(request[1]);
   request = [request[0]].concat(request.slice(3));

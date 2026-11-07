@@ -83,7 +83,7 @@ local function present(s, win, png, info, fit, rows)
   local id = s.ids[slot]
   if held then
     kitty.send(kitty.unplace(id)) -- the terminal still has the page: only its placement is made again
-  else
+  elseif terminal.protocol() ~= "iterm2" then -- an iTerm2 image is sent as it is printed (see `positioned`)
     local sent, commands = pcall(kitty.transmit, id, png, terminal.transmission())
     if not sent then
       return display_message(s, win, "pdf-view: " .. tostring(commands))
