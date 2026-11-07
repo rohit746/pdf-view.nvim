@@ -24,6 +24,7 @@ LaTeX or Typst build, say — the page refreshes by itself.
   [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) using Unicode placeholders, so the
   image behaves like text: it follows splits, tabs, resizes and works inside tmux. zellij, WezTerm and Konsole have no
   placeholders, so there the page is placed at its window's position instead ([Positioned placements](#positioned-placements)).
+  iTerm2 and VS Code get [iTerm2 inline images](#iterm2-and-vs-code).
 - No dependency on other plugins, ImageMagick or Ghostscript.
 - Opening a PDF never reads its bytes into a buffer, and `:w` can never overwrite it. `:w {file}` saves a copy.
 
@@ -35,22 +36,24 @@ LaTeX or Typst build, say — the page refreshes by itself.
 
 ## Requirements
 
-- Neovim 0.11 or newer, with `termguicolors` (the image id travels in a 24-bit foreground colour; zellij, WezTerm and
-  Konsole do not need it).
+- Neovim 0.11 or newer, with `termguicolors` (the image id travels in a 24-bit foreground colour; zellij, WezTerm,
+  Konsole, iTerm2 and VS Code do not need it).
 - `mutool` from MuPDF, built with JavaScript support (the Homebrew `mupdf`, Debian/Ubuntu and Arch `mupdf-tools`
   packages are):
   `brew install mupdf` · `apt install mupdf-tools` · `pacman -S mupdf-tools`
 - A terminal with the Kitty graphics protocol: [kitty](https://sw.kovidgoyal.net/kitty/) or
   [Ghostty](https://ghostty.org), which also have its Unicode placeholders, or [WezTerm](https://wezterm.org) or
   [Konsole](https://konsole.kde.org), which do not ([Positioned placements](#positioned-placements)). WezTerm needs
-  `config.enable_kitty_graphics = true` in `wezterm.lua`. iTerm2 has no Kitty graphics.
+  `config.enable_kitty_graphics = true` in `wezterm.lua`.
+- Or a terminal with iTerm2 inline images: [iTerm2](https://iterm2.com), or VS Code's terminal with
+  `"terminal.integrated.enableImages": true` in its settings ([iTerm2 and VS Code](#iterm2-and-vs-code)).
 - Inside tmux (3.3a or newer): the plugin runs `tmux set -p allow-passthrough on` for its own pane. To manage it
   yourself, set `tmux_passthrough = false` and add `set -g allow-passthrough on` to `tmux.conf`. tmux must also pass
   24-bit colour on: if `:checkhealth pdf-view` says it doesn't, add `set -as terminal-features ',xterm-kitty:RGB'`
   (with your outer `$TERM`) to `tmux.conf`.
 - Inside zellij (0.45 or newer): nothing to configure. See [zellij](#zellij) for how it differs.
-- WezTerm or Konsole inside tmux: also `set -g focus-events on`, so that a page leaves the screen when you switch to
-  another tmux window.
+- WezTerm, Konsole, iTerm2 or VS Code inside tmux: also `set -g focus-events on`, so that a page leaves the screen when
+  you switch to another tmux window, and comes back with it.
 
 > [!TIP]
 > Run `:checkhealth pdf-view` to verify all of this.
@@ -269,6 +272,7 @@ require("pdf-view").setup({
   tmux_passthrough = true, -- run `tmux set -p allow-passthrough on` for this pane
   placement = "auto",      -- "placeholders"; "positioned": at the window's position. auto = positioned in zellij,
                            -- WezTerm and Konsole
+  protocol = "auto",       -- "kitty"; "iterm2": iTerm2 inline images. auto = iterm2 in iTerm2 and VS Code
   force = false,           -- skip terminal detection
   max_pixels = 4096,       -- cap for either side of a fitted page (zoomed views are window-sized anyway)
   zoom_step = 1.25,        -- factor of one zoom step
@@ -366,6 +370,29 @@ taken away while its window is hidden or in another tab page, and put back after
 Another terminal with Kitty graphics but without placeholders can be tried with `placement = "positioned"`: it is
 asked whether it has Kitty graphics, and pages are shown if it answers.
 
+## iTerm2 and VS Code
+
+iTerm2 and VS Code's terminal have no Kitty graphics, but they draw iTerm2 inline images (OSC 1337). They are told
+apart by `$TERM_PROGRAM` (iTerm2 also by `$LC_TERMINAL`, which ssh passes on), and inside tmux by the name the terminal
+gave tmux. VS Code draws images only with `"terminal.integrated.enableImages": true` in its settings.
+
+The page is printed into the cells at its window's position, like positioned placements, but such an image has no id:
+it cannot be moved or taken away, and it goes when its cells are written over. So:
+
+- The page is printed again whenever Neovim draws the window's lines, which may have written over it, and after a
+  message that scrolled the screen. Every print carries the whole PNG, which costs more than a Kitty placement, over
+  SSH especially.
+- Around a floating window or the popup menu the page is printed in parts, each cut out of the rendered page by
+  mutool.
+- What a page leaves uncovered (a smaller page, zooming out) is erased. When that may be under another window (a
+  split, a viewer that was hidden), the screen is cleared and drawn again instead (`:mode`).
+
+- Inside tmux an image passes through in one piece, and tmux drops one that is over its input buffer: a page whose PNG
+  is over about 750 KB stays blank. tmux 3.6 lets you raise the buffer with `set -s input-buffer-size 4194304`.
+
+`protocol = "iterm2"` uses these images in another terminal that draws them. WezTerm and Konsole draw them too, but
+keep Kitty graphics by default: Konsole leaves parts of old images on screen.
+
 ## zellij
 
 zellij 0.45 implements the Kitty graphics protocol itself, but not its Unicode placeholders. Inside zellij (detected
@@ -403,7 +430,8 @@ Set `placement = "placeholders"` once your zellij supports Unicode placeholders
 
 In zellij, WezTerm and Konsole, steps 3 and 4 differ. The buffer stays blank, and the image is placed (`a=p`) at the
 screen position of the window, under the text, after moving the cursor there; see
-[Positioned placements](#positioned-placements).
+[Positioned placements](#positioned-placements). In iTerm2 and VS Code nothing is uploaded: the PNG is printed at that
+position as an inline image (`OSC 1337`); see [iTerm2 and VS Code](#iterm2-and-vs-code).
 
 When zoomed, step 2 renders only the rectangle of the enlarged page that is on screen, so a window-sized PNG is all
 that is ever drawn and uploaded, however deep the zoom, and scrolling costs the same as turning a page.
@@ -433,7 +461,9 @@ lua/pdf-view/
   mupdf.lua       async wrapper around mutool, and the worker that keeps a document open
   kitty.lua       graphics protocol encoding, tmux passthrough
   placeholder.lua Unicode placeholder text
-  positioned.lua  zellij, WezTerm, Konsole: the page placed at its window's position, kept in step with floats and redraws
+  positioned.lua  zellij, WezTerm, Konsole, iTerm2, VS Code: the page placed at its window's position, kept in step with
+                  floats and redraws
+  iterm2.lua      iTerm2 inline images (OSC 1337)
   terminal.lua    terminal detection, cell size, tmux
   watch.lua       file watching
   health.lua      :checkhealth pdf-view

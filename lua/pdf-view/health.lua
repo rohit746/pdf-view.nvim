@@ -117,6 +117,10 @@ local function check_mutool()
 end
 
 local function check_transmission()
+  if terminal.protocol() == "iterm2" then
+    vim.health.info("image transmission: bytes (an iTerm2 inline image carries its PNG every time it is printed)")
+    return
+  end
   local mode, probe = terminal.transmission(), terminal.probe
   local blank = 'If pages stay blank, set `transmission = "direct"` in setup().'
   if config.options.transmission ~= "auto" then
@@ -154,12 +158,11 @@ local function check_transmission()
   end
 end
 
-local function check_terminal()
-  local detected = terminal.detect()
-  local positioned = terminal.placement() == "positioned"
-  if config.options.force then
-    vim.health.warn("`force = true`: terminal detection is skipped")
-  elseif detected.placeholders then
+--- What is known of a terminal for Kitty graphics: whether it has Unicode placeholders, or answers a graphics query.
+---@param detected PdfView.Terminal
+---@param positioned boolean
+local function check_kitty_terminal(detected, positioned)
+  if detected.placeholders then
     vim.health.ok("terminal: " .. detected.name)
   elseif detected.name or (positioned and config.options.placement == "positioned") then
     local name = detected.name or ("`" .. (detected.term or "") .. "`")
@@ -188,9 +191,31 @@ local function check_terminal()
       ("terminal not recognised (TERM_PROGRAM=%s, TERM=%s)"):format(vim.env.TERM_PROGRAM or "", vim.env.TERM or ""),
       {
         "Use kitty or Ghostty (directly or inside tmux or zellij), or WezTerm or Konsole: they have Kitty graphics.",
+        'Or iTerm2 or VS Code, with iTerm2 inline images. Another terminal with them: `protocol = "iterm2"`.',
         'Another terminal with Kitty graphics can be tried with `placement = "positioned"`, or `force = true`.',
       }
     )
+  end
+end
+
+-- how the terminals that get iTerm2 inline images are named in the report
+local IMAGE_TERMINALS = { iterm2 = "iTerm2", vscode = "VS Code", wezterm = "WezTerm", konsole = "Konsole" }
+
+local function check_terminal()
+  local detected = terminal.detect()
+  local positioned = terminal.placement() == "positioned"
+  local printed = terminal.protocol() == "iterm2"
+  if config.options.force then
+    vim.health.warn("`force = true`: terminal detection is skipped")
+  end
+  if printed then
+    local name = IMAGE_TERMINALS[detected.name] or detected.name or ("`" .. (detected.term or "") .. "`")
+    vim.health.ok(("terminal: %s, with iTerm2 inline images (OSC 1337)"):format(name))
+    if detected.name == "vscode" then
+      vim.health.info('VS Code shows them only with `"terminal.integrated.enableImages": true` in its settings')
+    end
+  elseif not config.options.force then
+    check_kitty_terminal(detected, positioned)
   end
   if terminal.in_zellij() then
     local version = terminal.zellij_version()
@@ -205,21 +230,44 @@ local function check_terminal()
     end
     vim.health.info("zellij must not have `support_kitty_graphics_protocol false` in its configuration")
   end
-  if positioned then
+  if printed then
+    vim.health.ok("pages are printed at the position of their window, and again after Neovim draws over them")
+  elseif positioned then
     vim.health.ok("pages are placed at the position of their window (Unicode placeholders are not used)")
   else
     vim.health.ok("pages are drawn with Unicode placeholders")
   end
 
   if terminal.in_tmux() and positioned and not terminal.in_zellij() then
-    -- tmux knows nothing of a positioned page, and only focus events tell Neovim that its window was left
+    -- tmux knows nothing of a positioned page, and only focus events tell Neovim that its window was left, or shown
+    -- again (and drawn again by tmux, without an iTerm2 image)
     local focus = vim.system({ "tmux", "show-options", "-gv", "focus-events" }, { text = true }):wait(1000)
     if vim.trim(focus.stdout or "") == "on" then
-      vim.health.ok("tmux focus-events: on (a page is taken off the screen while its tmux window is not shown)")
+      vim.health.ok(
+        printed and "tmux focus-events: on (a page is printed again when its tmux window is shown again)"
+          or "tmux focus-events: on (a page is taken off the screen while its tmux window is not shown)"
+      )
     else
-      vim.health.warn("tmux focus-events is off: a page stays on the screen over another tmux window", {
-        "Add `set -g focus-events on` to tmux.conf.",
-      })
+      local effect = printed and "a page stays blank after switching back to its tmux window"
+        or "a page stays on the screen over another tmux window"
+      vim.health.warn("tmux focus-events is off: " .. effect, { "Add `set -g focus-events on` to tmux.conf." })
+    end
+  end
+
+  if terminal.in_tmux() and printed then
+    -- an inline image passes through tmux in one piece, which tmux drops when it is over its input buffer
+    local size = tonumber(
+      vim.trim(
+        vim.system({ "tmux", "show-options", "-sv", "input-buffer-size" }, { text = true }):wait(1000).stdout or ""
+      )
+    ) or 1048576
+    if size < 4194304 then
+      vim.health.info(
+        ("tmux drops an image over its input buffer (%d KiB), so a page whose PNG is over %d KiB stays blank. "):format(
+          math.floor(size / 1024),
+          math.floor(size * 3 / 4 / 1024)
+        ) .. "If one does, add `set -s input-buffer-size 4194304` to tmux.conf (tmux 3.6 has it)."
+      )
     end
   end
 

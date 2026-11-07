@@ -3061,6 +3061,182 @@ describe("viewer with positioned placements outside zellij (WezTerm, Konsole)", 
   setup()
 end)
 
+describe("viewer with iTerm2 inline images (iTerm2, VS Code)", function()
+  local detect = terminal.detect
+  terminal.detect = function()
+    return { name = "iterm2", term = "iterm.app", placeholders = false }
+  end
+  setup()
+
+  --- The images printed by the writes from `from` on: `{ row, col, args, png }`, rows and columns 1-based.
+  local function prints(from)
+    local list = {}
+    for index = from or 1, #writes do
+      for row, col, args, data in writes[index]:gmatch("\27%[(%d+);(%d+)H\27%]1337;File=([^:]*):([^\a]*)\a") do
+        local parsed = {}
+        for key, value in args:gmatch("(%w+)=(%w+)") do
+          parsed[key] = tonumber(value) or value
+        end
+        list[#list + 1] = { row = tonumber(row), col = tonumber(col), args = parsed, png = vim.base64.decode(data) }
+      end
+    end
+    return list
+  end
+
+  --- The cells erased by the writes, as "row:col", 1-based.
+  local function erased()
+    local cells = {}
+    for _, data in ipairs(writes) do
+      for row, col, count in data:gmatch("\27%[(%d+);(%d+)H\27%[(%d+)X") do
+        for offset = 0, tonumber(count) - 1 do
+          cells[row .. ":" .. (tonumber(col) + offset)] = true
+        end
+      end
+    end
+    return cells
+  end
+
+  --- The cells of `rects`, as "row:col", 1-based.
+  local function cells_of(rects)
+    local cells = {}
+    for _, r in ipairs(rects) do
+      for row = r.row, r.row + r.rows - 1 do
+        for col = r.col, r.col + r.cols - 1 do
+          cells[(row + 1) .. ":" .. (col + 1)] = true
+        end
+      end
+    end
+    return cells
+  end
+
+  local function printed(s, count)
+    wait_for(function()
+      return s.placed ~= nil and s.placed.rects ~= nil and #s.placed.rects == count and not s.dirty
+    end, count .. " pieces printed")
+  end
+
+  it("prints the page at its window's position, and sends no Kitty graphics", function()
+    reset()
+    eq("iterm2", terminal.protocol())
+    eq("positioned", terminal.placement())
+    local s = open(make("iterm2-basic", pages(1)))
+    printed(s, 1)
+    eq({ "" }, vim.fn.uniq(vim.api.nvim_buf_get_lines(0, 0, -1, false)), "the buffer is blank")
+    local list = prints()
+    local last, image = list[#list], image_rect(s)
+    eq({ image.row + 1, image.col + 1 }, { last.row, last.col })
+    eq({ s.picture.cols, s.picture.rows, 0, 1 }, {
+      last.args.width,
+      last.args.height,
+      last.args.preserveAspectRatio,
+      last.args.doNotMoveCursor,
+    })
+    eq(slurp(s.picture.path), last.png, "the rendered page, as it is")
+    eq(false, sent("\27_G"), "no Kitty graphics command")
+    truthy(writes[#writes]:find("^\0277") and writes[#writes]:find("\0278$"), "the cursor is saved and restored")
+  end)
+
+  it("prints the parts around a float as PNGs of their own, and the whole page once it closes", function()
+    reset()
+    local s = open(make("iterm2-float", pages(1)))
+    printed(s, 1)
+    local image = image_rect(s)
+    local float = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, {
+      relative = "editor",
+      row = image.row + 2,
+      col = image.col + 3,
+      width = 4,
+      height = 2,
+      border = "single",
+    })
+    writes = {}
+    vim.cmd.redraw()
+    printed(s, 4)
+    local list = prints()
+    local area = 0
+    for index = #list - 3, #list do
+      local piece = list[index]
+      area = area + piece.args.width * piece.args.height
+      local function u32(offset)
+        local a, b, c, d = piece.png:byte(offset, offset + 3)
+        return ((a * 256 + b) * 256 + c) * 256 + d
+      end
+      local w, h = u32(17), u32(21)
+      truthy(w < s.picture.width or h < s.picture.height, "a part of the page, not all of it")
+    end
+    eq(image.rows * image.cols - 6 * 4, area, "every cell but the float's (with its border)")
+    eq({}, erased(), "nothing to erase: the float was drawn over the page")
+
+    writes = {}
+    vim.api.nvim_win_close(float, true)
+    vim.cmd.redraw()
+    printed(s, 1)
+    eq(slurp(s.picture.path), prints()[#prints()].png, "whole again")
+  end)
+
+  it("erases what the zoomed page leaves uncovered when it zooms out", function()
+    reset()
+    local s = open(make("iterm2-zoom", pages(1)))
+    printed(s, 1)
+    press("+")
+    wait_for(function()
+      return s.zoom > 1 and s.job == nil and s.placed and s.placed.id == s.picture.id and not s.dirty
+    end, "zoomed in")
+    local zoomed = vim.deepcopy(s.placed.rects)
+    writes = {}
+    press("0")
+    wait_for(function()
+      return s.zoom == 1 and s.job == nil and next(erased()) ~= nil
+    end, "the zoomed page erased")
+    local expected = cells_of(zoomed)
+    for cell in pairs(cells_of(s.placed.rects)) do
+      expected[cell] = nil
+    end
+    eq(expected, erased(), "exactly the cells the fitted page does not cover")
+  end)
+
+  it("clears the screen when the window shows another buffer, which may not draw over all of the page", function()
+    reset()
+    local s = open(make("iterm2-hide", pages(1)))
+    printed(s, 1)
+    local cleared = 0
+    with_stub(vim.cmd, "mode", function()
+      cleared = cleared + 1
+    end, function()
+      vim.cmd.enew()
+      vim.cmd.redraw()
+      wait_for(function()
+        return cleared > 0
+      end, ":mode")
+      eq({}, erased(), "nothing erased by hand: the other buffer is drawn there")
+
+      writes = {}
+      vim.cmd.buffer(s.buf)
+      vim.cmd.redraw()
+      printed(s, 1)
+    end)
+  end)
+
+  it("erases the page for a message in its place", function()
+    reset()
+    local path = make("iterm2-message", pages(1))
+    local s = open(path)
+    printed(s, 1)
+    local rects = vim.deepcopy(s.placed.rects)
+    writes = {}
+    os.remove(path)
+    press("r")
+    wait_for(function()
+      return vim.api.nvim_buf_get_lines(0, 0, 1, false)[1]:find("pdf%-view:") ~= nil
+    end, "the message")
+    eq(cells_of(rects), erased())
+    eq({}, prints())
+  end)
+
+  terminal.detect = detect
+  setup()
+end)
+
 describe("viewer page turns", function()
   setup()
 
