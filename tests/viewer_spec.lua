@@ -1818,8 +1818,59 @@ describe("viewer page text", function()
     eq({ "Page 1" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
     eq(2, #vim.api.nvim_tabpage_list_wins(0))
 
+    -- another page: the same buffer and split take its text and its page number, no second split opens
+    vim.api.nvim_set_current_win(viewer_win)
+    press("2gg")
+    on_page(s, 2)
+    press("t")
+    wait_for(function()
+      return vim.api.nvim_get_current_win() ~= viewer_win
+    end, "the text split for page 2")
+    eq(buf, vim.api.nvim_get_current_buf())
+    eq("pdf-view://show.pdf (page 2)", vim.api.nvim_buf_get_name(buf))
+    eq({ "Page 2", "", "Far below" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    eq(2, #vim.api.nvim_tabpage_list_wins(0))
+    eq(-1, vim.fn.bufnr("pdf-view://show.pdf (page 1)"), "renaming leaves no buffer behind under the old name")
+
     vim.cmd.close()
     eq(false, vim.api.nvim_buf_is_valid(buf), "closing the split wipes the scratch buffer")
+  end)
+
+  it("keeps a text buffer for each document, also for documents of the same file name", function()
+    reset()
+    vim.fn.mkdir(dir .. "/other", "p")
+    local first = open(texts("same"))
+    press("t")
+    wait_for(function()
+      return vim.api.nvim_get_current_buf() ~= first.buf
+    end, "the text split of the first document")
+    local first_text = vim.api.nvim_get_current_buf()
+    vim.cmd.wincmd("p")
+
+    local second = open(texts("other/same"))
+    press("2gg")
+    on_page(second, 2)
+    press("t")
+    wait_for(function()
+      local buf = vim.api.nvim_get_current_buf()
+      return buf ~= second.buf and buf ~= first_text
+    end, "the text split of the second document")
+    local second_text = vim.api.nvim_get_current_buf()
+    eq({ "Page 2", "", "Far below" }, vim.api.nvim_buf_get_lines(second_text, 0, -1, false))
+    eq("pdf-view://same.pdf (page 1)", vim.api.nvim_buf_get_name(first_text))
+    eq({ "Page 1" }, vim.api.nvim_buf_get_lines(first_text, 0, -1, false))
+
+    -- the second document's page 1 takes the name the first one holds: its full path tells them apart
+    vim.cmd.wincmd("p")
+    press("gg")
+    on_page(second, 1)
+    press("t")
+    wait_for(function()
+      return vim.api.nvim_get_current_buf() == second_text
+    end, "the text split of the second document again")
+    eq({ "Page 1" }, vim.api.nvim_buf_get_lines(second_text, 0, -1, false))
+    eq(("pdf-view://%s (page 1)"):format(second.path), vim.api.nvim_buf_get_name(second_text))
+    eq("pdf-view://same.pdf (page 1)", vim.api.nvim_buf_get_name(first_text))
   end)
 
   it("says so when the page has no text, and changes nothing", function()

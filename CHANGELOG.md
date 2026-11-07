@@ -19,6 +19,9 @@ All notable changes to this project are documented here. The format follows
 - With a search active, live reload searched the whole document again on every change of the file even when its
   viewer was in no window (`:bnext` away from it, say), which for a LaTeX or Typst build that writes the PDF on every
   save meant a full search per save. A hidden viewer now searches again once, when a window shows it.
+- `t` opened another split for every page whose text it showed, as each page had a buffer of its own. A document now
+  has one text buffer, which `t` fills with the page on screen, renames after it and focuses in the split it already
+  has.
 
 ## [0.4.1] - 2026-11-02
 

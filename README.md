@@ -216,9 +216,9 @@ opens with `vim.ui.open()`. A page without links says so.
 
 `y` yanks the text of the page on screen, a line per line of text and an empty line between blocks, into the register
 given (`"+y` copies it to the clipboard, `"ay` into register `a`), linewise. `t` shows the same text in a scratch buffer
-in a vertical split next to the viewer, to quote from or to search with Neovim's own tools; `t` on a page whose text is
-already shown goes back to it. The text of an EPUB, FB2 or MOBI page follows its layout. A scanned page has no text to
-copy, and says so.
+in a vertical split next to the viewer, to quote from or to search with Neovim's own tools. Each document has one such
+buffer, named after the page it holds: `t` on another page fills it with that page and goes back to its split. The text
+of an EPUB, FB2 or MOBI page follows its layout. A scanned page has no text to copy, and says so.
 
 ### Dark mode
 
