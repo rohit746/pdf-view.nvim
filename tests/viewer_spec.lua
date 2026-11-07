@@ -2436,7 +2436,13 @@ describe("viewer robustness", function()
     local remembered_path = initial.path
     vim.cmd("silent! %bwipeout!")
     positions.set(remembered_path, { page = 1, mode = "page", zoom = 100000, cx = 2.5, cy = -3 })
-    local s = open(path)
+    vim.cmd.edit(vim.fn.fnameescape(path))
+    local s = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(s, "no viewer session for " .. path)
+    eq({ 1, 0 }, { s.cx, s.cy })
+    wait_for(function()
+      return s.slot ~= 0 or vim.api.nvim_buf_get_lines(0, 0, 1, false)[1]:find("pdf%-view:") ~= nil
+    end, "first render")
     eq(4, s.zoom)
     truthy(s.cx > 0.5 and s.cx <= 1 and s.cy < 0.5 and s.cy >= 0, "centre clamped toward the top right")
 
