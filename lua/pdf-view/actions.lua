@@ -566,22 +566,35 @@ local function yank_text(s)
   end)
 end
 
---- Show the text of the page in a scratch buffer, in a split next to the viewer. The buffer of a page that is already
---- shown is filled again and focused.
+--- Show the text of the page in a scratch buffer, in a split next to the viewer. Each document has one such buffer,
+--- named after the page it holds: `t` on another page fills it again, renames it and focuses its window.
 ---@param s PdfView.Session
 local function show_text(s)
   with_page_text(s, function(lines, page)
-    local name = ("pdf-view://%s (page %d)"):format(vim.fn.fnamemodify(s.path, ":t"), page)
     local buf
     for _, candidate in ipairs(vim.api.nvim_list_bufs()) do
-      if vim.api.nvim_buf_get_name(candidate) == name then
+      if vim.b[candidate].pdf_view_text_of == s.path then
         buf = candidate
       end
     end
     if not buf then
       buf = vim.api.nvim_create_buf(false, true)
       vim.bo[buf].bufhidden = "wipe"
-      vim.api.nvim_buf_set_name(buf, name)
+      vim.b[buf].pdf_view_text_of = s.path
+    end
+    local old_name = vim.api.nvim_buf_get_name(buf)
+    local name = ("pdf-view://%s (page %d)"):format(vim.fn.fnamemodify(s.path, ":t"), page)
+    if old_name ~= name and not pcall(vim.api.nvim_buf_set_name, buf, name) then
+      -- another document of the same file name holds that name: the full path tells them apart
+      pcall(vim.api.nvim_buf_set_name, buf, ("pdf-view://%s (page %d)"):format(s.path, page))
+    end
+    if old_name ~= "" and old_name ~= vim.api.nvim_buf_get_name(buf) then
+      -- renaming leaves an empty alternate buffer under the old name, as `:file` does
+      for _, other in ipairs(vim.api.nvim_list_bufs()) do
+        if other ~= buf and not vim.api.nvim_buf_is_loaded(other) and vim.api.nvim_buf_get_name(other) == old_name then
+          vim.api.nvim_buf_delete(other, { force = true })
+        end
+      end
     end
     vim.bo[buf].modifiable = true
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)

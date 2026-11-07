@@ -152,8 +152,9 @@ an e-mail opens with |vim.ui.open()|. A page without links says so.
 the clipboard, `"ay` for register a), linewise: a line per line of text and
 an empty line between blocks. `t` shows the same text in a scratch buffer in
 a vertical split next to the viewer, to quote from or search with Neovim's
-own tools; `t` again on that page goes back to it. A scanned page has no text
-and says so.
+own tools. Each document has one such buffer, named after the page it holds:
+`t` on another page fills it with that page and goes back to its split. A
+scanned page has no text and says so.
 
                                                               *pdf-view-marks*
 `gg`, `G`, `{count}G`, outline picks, search matches and marks are jumps. Each
