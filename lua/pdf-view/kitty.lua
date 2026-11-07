@@ -83,14 +83,16 @@ end
 
 --- Command that shows part of image `id` at the cursor, as placement `placement`. Placing the same id and placement
 --- again moves it. The cursor stays where it is, and the image is drawn under the text so that text over it (a
---- message, a floating window) stays readable.
+--- message, a floating window) stays readable, unless `over` puts it over the text.
 ---@param id integer
 ---@param placement integer
 ---@param crop PdfView.Crop
 ---@param quiet? integer 2 (the default) silences errors too, 1 only the acknowledgements
+---@param over? boolean draw the image over the text, for a terminal that would hide it under the text
 ---@return string
-function M.place_at(id, placement, crop, quiet)
-  local keys = { a = "p", i = id, p = placement, x = crop.x, y = crop.y, w = crop.w, h = crop.h, C = 1, z = -1 }
+function M.place_at(id, placement, crop, quiet, over)
+  local keys = { a = "p", i = id, p = placement, x = crop.x, y = crop.y, w = crop.w, h = crop.h, C = 1 }
+  keys.z = not over and -1 or nil
   keys.q = quiet or 2
   if crop.cols then
     keys.c, keys.r = crop.cols, crop.rows

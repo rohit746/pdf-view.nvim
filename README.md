@@ -22,8 +22,8 @@ LaTeX or Typst build, say — the page refreshes by itself.
 
 - Pages are rendered by [MuPDF](https://mupdf.com)'s `mutool` and drawn with the
   [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) using Unicode placeholders, so the
-  image behaves like text: it follows splits, tabs, resizes and works inside tmux. zellij has no placeholders, so
-  there the page is placed at its window's position instead ([zellij](#zellij)).
+  image behaves like text: it follows splits, tabs, resizes and works inside tmux. zellij, WezTerm and Konsole have no
+  placeholders, so there the page is placed at its window's position instead ([Positioned placements](#positioned-placements)).
 - No dependency on other plugins, ImageMagick or Ghostscript.
 - Opening a PDF never reads its bytes into a buffer, and `:w` can never overwrite it. `:w {file}` saves a copy.
 
@@ -35,18 +35,22 @@ LaTeX or Typst build, say — the page refreshes by itself.
 
 ## Requirements
 
-- Neovim 0.11 or newer, with `termguicolors` (the image id travels in a 24-bit foreground colour; zellij does not need
-  it).
+- Neovim 0.11 or newer, with `termguicolors` (the image id travels in a 24-bit foreground colour; zellij, WezTerm and
+  Konsole do not need it).
 - `mutool` from MuPDF, built with JavaScript support (the Homebrew `mupdf`, Debian/Ubuntu and Arch `mupdf-tools`
   packages are):
   `brew install mupdf` · `apt install mupdf-tools` · `pacman -S mupdf-tools`
-- A terminal with Kitty graphics **and** Unicode placeholder support: [kitty](https://sw.kovidgoyal.net/kitty/) or
-  [Ghostty](https://ghostty.org). WezTerm and iTerm2 do not implement placeholders.
+- A terminal with the Kitty graphics protocol: [kitty](https://sw.kovidgoyal.net/kitty/) or
+  [Ghostty](https://ghostty.org), which also have its Unicode placeholders, or [WezTerm](https://wezterm.org) or
+  [Konsole](https://konsole.kde.org), which do not ([Positioned placements](#positioned-placements)). WezTerm needs
+  `config.enable_kitty_graphics = true` in `wezterm.lua`. iTerm2 has no Kitty graphics.
 - Inside tmux (3.3a or newer): the plugin runs `tmux set -p allow-passthrough on` for its own pane. To manage it
   yourself, set `tmux_passthrough = false` and add `set -g allow-passthrough on` to `tmux.conf`. tmux must also pass
   24-bit colour on: if `:checkhealth pdf-view` says it doesn't, add `set -as terminal-features ',xterm-kitty:RGB'`
   (with your outer `$TERM`) to `tmux.conf`.
 - Inside zellij (0.45 or newer): nothing to configure. See [zellij](#zellij) for how it differs.
+- WezTerm or Konsole inside tmux: also `set -g focus-events on`, so that a page leaves the screen when you switch to
+  another tmux window.
 
 > [!TIP]
 > Run `:checkhealth pdf-view` to verify all of this.
@@ -263,7 +267,8 @@ require("pdf-view").setup({
   mutool = "mutool",       -- executable
   transmission = "auto",   -- "file": the terminal reads the PNG itself; "direct": send the bytes (SSH). auto = SSH-aware
   tmux_passthrough = true, -- run `tmux set -p allow-passthrough on` for this pane
-  placement = "auto",      -- "placeholders"; "positioned": at the window's position. auto = positioned in zellij
+  placement = "auto",      -- "placeholders"; "positioned": at the window's position. auto = positioned in zellij,
+                           -- WezTerm and Konsole
   force = false,           -- skip terminal detection
   max_pixels = 4096,       -- cap for either side of a fitted page (zoomed views are window-sized anyway)
   zoom_step = 1.25,        -- factor of one zoom step
@@ -343,6 +348,24 @@ to the file the link points to. `:edit` re-reads the file by hand and stays on t
 On NFS, SMB, sshfs and WSL's `/mnt/c` (detected on Linux), and wherever the directory cannot be watched, the file is
 checked for changes every 500 ms instead. If even that cannot be set up, a notice says live reload is off.
 
+## Positioned placements
+
+WezTerm and Konsole implement the Kitty graphics protocol, but not its Unicode placeholders, and neither does zellij
+(below). There the buffer is left blank and the page is placed at the screen position of its window instead. The
+plugin keeps the image in step with the screen: it is cut around floating windows and the popup menu that cover it,
+taken away while its window is hidden or in another tab page, and put back after Neovim redraws the window.
+
+- The terminal is asked once whether it has Kitty graphics. WezTerm only answers with
+  `config.enable_kitty_graphics = true` in `wezterm.lua`; without it the viewer says so instead of staying blank.
+- Konsole draws an image under the text only where a cell has the terminal's own background, which Neovim never
+  leaves, so there the page is drawn over the text. Konsole cannot read image files, so pages are sent as bytes.
+- When a PDF is shown in several windows of one tab page, only one of them shows the page.
+- Inside tmux the page is placed on the outer terminal, at the position of Neovim's pane. tmux does not know about it,
+  so it is taken away when Neovim's tmux window is left, which Neovim only learns with `set -g focus-events on`.
+
+Another terminal with Kitty graphics but without placeholders can be tried with `placement = "positioned"`: it is
+asked whether it has Kitty graphics, and pages are shown if it answers.
+
 ## zellij
 
 zellij 0.45 implements the Kitty graphics protocol itself, but not its Unicode placeholders. Inside zellij (detected
@@ -378,8 +401,9 @@ Set `placement = "placeholders"` once your zellij supports Unicode placeholders
 4. The buffer is filled with `U+10EEEE` placeholder cells whose foreground colour is the image id; the terminal paints
    the image over them.
 
-In zellij, steps 3 and 4 differ. The buffer stays blank, and the image is placed (`a=p`) at the screen position of the
-window, under the text, after moving the cursor there; see [zellij](#zellij).
+In zellij, WezTerm and Konsole, steps 3 and 4 differ. The buffer stays blank, and the image is placed (`a=p`) at the
+screen position of the window, under the text, after moving the cursor there; see
+[Positioned placements](#positioned-placements).
 
 When zoomed, step 2 renders only the rectangle of the enlarged page that is on screen, so a window-sized PNG is all
 that is ever drawn and uploaded, however deep the zoom, and scrolling costs the same as turning a page.
@@ -409,7 +433,7 @@ lua/pdf-view/
   mupdf.lua       async wrapper around mutool, and the worker that keeps a document open
   kitty.lua       graphics protocol encoding, tmux passthrough
   placeholder.lua Unicode placeholder text
-  positioned.lua  zellij: the page placed at its window's position, kept in step with floats and redraws
+  positioned.lua  zellij, WezTerm, Konsole: the page placed at its window's position, kept in step with floats and redraws
   terminal.lua    terminal detection, cell size, tmux
   watch.lua       file watching
   health.lua      :checkhealth pdf-view

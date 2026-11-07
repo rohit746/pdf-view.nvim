@@ -18,13 +18,25 @@ function M.in_zellij()
 end
 
 --- How pages are put on screen: as Unicode placeholder cells, or as placements at the screen position of the window.
+--- zellij and the terminals that have Kitty graphics but no Unicode placeholders (WezTerm, Konsole) get placements.
 ---@return "placeholders"|"positioned"
 function M.placement()
   local mode = config.options.placement
   if mode ~= "auto" then
     return mode --[[@as "placeholders"|"positioned"]]
   end
-  return M.in_zellij() and "positioned" or "placeholders"
+  if M.in_zellij() or M.detect().placeholders == false then
+    return "positioned"
+  end
+  return "placeholders"
+end
+
+--- Whether an image placed under the text would be hidden. Konsole draws it behind every cell background but the
+--- terminal's own, and Neovim paints the colour of its Normal group into every cell, so there the page is placed
+--- over the text (the floats and the popup menu over the page are cut out of it all the same).
+---@return boolean
+function M.hides_images_under_text()
+  return M.detect().name == "konsole"
 end
 
 ---@return boolean
@@ -91,9 +103,21 @@ function M.cell_size()
 end
 
 local detected
+-- rows and columns of the outer terminal above and left of this tmux pane, once asked (see `pane_offset()`)
+---@type integer[]?
+local pane_offset
 
---- Identify a terminal that implements the Kitty graphics protocol *with* Unicode placeholders.
----@return { name?: string, term?: string }
+-- the terminals pdf-view recognises, all with the Kitty graphics protocol, and whether they draw Unicode placeholders
+local KNOWN = { "kitty", "ghostty", "wezterm", "konsole" }
+local PLACEHOLDERS = { kitty = true, ghostty = true, wezterm = false, konsole = false }
+
+---@class PdfView.Terminal
+---@field name? "kitty"|"ghostty"|"wezterm"|"konsole" nil when the terminal is not recognised
+---@field term? string $TERM_PROGRAM or $TERM, to name it in messages
+---@field placeholders? boolean whether it draws Unicode placeholders; nil when it is not recognised
+
+--- Identify a terminal that implements the Kitty graphics protocol, and whether it has Unicode placeholders.
+---@return PdfView.Terminal
 function M.detect()
   if detected then
     return detected
@@ -104,15 +128,19 @@ function M.detect()
 
   local function classify(value)
     value = (value or ""):lower()
-    if value:find("kitty", 1, true) then
-      return "kitty"
-    elseif value:find("ghostty", 1, true) then
-      return "ghostty"
+    for _, name in ipairs(KNOWN) do
+      if value:find(name, 1, true) then
+        return name
+      end
     end
   end
 
-  -- zellij passes the outer terminal's $TERM, $TERM_PROGRAM, $KITTY_WINDOW_ID and $GHOSTTY_RESOURCES_DIR on to its
-  -- panes, so the checks below see through it
+  local function set(var)
+    return (env[var] or "") ~= ""
+  end
+
+  -- zellij passes the outer terminal's $TERM, $TERM_PROGRAM and the variables below on to its panes, so the checks
+  -- see through it. WezTerm and Konsole leave $TERM at xterm-256color; they are told by the variables they set.
   local name
   if M.in_tmux() then
     -- inside tmux $TERM says nothing about the outer terminal, but the attached client knows
@@ -121,28 +149,146 @@ function M.detect()
   name = name
     or classify(term)
     or classify(program)
-    or ((env.KITTY_WINDOW_ID or "") ~= "" and "kitty")
-    or ((env.GHOSTTY_RESOURCES_DIR or "") ~= "" and "ghostty")
+    or (set("KITTY_WINDOW_ID") and "kitty")
+    or (set("GHOSTTY_RESOURCES_DIR") and "ghostty")
+    or (set("WEZTERM_EXECUTABLE") and "wezterm")
+    or (set("KONSOLE_VERSION") and "konsole")
     or nil
 
-  detected = { name = name or nil, term = program ~= "" and program or term }
+  detected = { name = name, term = program ~= "" and program or term, placeholders = PLACEHOLDERS[name] }
   return detected
 end
 
---- Whether pages can be displayed here. The second return value explains a failure.
----@return boolean, string?
+-- a 1x1 transparent PNG
+local PROBE_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+-- image id of the graphics query, next to the probe's (see `probe_file()`)
+local QUERY_ID = 0xFFFFFD
+-- a terminal that has not answered by then has no Kitty graphics, or they are turned off
+local QUERY_TIMEOUT = 1000
+
+---@type boolean? the answer to the graphics query, once it has been asked
+local graphics
+---@type fun()[]? callbacks waiting for that answer while the query is out
+local waiting
+---@type boolean? whether the terminal can be asked at all
+local askable
+
+--- Whether the terminal can be asked a question whose answer comes back as a TermResponse: Neovim 0.11 cannot read
+--- it, and behind tmux with extended keys it would arrive as typed keys (see `replies_arrive_as_keys()`).
+---@return boolean
+local function can_ask()
+  if not M.ui_attached() then
+    return false
+  end
+  if askable == nil then
+    askable = vim.fn.has("nvim-0.12") == 1 and not M.replies_arrive_as_keys()
+  end
+  return askable
+end
+
+--- Whether the terminal answered a Kitty graphics query: nil until it has been asked (see `ask_graphics()`), and when
+--- it cannot be asked.
+---@return boolean?
+function M.graphics()
+  return graphics
+end
+
+--- Ask the terminal, once, whether it has Kitty graphics: a query (`a=q`, which loads a 1x1 image without keeping
+--- it) that a terminal without them, or with them turned off, does not answer. `callback` runs once the answer is in,
+--- at once when it is known already or the terminal cannot be asked.
+---@param callback fun()
+function M.ask_graphics(callback)
+  if graphics ~= nil or not can_ask() then
+    return callback()
+  end
+  if waiting then
+    waiting[#waiting + 1] = callback
+    return
+  end
+  waiting = { callback }
+  local autocmd, timer
+  local function finish(answer)
+    if not waiting then
+      return
+    end
+    pcall(vim.api.nvim_del_autocmd, autocmd)
+    timer:stop()
+    timer:close()
+    graphics = answer
+    local callbacks = waiting
+    waiting = nil
+    for _, waiter in ipairs(callbacks) do
+      waiter()
+    end
+  end
+  autocmd = vim.api.nvim_create_autocmd("TermResponse", {
+    desc = "pdf-view: whether the terminal has Kitty graphics",
+    callback = function(args)
+      local sequence = (args.data and args.data.sequence) or vim.v.termresponse or ""
+      local keys = sequence:match("^\27_G([^;]*);")
+      if keys and tonumber(keys:match("i=(%d+)")) == QUERY_ID then
+        vim.schedule(function()
+          finish(true)
+        end)
+      end
+    end,
+  })
+  timer = assert(vim.uv.new_timer())
+  timer:start(QUERY_TIMEOUT, 0, function()
+    vim.schedule(function()
+      finish(false)
+    end)
+  end)
+  local kitty = require("pdf-view.kitty")
+  kitty.send(kitty.sequence({ a = "q", f = 100, t = "d", i = QUERY_ID }, PROBE_PNG))
+end
+
+--- Forget what was found out about the terminal, for another one attached through tmux.
+function M.forget()
+  detected, graphics, askable, pane_offset = nil, nil, nil, nil
+end
+
+--- Whether pages can be displayed here. The second return value explains a failure. Nil when the terminal has to be
+--- asked first: call `ask_graphics()` and check again once it is answered.
+---
+--- A terminal without Unicode placeholders gets positioned placements, which need nothing but Kitty graphics: it is
+--- asked whether it has them, as is an unrecognised terminal when `placement = "positioned"` is set.
+---@return boolean?, string?
 function M.check()
   if config.options.force then
     return true
   end
-  if M.detect().name then
+  local found = M.detect()
+  if found.placeholders then
     return true
   end
-  local term = M.detect().term
-  local needs = M.placement() == "positioned" and "Kitty graphics" or "Kitty graphics and Unicode placeholder"
+  local positioned = M.placement() == "positioned"
+  if positioned and (found.name or config.options.placement == "positioned") then
+    if graphics == nil and can_ask() then
+      return nil
+    end
+    if graphics ~= false then
+      return true
+    end
+    if found.name == "wezterm" then
+      return false,
+        "pdf-view: WezTerm did not answer a Kitty graphics query. Add `config.enable_kitty_graphics = true` "
+          .. "to wezterm.lua and restart WezTerm."
+    end
+    return false,
+      ("pdf-view: %s did not answer a Kitty graphics query, so it cannot show pages. "):format(
+        found.name or (found.term ~= "" and ("`" .. found.term .. "`")) or "this terminal"
+      ) .. "Set `force = true` in setup() to try anyway."
+  end
+  if found.name and not positioned then
+    return false,
+      ('pdf-view: %s has no Unicode placeholders. Remove `placement = "placeholders"` from setup().'):format(found.name)
+  end
+  local term = found.term
+  local needs = positioned and "Kitty graphics" or "Kitty graphics and Unicode placeholder"
   return false,
     (
-      "pdf-view: %s does not look like a terminal with %s support (kitty, Ghostty). "
+      "pdf-view: %s does not look like a terminal with %s support (kitty, Ghostty, WezTerm, Konsole). "
       .. "Set `force = true` in setup() to try anyway."
     ):format(term ~= "" and ("`" .. term .. "`") or "this terminal", needs)
 end
@@ -187,7 +333,8 @@ function M.check_client()
       if now == "" or now == client or not prepared then
         return
       end
-      detected, prepared = nil, nil -- `prepare()` notes the new client
+      M.forget()
+      prepared = nil -- `prepare()` notes the new client
       if not (M.probe and M.probe.state == "pending") then
         M.probe = nil -- the new terminal is asked again whether it can read the PNGs
       end
@@ -201,15 +348,22 @@ local function over_ssh()
   return (vim.env.SSH_CONNECTION or "") ~= "" or (vim.env.SSH_TTY or "") ~= ""
 end
 
+--- Whether the terminal takes images only as bytes: Konsole answers ENOTSUPPORTED to a file.
+---@return boolean
+function M.bytes_only()
+  return M.detect().name == "konsole"
+end
+
 --- How images are handed to the terminal. A local terminal can read the PNG itself; over SSH the bytes are sent, and
---- so they are when the terminal said it cannot read the file (see `probe_file()`).
+--- so they are to a terminal that reads no files, or when the terminal said it cannot read the file (see
+--- `probe_file()`).
 ---@return "file"|"direct"
 function M.transmission()
   local mode = config.options.transmission
   if mode ~= "auto" then
     return mode --[[@as "file"|"direct"]]
   end
-  if over_ssh() or (M.probe and M.probe.state == "failed") then
+  if over_ssh() or M.bytes_only() or (M.probe and M.probe.state == "failed") then
     return "direct"
   end
   return "file"
@@ -217,8 +371,6 @@ end
 
 -- image id of the probe, above the ids of pages (see `allocate_ids()` in session.lua)
 local PROBE_ID = 0xFFFFFE
--- a 1x1 transparent PNG
-local PROBE_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 -- a terminal that has not answered by then is not going to (a multiplexer may not pass the reply on)
 local PROBE_TIMEOUT = 3000
 
@@ -271,7 +423,7 @@ end
 --- neither is a terminal behind tmux with extended keys on, whose reply would be typed keys as well.
 ---@param dir string the directory pages are rendered to
 function M.probe_file(dir)
-  if M.probe or config.options.transmission ~= "auto" or over_ssh() then
+  if M.probe or config.options.transmission ~= "auto" or over_ssh() or M.bytes_only() then
     return
   end
   if vim.fn.has("nvim-0.12") == 0 or not M.ui_attached() then
@@ -334,6 +486,48 @@ end
 function M.zellij_version()
   local out = capture({ "zellij", "--version" })
   return out and vim.version.parse(out:match("%d+%.%d+%.%d+") or "") or nil
+end
+
+--- Where this tmux pane is on the outer terminal's screen, as the rows and columns above and left of it: positioned
+--- placements pass through tmux and land at a position on that screen. 0, 0 outside tmux.
+---@param fresh? boolean ask tmux again, e.g. after the pane was resized
+---@return integer rows, integer cols
+function M.pane_offset(fresh)
+  if not M.in_tmux() then
+    return 0, 0
+  end
+  if fresh or not pane_offset then
+    local cmd = { "tmux", "display-message", "-p" }
+    if (vim.env.TMUX_PANE or "") ~= "" then
+      vim.list_extend(cmd, { "-t", vim.env.TMUX_PANE })
+    end
+    cmd[#cmd + 1] = "#{pane_top} #{pane_left} #{status} #{status-position}"
+    local top, left, status, position = (capture(cmd) or ""):match("^(%d+) (%d+) (%S+) (%S+)")
+    if not top then
+      return 0, 0 -- not remembered: asked again next time
+    end
+    -- pane_top counts the pane borders but not the status line, which is 1 row when "on", or as many as its number
+    local lines = status == "off" and 0 or (tonumber(status) or 1)
+    pane_offset = { tonumber(top) + (position == "top" and lines or 0), tonumber(left) }
+  end
+  return pane_offset[1], pane_offset[2]
+end
+
+--- Ask tmux whether this pane's window is on screen: it is not after switching to another window or session.
+---@param callback fun(shown: boolean)
+function M.tmux_window_shown(callback)
+  local cmd = { "tmux", "display-message", "-p" }
+  if (vim.env.TMUX_PANE or "") ~= "" then
+    vim.list_extend(cmd, { "-t", vim.env.TMUX_PANE })
+  end
+  cmd[#cmd + 1] = "#{window_active} #{session_attached}"
+  pcall(vim.system, cmd, { text = true }, function(result)
+    local active, attached = (result.stdout or ""):match("^(%d+) (%d+)")
+    local shown = result.code ~= 0 or not active or (active == "1" and attached ~= "0")
+    vim.schedule(function()
+      callback(shown)
+    end)
+  end)
 end
 
 --- tmux's effective `allow-passthrough` for this pane ("on", "all", "off"), or nil outside tmux.

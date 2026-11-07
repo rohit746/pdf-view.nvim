@@ -1,12 +1,14 @@
---- Positioned placements, for zellij: it implements the Kitty graphics protocol but not Unicode placeholders.
+--- Positioned placements, for zellij and for the terminals that implement the Kitty graphics protocol but not Unicode
+--- placeholders (WezTerm, Konsole).
 ---
 --- Instead of placeholder text the buffer holds blank lines, and the page is placed at the screen position of its
 --- window. Neovim knows nothing about such an image, so this module keeps it in step with the screen: the image is
 --- cut around floating windows and the popup menu that cover it, it is taken away while its window is hidden, and it
---- is placed again after Neovim redraws the window (a clear or a scroll inside zellij moves or drops a placement).
+--- is placed again after Neovim redraws the window (a clear or a scroll moves or drops a placement).
 ---
---- zellij also forgets an image once nothing shows it any more, so an image that was taken away or cleared off the
---- screen is sent again before it is placed again.
+--- zellij also forgets an image once nothing shows it any more, so there an image that was taken away or cleared off
+--- the screen is sent again before it is placed again. A terminal keeps its images until they are deleted, and says
+--- so when it has lost one (see `hook()`).
 local kitty = require("pdf-view.kitty")
 local terminal = require("pdf-view.terminal")
 
@@ -45,6 +47,9 @@ M.replies = vim.fn.has("nvim-0.12") == 1
 
 ---@type table<integer, PdfView.Session> sessions with a picture, by buffer
 local shown = {}
+
+-- tmux shows another window than Neovim's: the terminal under tmux would still show the page there
+local tmux_hidden = false
 
 --- Show the page again from scratch, for a picture whose PNG has gone. Set by `render`.
 ---@type fun(s: PdfView.Session)
@@ -203,7 +208,7 @@ end
 ---@return PdfView.Rect[] pieces, PdfView.Rect? image
 local function visible(s)
   local pic, win = s.picture, target_window(s)
-  if not (pic and win) then
+  if not (pic and win) or tmux_hidden then
     return {}
   end
   local info = vim.fn.getwininfo(win)[1]
@@ -290,11 +295,12 @@ function M.refresh(s)
     return
   end
   local pieces, image = visible(s)
+  local zellij = terminal.in_zellij()
   -- zellij 0.45.1 draws a part of an image from the image's top-left corner, wherever the part starts, unless the part
   -- is scaled to a size in cells. It keeps one scaled copy per size and image: the parts of a page cut around a float
   -- get sizes of their own, and the page is sent again when they change, to drop the copies cut for the last float.
-  local cut = #pieces > 1
-    or (#pieces == 1 and image ~= nil and (pieces[1].row ~= image.row or pieces[1].col ~= image.col))
+  local cut = zellij
+    and (#pieces > 1 or (#pieces == 1 and image ~= nil and (pieces[1].row ~= image.row or pieces[1].col ~= image.col)))
   if cut then
     pieces = M.distinct(pieces)
   end
@@ -316,7 +322,7 @@ function M.refresh(s)
   if #pieces == 0 then
     if before > 0 then
       kitty.send(kitty.unplace(pic.id))
-      s.lost = true -- zellij frees an image along with its last placement
+      s.lost = zellij -- zellij frees an image along with its last placement
     end
     s.placed = { id = pic.id, count = 0, key = key, base = 0 }
     return
@@ -344,11 +350,14 @@ function M.refresh(s)
   end
 
   local quiet = M.replies and 1 or 2 -- with replies, an image the terminal has lost is reported and sent again
+  local over = terminal.hides_images_under_text()
+  -- inside tmux the placement goes to the outer terminal, where the pane may not start in the top-left corner
+  local top, left = terminal.pane_offset()
   local parts = { ESC .. "7" } -- save the cursor: Neovim does not know it is moved
   for index, piece in ipairs(pieces) do
-    parts[#parts + 1] = ("%s[%d;%dH"):format(ESC, piece.row + 1, piece.col + 1)
+    parts[#parts + 1] = ("%s[%d;%dH"):format(ESC, top + piece.row + 1, left + piece.col + 1)
     local part = crop(pic, image --[[@as PdfView.Rect]], piece, cut)
-    parts[#parts + 1] = kitty.place_at(pic.id, base + index, part, quiet)
+    parts[#parts + 1] = kitty.place_at(pic.id, base + index, part, quiet, over)
   end
   parts[#parts + 1] = ESC .. "8"
   kitty.send(table.concat(parts))
@@ -406,11 +415,19 @@ local function all_lost()
   end
 end
 
+--- Mark every picture as possibly misplaced, to be placed again.
+local function all_dirty()
+  for _, s in pairs(shown) do
+    s.dirty = true
+  end
+end
+
 local function check()
   check_pending = false
   -- Without replies to tell that zellij dropped an image, a message that scrolled the screen (which may scroll the
-  -- page out of zellij's screen) is taken to have done so. Neovim notes the first scroll in v:scrollstart.
-  if not M.replies and vim.v.scrollstart ~= "" then
+  -- page out of zellij's screen) is taken to have done so. A terminal scrolls the image with the text, and it is
+  -- placed again where it belongs after the redraw. Neovim notes the first scroll in v:scrollstart.
+  if not M.replies and vim.v.scrollstart ~= "" and terminal.in_zellij() then
     vim.v.scrollstart = ""
     all_lost()
   end
@@ -468,6 +485,32 @@ function M.hook()
       schedule_check()
     end,
   })
+  if terminal.in_tmux() then
+    -- tmux knows nothing of the page, which stays on the terminal's screen over another tmux window. With tmux's
+    -- `focus-events` on, leaving the pane says so.
+    vim.api.nvim_create_autocmd({ "FocusLost", "FocusGained", "VimResized" }, {
+      group = augroup,
+      desc = "Follow the tmux pane of PDF pages: where it is, and whether its window is on screen",
+      callback = function(args)
+        if args.event == "FocusLost" then
+          terminal.tmux_window_shown(function(on_screen)
+            if not on_screen and not tmux_hidden then
+              tmux_hidden = true
+              all_dirty()
+              schedule_check()
+            end
+          end)
+          return
+        end
+        terminal.pane_offset(true)
+        if args.event == "FocusGained" then
+          tmux_hidden = false
+        end
+        all_dirty()
+        schedule_check()
+      end,
+    })
+  end
   vim.api.nvim_create_autocmd("TermResponse", {
     group = augroup,
     desc = "Send a PDF page again when the terminal has lost it",

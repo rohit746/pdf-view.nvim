@@ -389,6 +389,21 @@ local function show(s, page, opts)
   apply_window_options(s, win)
 
   local supported, reason = terminal.check()
+  if supported == nil then
+    -- the terminal is asked whether it has Kitty graphics; the latest page asked for meanwhile is shown then
+    local first = not s.waiting_for_terminal
+    s.waiting_for_terminal = { page = page, opts = opts }
+    if first then
+      terminal.ask_graphics(function()
+        local latest = s.waiting_for_terminal
+        s.waiting_for_terminal = nil
+        if latest then
+          show(s, latest.page, latest.opts)
+        end
+      end)
+    end
+    return
+  end
   if not supported then
     return display_message(s, win, reason --[[@as string]])
   end
