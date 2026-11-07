@@ -23,6 +23,11 @@ kitty.write = function(data)
 end
 vim.env.TMUX = nil
 vim.env.ZELLIJ = nil
+-- the terminal the tests run in is not asked about: they pretend to run in kitty
+local real_detect = terminal.detect
+terminal.detect = function()
+  return { name = "kitty", term = "xterm-kitty", placeholders = true }
+end
 
 local ns = vim.api.nvim_create_namespace("pdf-view")
 local dir = fixture.tmpdir()
@@ -2591,9 +2596,10 @@ describe("viewer in tmux", function()
   --- Run `body` inside a pretend tmux whose attached client, and that client's $TERM, can be changed.
   ---@param body fun(attach: fun(pid: string, termname: string))
   local function in_tmux(body)
-    local saved_tmux, saved_system = vim.env.TMUX, vim.system
+    local saved_tmux, saved_system, saved_detect = vim.env.TMUX, vim.system, terminal.detect
     local client = { pid = "100", termname = "xterm-kitty" }
     vim.env.TMUX = "/tmp/tmux-1000/default,1,0"
+    terminal.detect = real_detect -- tmux names the terminal of the attached client
     ---@diagnostic disable-next-line: duplicate-set-field
     vim.system = function(cmd, opts, on_exit)
       if cmd[1] ~= "tmux" then
@@ -2618,7 +2624,7 @@ describe("viewer in tmux", function()
       vim.api.nvim_exec_autocmds("FocusGained", {})
       vim.wait(100) -- the client is asked in the background
     end)
-    vim.env.TMUX, vim.system = saved_tmux, saved_system
+    vim.env.TMUX, vim.system, terminal.detect = saved_tmux, saved_system, saved_detect
     if not ok then
       error(err, 0)
     end
@@ -2719,6 +2725,7 @@ end
 
 describe("viewer in zellij", function()
   setup({ placement = "positioned" })
+  vim.env.ZELLIJ = "0"
   local quiet = vim.fn.has("nvim-0.12") == 1 and 1 or 2
 
   it("leaves the buffer blank and places the page at its window's position", function()
@@ -2940,6 +2947,117 @@ describe("viewer in zellij", function()
     end)
   end
 
+  vim.env.ZELLIJ = nil
+  setup()
+end)
+
+describe("viewer with positioned placements outside zellij (WezTerm, Konsole)", function()
+  local detect = terminal.detect
+  local function as_terminal(name)
+    terminal.detect = function()
+      return { name = name, term = name, placeholders = false }
+    end
+  end
+  as_terminal("wezterm")
+  setup()
+
+  it("places the page at its window's position, under the text", function()
+    reset()
+    eq("positioned", terminal.placement(), "chosen for a terminal without placeholders")
+    open(make("wezterm-basic", pages(1)))
+    eq(false, sent("U=1"), "no virtual placement")
+    local batch = last_batch()
+    eq(1, #batch)
+    eq(-1, batch[1].keys.z)
+  end)
+
+  it("keeps the page in the terminal while its window shows another buffer", function()
+    reset()
+    local s = open(make("wezterm-hide", pages(1)))
+    local id = s.ids[s.slot]
+    writes = {}
+    vim.cmd.enew()
+    vim.cmd.redraw()
+    wait_for(function()
+      return sent(("a=d,d=i,i=%d,q=2"):format(id))
+    end, "the page taken away")
+    eq(false, s.lost, "a terminal keeps an image without placements")
+
+    writes = {}
+    vim.cmd.buffer(s.buf)
+    vim.cmd.redraw()
+    wait_for(function()
+      return #last_batch() == 1
+    end, "the page placed again")
+    eq({}, transmitted(), "not sent again")
+  end)
+
+  it("cuts the page around a floating window without sending it again when the float moves", function()
+    reset()
+    local s = open(make("wezterm-float", pages(1)))
+    local image = image_rect(s)
+    local float = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, {
+      relative = "editor",
+      row = image.row + 2,
+      col = image.col + 3,
+      width = 4,
+      height = 2,
+      border = "single",
+    })
+    local before = #writes
+    vim.cmd.redraw()
+    wait_for(function()
+      return select(2, last_batch()) > before
+    end, "the page placed around the float")
+    -- above, left of, right of and below the float: pieces of equal size are not split as for zellij
+    eq(4, #last_batch())
+    writes = {}
+    vim.api.nvim_win_set_config(float, { relative = "editor", row = image.row + 3, col = image.col + 3 })
+    vim.cmd.redraw()
+    wait_for(function()
+      return #last_batch() == 4
+    end, "the page placed around the moved float")
+    eq({}, transmitted(), "the terminal still has the page")
+    vim.api.nvim_win_close(float, true)
+    eq(s.picture ~= nil, true)
+  end)
+
+  it("does not send the page again after a message scrolled the screen, when replies cannot be read", function()
+    reset()
+    local positioned = require("pdf-view.positioned")
+    local replies = positioned.replies
+    positioned.replies = false -- as on Neovim 0.11
+    local ok, err = pcall(function()
+      open(make("wezterm-scrolled", pages(1)))
+      writes = {}
+      vim.v.scrollstart = "Unknown"
+      vim.cmd("redraw!")
+      wait_for(function()
+        return #last_batch() == 1
+      end, "placed again")
+      eq({}, transmitted(), "the terminal scrolled the image with the text")
+    end)
+    positioned.replies = replies
+    vim.v.scrollstart = ""
+    if not ok then
+      error(err, 0)
+    end
+  end)
+
+  it("places the page over the text in Konsole, which hides it under a coloured cell", function()
+    reset()
+    as_terminal("konsole")
+    setup({ transmission = "auto" })
+    eq("direct", terminal.transmission(), "Konsole takes no image files")
+    open(make("konsole-basic", pages(1)))
+    local batch = last_batch()
+    eq(1, #batch)
+    eq(nil, batch[1].keys.z)
+    truthy(sent("t=d"), "sent as bytes")
+    as_terminal("wezterm")
+  end)
+
+  terminal.detect = detect
   setup()
 end)
 

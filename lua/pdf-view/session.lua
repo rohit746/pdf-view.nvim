@@ -93,6 +93,7 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field watcher? PdfView.Watcher
 ---@field mapped? string[] the keys mapped in the buffer by `actions.set_keymaps`
 ---@field waiting_for_ui? boolean the first render is waiting for a UI to attach
+---@field waiting_for_terminal? { page?: integer, opts?: table } the page to show once the terminal has said whether it has Kitty graphics
 ---@field unlocking? boolean the password prompt of a password-protected document is open
 ---@field locked? boolean the password prompt was cancelled: say so instead of asking again, until `actions.reload`
 ---@field recolor? PdfView.Recolor how the pages are recoloured, once toggled; until then `config.options.recolor`

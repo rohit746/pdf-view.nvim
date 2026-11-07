@@ -1,5 +1,5 @@
 local harness = require("tests.harness")
-local eq = harness.eq
+local eq, truthy = harness.eq, harness.truthy
 local config = require("pdf-view.config")
 local fixture = require("tests.fixture")
 local kitty = require("pdf-view.kitty")
@@ -234,5 +234,219 @@ describe("terminal", function()
       eq({}, written)
       eq(nil, terminal.probe)
     end)
+  end)
+end)
+
+local TERMINAL_VARS = {
+  "TERM",
+  "TERM_PROGRAM",
+  "KITTY_WINDOW_ID",
+  "GHOSTTY_RESOURCES_DIR",
+  "WEZTERM_EXECUTABLE",
+  "KONSOLE_VERSION",
+  "TMUX",
+  "ZELLIJ",
+}
+
+--- Run `body` with only the terminal variables in `vars` set, and nothing detected yet.
+---@param vars table<string, string>
+---@param body fun()
+local function with_env(vars, body)
+  local saved = {}
+  for _, name in ipairs(TERMINAL_VARS) do
+    saved[name] = vim.env[name]
+    vim.env[name] = vars[name]
+  end
+  terminal.forget()
+  local ok, err = pcall(body)
+  for _, name in ipairs(TERMINAL_VARS) do
+    vim.env[name] = saved[name]
+  end
+  terminal.forget()
+  if not ok then
+    error(err, 0)
+  end
+end
+
+describe("terminal.detect", function()
+  it("recognises WezTerm and Konsole, which have Kitty graphics but no Unicode placeholders", function()
+    config.setup()
+    with_env(
+      { TERM = "xterm-256color", TERM_PROGRAM = "WezTerm", WEZTERM_EXECUTABLE = "/usr/bin/wezterm-gui" },
+      function()
+        eq({ name = "wezterm", term = "wezterm", placeholders = false }, terminal.detect())
+        eq("positioned", terminal.placement())
+      end
+    )
+    with_env({ TERM = "xterm-256color", WEZTERM_EXECUTABLE = "/usr/bin/wezterm-gui" }, function()
+      eq("wezterm", terminal.detect().name, "by $WEZTERM_EXECUTABLE alone, as inside tmux")
+    end)
+    with_env({ TERM = "xterm-256color", KONSOLE_VERSION = "251203" }, function()
+      eq({ name = "konsole", term = "xterm-256color", placeholders = false }, terminal.detect())
+      eq("positioned", terminal.placement())
+      eq(true, terminal.hides_images_under_text())
+      eq(true, terminal.bytes_only())
+    end)
+  end)
+
+  it("keeps placeholders for kitty and Ghostty, and recognises nothing in xterm", function()
+    config.setup()
+    with_env({ TERM = "xterm-kitty", KITTY_WINDOW_ID = "1" }, function()
+      eq({ name = "kitty", term = "xterm-kitty", placeholders = true }, terminal.detect())
+      eq("placeholders", terminal.placement())
+      eq(false, terminal.hides_images_under_text())
+    end)
+    with_env({ TERM = "xterm-ghostty", TERM_PROGRAM = "ghostty" }, function()
+      eq("ghostty", terminal.detect().name)
+      eq("placeholders", terminal.placement())
+    end)
+    with_env({ TERM = "xterm-256color" }, function()
+      eq({ term = "xterm-256color" }, terminal.detect())
+      eq("placeholders", terminal.placement())
+    end)
+  end)
+
+  it("lets the placement option win", function()
+    config.setup({ placement = "placeholders" })
+    with_env({ TERM_PROGRAM = "WezTerm" }, function()
+      eq("placeholders", terminal.placement())
+    end)
+    config.setup()
+  end)
+end)
+
+describe("terminal.check", function()
+  local QUERY = "a=q,f=100,i=16777213,t=d;"
+
+  ---@param written string[]
+  ---@return integer queries graphics queries written
+  local function queries(written)
+    local count = 0
+    for _, data in ipairs(written) do
+      count = count + (data:find(QUERY, 1, true) and 1 or 0)
+    end
+    return count
+  end
+
+  it("says that WezTerm has no placeholders when they are asked for", function()
+    with_terminal(function()
+      config.setup({ placement = "placeholders" })
+      with_env({ TERM_PROGRAM = "WezTerm" }, function()
+        local ok, reason = terminal.check()
+        eq(false, ok)
+        truthy(reason:find("wezterm has no Unicode placeholders", 1, true), reason)
+      end)
+    end)
+  end)
+
+  it("refuses a terminal it does not recognise", function()
+    with_terminal(function(written)
+      with_env({ TERM = "xterm-256color" }, function()
+        local ok, reason = terminal.check()
+        eq(false, ok)
+        truthy(reason:find("`xterm-256color` does not look like", 1, true), reason)
+        eq({}, written, "nothing is asked")
+      end)
+    end)
+  end)
+
+  if vim.fn.has("nvim-0.12") == 0 then
+    it("accepts WezTerm without asking on Neovim 0.11, which cannot read the answer", function()
+      with_terminal(function(written)
+        with_env({ TERM_PROGRAM = "WezTerm" }, function()
+          eq(true, (terminal.check()))
+          eq({}, written)
+        end)
+      end)
+    end)
+    return
+  end
+
+  it("asks a terminal without placeholders whether it has Kitty graphics, once", function()
+    with_terminal(function(written)
+      with_env({ KONSOLE_VERSION = "251203" }, function()
+        eq(nil, (terminal.check()), "not known yet")
+        local answered = 0
+        terminal.ask_graphics(function()
+          answered = answered + 1
+        end)
+        terminal.ask_graphics(function()
+          answered = answered + 1
+        end)
+        eq(1, queries(written), "one query for both")
+        reply(ESC .. "_Gi=16777213;OK" .. ESC .. "\\")
+        harness.wait_for(function()
+          return answered == 2
+        end, "the answer")
+        eq(true, terminal.graphics())
+        eq(true, (terminal.check()))
+        terminal.ask_graphics(function()
+          answered = answered + 1
+        end)
+        eq(3, answered, "known: at once")
+        eq(1, queries(written), "not asked again")
+      end)
+    end)
+  end)
+
+  it("tells how to turn on WezTerm's Kitty graphics when it does not answer", function()
+    with_terminal(function(written)
+      with_env({ TERM_PROGRAM = "WezTerm" }, function()
+        local done = false
+        terminal.ask_graphics(function()
+          done = true
+        end)
+        eq(1, queries(written))
+        harness.wait_for(function()
+          return done
+        end, "the query to time out")
+        eq(false, terminal.graphics())
+        local ok, reason = terminal.check()
+        eq(false, ok)
+        truthy(reason:find("enable_kitty_graphics = true", 1, true), reason)
+      end)
+    end)
+  end)
+
+  it("asks any terminal when the placement is set to positioned, without `force`", function()
+    with_terminal(function(written)
+      config.setup({ placement = "positioned" })
+      with_env({ TERM = "foot" }, function()
+        eq(nil, (terminal.check()))
+        terminal.ask_graphics(function() end)
+        reply(ESC .. "_Gi=16777213;OK" .. ESC .. "\\")
+        harness.wait_for(function()
+          return terminal.graphics() ~= nil
+        end, "the answer")
+        eq(true, (terminal.check()))
+        eq(1, queries(written))
+      end)
+    end)
+  end)
+end)
+
+describe("terminal.pane_offset", function()
+  it("is 0, 0 outside tmux", function()
+    local saved = vim.env.TMUX
+    vim.env.TMUX = nil
+    eq({ 0, 0 }, { terminal.pane_offset(true) })
+    vim.env.TMUX = saved
+  end)
+
+  it("adds a status line at the top to the pane's position", function()
+    in_tmux("16 51 on top\n", function()
+      eq({ 17, 51 }, { terminal.pane_offset(true) })
+    end)
+    in_tmux("3 0 2 top\n", function()
+      eq({ 5, 0 }, { terminal.pane_offset(true) })
+    end)
+    in_tmux("16 51 on bottom\n", function()
+      eq({ 16, 51 }, { terminal.pane_offset(true) })
+      eq({ 16, 51 }, { terminal.pane_offset() }, "remembered")
+    end)
+    in_tmux(nil, function()
+      eq({ 0, 0 }, { terminal.pane_offset(true) }, "tmux did not answer")
+    end)
+    terminal.forget()
   end)
 end)

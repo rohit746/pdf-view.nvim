@@ -129,6 +129,8 @@ local function check_transmission()
         'terminal is a flatpak. Pages still show, a little slower. Set `transmission = "direct"` to skip the check.',
       }
     )
+  elseif mode == "direct" and terminal.bytes_only() then
+    vim.health.info("image transmission: direct (the terminal does not read image files)")
   elseif mode == "direct" then
     vim.health.info("image transmission: direct (over SSH)")
   elseif probe and probe.state == "ok" then
@@ -154,21 +156,42 @@ end
 
 local function check_terminal()
   local detected = terminal.detect()
+  local positioned = terminal.placement() == "positioned"
   if config.options.force then
     vim.health.warn("`force = true`: terminal detection is skipped")
-  elseif detected.name then
+  elseif detected.placeholders then
     vim.health.ok("terminal: " .. detected.name)
+  elseif detected.name or (positioned and config.options.placement == "positioned") then
+    local name = detected.name or ("`" .. (detected.term or "") .. "`")
+    local asked = false
+    terminal.ask_graphics(function()
+      asked = true
+    end)
+    vim.wait(2000, function()
+      return asked
+    end, 10)
+    local answer = terminal.graphics()
+    if answer then
+      vim.health.ok(("terminal: %s (it answered a Kitty graphics query)"):format(name))
+    elseif answer == nil then
+      vim.health.info(("terminal: %s (it cannot be asked whether it has Kitty graphics here)"):format(name))
+    elseif detected.name == "wezterm" then
+      vim.health.error("terminal: WezTerm, but it did not answer a Kitty graphics query", {
+        "WezTerm has Kitty graphics turned off by default. Add `config.enable_kitty_graphics = true` to wezterm.lua",
+        "and restart WezTerm.",
+      })
+    else
+      vim.health.error(("terminal: %s, but it did not answer a Kitty graphics query"):format(name))
+    end
   else
     vim.health.error(
       ("terminal not recognised (TERM_PROGRAM=%s, TERM=%s)"):format(vim.env.TERM_PROGRAM or "", vim.env.TERM or ""),
       {
-        "Use kitty or Ghostty, directly or inside tmux or zellij: they have Kitty graphics and Unicode placeholders.",
-        "WezTerm and iTerm2 lack Unicode placeholders. Set `force = true` to try anyway.",
+        "Use kitty or Ghostty (directly or inside tmux or zellij), or WezTerm or Konsole: they have Kitty graphics.",
+        'Another terminal with Kitty graphics can be tried with `placement = "positioned"`, or `force = true`.',
       }
     )
   end
-
-  local positioned = terminal.placement() == "positioned"
   if terminal.in_zellij() then
     local version = terminal.zellij_version()
     if version and vim.version.lt(version, { 0, 45, 0 }) then
@@ -186,6 +209,18 @@ local function check_terminal()
     vim.health.ok("pages are placed at the position of their window (Unicode placeholders are not used)")
   else
     vim.health.ok("pages are drawn with Unicode placeholders")
+  end
+
+  if terminal.in_tmux() and positioned and not terminal.in_zellij() then
+    -- tmux knows nothing of a positioned page, and only focus events tell Neovim that its window was left
+    local focus = vim.system({ "tmux", "show-options", "-gv", "focus-events" }, { text = true }):wait(1000)
+    if vim.trim(focus.stdout or "") == "on" then
+      vim.health.ok("tmux focus-events: on (a page is taken off the screen while its tmux window is not shown)")
+    else
+      vim.health.warn("tmux focus-events is off: a page stays on the screen over another tmux window", {
+        "Add `set -g focus-events on` to tmux.conf.",
+      })
+    end
   end
 
   if terminal.in_tmux() then

@@ -5,13 +5,13 @@ INTRODUCTION                                                     *pdf-view*
 
 pdf-view.nvim shows PDF pages as images inside a normal buffer. Pages are
 rendered with MuPDF's `mutool` and drawn with the Kitty graphics protocol
-(Unicode placeholders), so the page follows splits, tabs and resizes. Inside
-zellij the page is placed at its window's position instead, see
-|pdf-view-zellij|.
+(Unicode placeholders), so the page follows splits, tabs and resizes. In
+WezTerm, Konsole and zellij the page is placed at its window's position
+instead, see |pdf-view-positioned| and |pdf-view-zellij|.
 
 Requirements: Neovim 0.11+, 'termguicolors', `mutool` (with JavaScript), and
-kitty or Ghostty (optionally inside tmux, or zellij 0.45+). Run
-`:checkhealth pdf-view`.
+kitty or Ghostty (optionally inside tmux, or zellij 0.45+), or WezTerm or
+Konsole. Run `:checkhealth pdf-view`.
 
 ==============================================================================
 USAGE                                                      *pdf-view-usage*
@@ -225,6 +225,28 @@ CONFIGURATION                                              *pdf-view-config*
 Unknown or mistyped options raise an error.
 
 ==============================================================================
+POSITIONED PLACEMENTS                                  *pdf-view-positioned*
+
+WezTerm and Konsole have the Kitty graphics protocol but not its Unicode
+placeholders. There the buffer is left blank and the page is placed at the
+screen position of its window, cut around floating windows and the popup
+menu, and placed again after Neovim redraws the window. 'termguicolors' is
+not needed.
+
+The terminal is asked once whether it has Kitty graphics. WezTerm answers
+only with `config.enable_kitty_graphics = true` in wezterm.lua; without it
+the viewer says so. Konsole hides an image under any cell background but its
+own, so there the page is drawn over the text, and it is sent as bytes
+because Konsole reads no image files.
+
+Inside tmux the page goes to the outer terminal at the position of Neovim's
+pane, and is taken away when the tmux window is left: that needs
+`set -g focus-events on` in tmux.conf.
+
+Another terminal with Kitty graphics can be tried with
+`placement = "positioned"`; it is asked as well.
+
+==============================================================================
 ZELLIJ                                                     *pdf-view-zellij*
 
 zellij 0.45 implements the Kitty graphics protocol itself, but not Unicode
@@ -241,8 +263,9 @@ windows of a tab page; and text that the page is not cut around shows on top
 of it. In zellij 0.45.1 the page is sent again whenever a float over it moves
 or changes size.
 
-`placement` chooses explicitly: "placeholders" (the default outside zellij)
-or "positioned" (the default inside it).
+`placement` chooses explicitly: "placeholders" (the default in kitty and
+Ghostty outside zellij) or "positioned" (the default inside zellij, and in
+WezTerm and Konsole).
 
 ==============================================================================
 SNACKS.NVIM                                              *pdf-view-snacks*

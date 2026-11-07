@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- WezTerm and Konsole, which have the Kitty graphics protocol but not its Unicode placeholders, are recognised (also
+  inside tmux) and get positioned placements, as zellij does: the page is placed at its window's position. They are
+  asked once whether they have Kitty graphics, and a WezTerm without `enable_kitty_graphics` gets a message saying so
+  instead of a blank page. In Konsole the page is drawn over the text, which is the only place Konsole shows it, and
+  sent as bytes. Inside tmux the page is placed at the position of Neovim's pane and taken off the screen while its
+  tmux window is not shown (with tmux's `focus-events` on). `placement = "positioned"` no longer needs `force = true`
+  as well: any terminal that answers the Kitty graphics query is accepted.
+
 ### Fixed
 
 - Cancelling the password prompt of a password-protected PDF only held until the page was shown again: resizing the
