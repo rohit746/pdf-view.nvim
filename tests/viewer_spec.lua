@@ -3975,9 +3975,10 @@ describe("viewer SyncTeX", function()
       eq("orange", classify(colour_at({ rects = s.synced.rects, width = 612, height = 792 })))
 
       -- a second search reuses the viewer on screen
+      local first_id = s.synced.id
       vim.cmd("PdfViewForward")
       wait_for(function()
-        return #logged() == 2 and s.job == nil
+        return s.synced.id > first_id and s.job == nil and s.target == nil
       end, "the second search")
       eq(2, #vim.api.nvim_tabpage_list_wins(0))
 
