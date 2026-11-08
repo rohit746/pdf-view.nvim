@@ -168,6 +168,18 @@ local function check_keymaps(value)
     end
     check_string_list("keymaps." .. action, keys)
   end
+  -- a key given to two actions would do whichever was mapped last
+  local owner = {}
+  for action, keys in pairs(value) do
+    for _, lhs in ipairs(keys) do
+      local other = owner[vim.keycode(lhs)]
+      if other and other ~= action then
+        local first, second = other < action and other or action, other < action and action or other
+        error(("pdf-view: `%s` is mapped to both `keymaps.%s` and `keymaps.%s`"):format(lhs, first, second), 3)
+      end
+      owner[vim.keycode(lhs)] = action
+    end
+  end
 end
 
 local function check_positive_integer(key, value)
@@ -276,6 +288,20 @@ function M.setup(opts)
   local merged = vim.deepcopy(defaults)
   for key, value in pairs(opts) do
     if key == "keymaps" and type(value) == "table" then
+      -- the user's keys win: a default action keeps only the keys no user action takes
+      local taken = {}
+      for _, keys in pairs(value) do
+        for _, lhs in ipairs(keys) do
+          taken[vim.keycode(lhs)] = true
+        end
+      end
+      for action, keys in pairs(merged.keymaps) do
+        if value[action] == nil then
+          merged.keymaps[action] = vim.tbl_filter(function(lhs)
+            return not taken[vim.keycode(lhs)]
+          end, keys)
+        end
+      end
       for action, keys in pairs(value) do
         merged.keymaps[action] = keys
       end

@@ -328,7 +328,9 @@ require("pdf-view").setup({
 })
 ```
 
-Unknown or mistyped options raise an error immediately. A keymap list replaces the default list for that action.
+Unknown or mistyped options raise an error immediately. A keymap list replaces the default list for that action, and
+a key you give one action is taken from the default action that had it (`next = { "n" }` leaves `search_next` with no
+key). Giving one key to two actions is an error.
 
 With `auto_open = false` only `:PdfView` and `require("pdf-view").open()` open PDFs. With it on, `:read` of these files
 is refused, since it would insert the file's bytes: use `:PdfView` to open them.
