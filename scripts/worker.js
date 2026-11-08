@@ -323,6 +323,28 @@ function pageText(number) {
   return JSON.stringify(out);
 }
 
+// Where in page `target` (0-based) the link `uri` leads, as fractions of the page's width and height from its top-left
+// corner: { x, y }, either missing when the link does not say (a link to a whole page, a horizontal or vertical fit).
+function destination(target, uri) {
+  var where = {};
+  var dest = null;
+  try {
+    dest = doc.resolveLinkDestination(uri);
+  } catch (e) {
+    return where;
+  }
+  var bounds = doc.loadPage(target).getBounds();
+  var w = bounds[2] - bounds[0];
+  var h = bounds[3] - bounds[1];
+  if (dest && typeof dest.x === "number" && isFinite(dest.x) && w > 0) {
+    where.x = Math.max(0, Math.min(1, (dest.x - bounds[0]) / w));
+  }
+  if (dest && typeof dest.y === "number" && isFinite(dest.y) && h > 0) {
+    where.y = Math.max(0, Math.min(1, (dest.y - bounds[1]) / h));
+  }
+  return where;
+}
+
 function pageLinks(number) {
   var count = openDocument().countPages();
   number = Math.max(1, Math.min(count, number || 1));
@@ -347,6 +369,7 @@ function pageLinks(number) {
         continue;
       }
       link.page = target + 1;
+      link.at = destination(target, uri);
     }
     structured = structured || page.toStructuredText();
     link.text = String(structured.copy([bounds[0], bounds[1]], [bounds[2], bounds[3]]) || "")
@@ -359,7 +382,17 @@ function pageLinks(number) {
   });
   return JSON.stringify(
     links.map(function (link) {
-      return link.uri !== undefined ? { text: link.text, uri: link.uri } : { text: link.text, page: link.page };
+      if (link.uri !== undefined) {
+        return { text: link.text, uri: link.uri };
+      }
+      var out = { text: link.text, page: link.page };
+      if (link.at.x !== undefined) {
+        out.x = link.at.x;
+      }
+      if (link.at.y !== undefined) {
+        out.y = link.at.y;
+      }
+      return out;
     })
   );
 }

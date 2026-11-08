@@ -666,8 +666,29 @@ awk 'NR == 1 { sub(/^:/, ":x") } { print; fflush() }' | exec '%s' "$@"
     it("parses the script's output", function()
       eq({
         { depth = 0, page = 2, title = "One" },
-        { depth = 1, page = 9, title = "Two words" },
-      }, mupdf.parse_outline("0\t2\tOne\n1\t9\t  Two words \nnot a line\n"))
+        { depth = 1, page = 9, x = 0.25, y = 0.5, title = "Two words" },
+      }, mupdf.parse_outline("0\t2\t\t\tOne\n1\t9\t0.25\t0.50000\t  Two words \nnot a line\n"))
+    end)
+
+    it("says where on its page a bookmark leads", function()
+      local path = dir .. "/outline-at.pdf"
+      fixture.write(path, { { w = 612, h = 792 }, { w = 612, h = 792 } }, {
+        outline = {
+          { title = "Whole page", page = 1 },
+          { title = "Figure", page = 2, top = 500, left = 153 },
+          { title = "Section", page = 2, top = 198 },
+        },
+      })
+      local err, entries = await(function(cb)
+        mupdf.outline(path, cb)
+      end)
+      eq(nil, err)
+      eq({ depth = 0, page = 1, title = "Whole page" }, entries[1])
+      eq(2, entries[2].page)
+      harness.near(0.25, entries[2].x, 1e-4, "153 points from the left of a page 612 points wide")
+      harness.near(292 / 792, entries[2].y, 1e-4, "500 points from the bottom of a page 792 points high")
+      eq(nil, entries[3].x)
+      harness.near(594 / 792, entries[3].y, 1e-4, "198 points from the bottom")
     end)
   end)
 
@@ -739,7 +760,11 @@ awk 'NR == 1 { sub(/^:/, ":x") } { print; fflush() }' | exec '%s' "$@"
           { rect = { 300, 590, 400, 630 }, uri = "mailto:someone@example.com" }, -- right of "Website"
         },
       },
-      { w = 612, h = 792 },
+      {
+        w = 612,
+        h = 792,
+        links = { { rect = { 70, 290, 250, 330 }, page = 3, top = 500, left = 153 } },
+      },
       { w = 612, h = 792 },
     })
 
@@ -756,9 +781,20 @@ awk 'NR == 1 { sub(/^:/, ":x") } { print; fflush() }' | exec '%s' "$@"
       }, links)
     end)
 
-    it("is empty for a page without links", function()
+    it("says where on its page a link leads", function()
       local err, links = await(function(cb)
         mupdf.links(linked, 2, cb)
+      end)
+      eq(nil, err)
+      eq(1, #links)
+      eq(3, links[1].page)
+      harness.near(0.25, links[1].x, 1e-4, "153 points from the left of a page 612 points wide")
+      harness.near(292 / 792, links[1].y, 1e-4, "500 points from the bottom of a page 792 points high")
+    end)
+
+    it("is empty for a page without links", function()
+      local err, links = await(function(cb)
+        mupdf.links(linked, 3, cb)
       end)
       eq(nil, err)
       eq({}, links)

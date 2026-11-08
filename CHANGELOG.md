@@ -15,6 +15,9 @@ All notable changes to this project are documented here. The format follows
 - A key mapped to an action that a default action also used, like `keymaps = { next = { "n" } }` with `search_next`'s
   `n`, did either action at random. The user's action gets the key now, and the default action loses it. One key
   given to two actions in `keymaps` is an error naming both.
+- Following a link (`f`) or a bookmark (`gO`) to a figure, a citation or a section in the middle of a page went to the
+  top of that page, so the target still had to be found by scrolling. A zoomed or width-fitted page now starts with the
+  point the link or bookmark leads to at the top of the window.
 
 ## [0.5.1] - 2026-11-08
 

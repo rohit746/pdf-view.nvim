@@ -585,6 +585,8 @@ end
 ---@class PdfView.Link
 ---@field text string the text under the link, "" for an image
 ---@field page? integer 1-based page of the document it leads to
+---@field x? number where on that page it leads, as a fraction of the page's width from its left edge, when it says
+---@field y? number the same as a fraction of the page's height from its top edge
 ---@field uri? string where it leads otherwise: a web address, an e-mail
 
 --- The links on one page, top to bottom, then left to right. Links that lead nowhere are left out.
@@ -626,6 +628,8 @@ end
 ---@class PdfView.OutlineEntry
 ---@field depth integer 0 for top-level entries
 ---@field page integer 1-based
+---@field x? number where on the page it leads, as a fraction of the page's width from its left edge, when it says
+---@field y? number the same as a fraction of the page's height from its top edge
 ---@field title string
 
 --- Parse the output of `scripts/outline.js`.
@@ -634,9 +638,10 @@ end
 function M.parse_outline(stdout)
   local entries = {}
   for line in (stdout or ""):gmatch("[^\r\n]+") do
-    local depth, page, title = line:match("^(%d+)\t(%d+)\t(.*)$")
+    local depth, page, x, y, title = line:match("^(%d+)\t(%d+)\t([^\t]*)\t([^\t]*)\t(.*)$")
     if depth then
-      entries[#entries + 1] = { depth = tonumber(depth), page = tonumber(page), title = vim.trim(title) }
+      entries[#entries + 1] =
+        { depth = tonumber(depth), page = tonumber(page), x = tonumber(x), y = tonumber(y), title = vim.trim(title) }
     end
   end
   return entries
