@@ -143,9 +143,33 @@ done
     eq(false, mupdf.has_worker(changing))
   end)
 
+  --- The text of page `page` of `book` laid out as `size`, without what a layout changes: spaces, line breaks and
+  --- the hyphens of words broken across lines.
+  ---@return string
+  local function bare_text(book, size, page)
+    mupdf.set_layout(book, size)
+    local err, text = await(function(cb)
+      mupdf.text(book, page, cb)
+    end)
+    assert(not err, err)
+    return (text:gsub("[%s%-]+", ""))
+  end
+
+  --- Assert that page `page` of `book` laid out as `now` holds the point of the text that page `number` starts at
+  --- when laid out as `before`.
+  local function holds_start(book, before, number, now, page)
+    local start = bare_text(book, before, number):sub(1, 40)
+    local own = bare_text(book, now, page)
+    local at = (own .. bare_text(book, now, page + 1)):find(start, 1, true)
+    truthy(
+      at and at <= #own,
+      ("page %d holds the start of page %d (%s): %s"):format(page, number, start, own:sub(1, 80))
+    )
+  end
+
   it("lays a reflowable document out to the page size it is given, and leaves a PDF alone", function()
     local book = dir .. "/book.fb2"
-    fixture.write_fb2(book, { "One", "Two" }, 30)
+    fixture.write_fb2(book, { "One", "Two" }, 30, true)
     mupdf.set_layout(book, { 300, 200, 12 })
     local _, small = await(function(cb)
       mupdf.info(book, 1, cb)
@@ -158,13 +182,15 @@ done
     eq({ 600, 400 }, { large.width, large.height })
     truthy(large.count < small.count, ("fewer pages when they are larger: %d, %d"):format(large.count, small.count))
 
-    -- the page that starts at the same point of the text
+    -- the page that holds the point of the text the page starts at
     local _, mapped = await(function(cb)
-      mupdf.info(book, small.count, cb, false, small.count)
+      mupdf.info(book, small.count, cb, false, { 300, 200, 12 })
     end)
-    eq(math.floor((small.count - 1) * large.count / small.count) + 1, mapped.page)
+    eq({ large.count, 600, 400 }, { mapped.count, mapped.width, mapped.height }, "the answer is about the new layout")
+    holds_start(book, { 300, 200, 12 }, small.count, { 600, 400, 12 }, mapped.page)
+    mupdf.set_layout(book, { 600, 400, 12 })
     local _, first = await(function(cb)
-      mupdf.info(book, 1, cb, false, small.count)
+      mupdf.info(book, 1, cb, false, { 300, 200, 12 })
     end)
     eq(1, first.page)
 
@@ -175,6 +201,32 @@ done
     eq({ 3, 400, 300 }, { page.count, page.width, page.height })
     mupdf.release(book)
     mupdf.release(pdf)
+  end)
+
+  it("lays a book out again at the same point of the text, however unevenly the text fills its pages", function()
+    -- short chapters fill their pages with titles more than with text: the page with the same share of the page
+    -- count is pages away from the same text
+    local book = dir .. "/uneven.fb2"
+    local titles, paragraphs = {}, {}
+    for c = 1, 14 do
+      titles[c] = "Chapter title " .. c
+      paragraphs[c] = (c == 1 or c == 14) and 25 or 1
+    end
+    fixture.write_fb2(book, titles, paragraphs, true)
+    local small, large = { 300, 200, 12 }, { 600, 500, 12 }
+    mupdf.set_layout(book, small)
+    local _, before = await(function(cb)
+      mupdf.info(book, 1, cb)
+    end)
+    for number = 1, before.count, 3 do
+      mupdf.set_layout(book, large)
+      local err, mapped = await(function(cb)
+        mupdf.info(book, number, cb, false, small)
+      end)
+      assert(not err, err)
+      holds_start(book, small, number, large, mapped.page)
+    end
+    mupdf.release(book)
   end)
 
   it("searches and reads the outline of a reflowable document as laid out", function()

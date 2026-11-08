@@ -28,7 +28,8 @@ local CONTENT_MARGIN = 8
 ---@field reflowable boolean the document is laid out to a page size (EPUB, FB2, MOBI), so its pages follow the layout
 ---@field content? number[] `{ x0, y0, x1, y1 }`: the part of the page with something drawn on it, in points from the
 --- page's top-left corner, with a margin of `CONTENT_MARGIN` (the whole page when it is blank). Only read when asked for
----@field layout? string the layout a reflowable document was laid out to (set by `render`, not by mutool)
+---@field layout? PdfView.Layout the layout a reflowable document was laid out to (set by `render`, not by
+--- mutool)
 
 --- The line of mutool's stderr that says why it failed: the last error, or else the last line. mutool ends with a
 --- summary such as "cannot draw 'file.pdf'" that does not say why, and a script's exception is followed by its stack.
@@ -458,8 +459,8 @@ end
 ---@param page integer 1-based; clamped to the document
 ---@param cb fun(err?: string, info?: PdfView.PageInfo)
 ---@param content? boolean also find the part of the page that has content (`info.content`), which renders the page
----@param of? integer `page` is a page of a reflowable document as it was laid out before, with this many pages: the
---- answer is the page that now starts at the same point of the text
+---@param of? PdfView.Layout `page` is a page of a reflowable document as it was laid out this way: the answer is the
+--- page that now holds the point of the text it starts at
 ---@return PdfView.Job
 function M.info(path, page, cb, content, of)
   local request = { "info", math.min(math.max(math.floor(page), 1), MAX_PAGE), content == true, of or vim.NIL }

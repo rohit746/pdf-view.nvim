@@ -145,7 +145,7 @@ local function present(s, win, png, info, fit, rows)
   end
 
   s.slot, s.page, s.count, s.target = slot, info.page, info.count, nil
-  s.laid_out = info.layout and { key = info.layout, count = info.count } or nil
+  s.laid_out = info.layout and { key = table.concat(info.layout, "x"), size = info.layout } or nil
   s.geom = { w = info.width, h = info.height, box = info.content }
   if fit.cx then
     s.cx, s.cy = fit.cx, fit.cy -- what was reachable, after clamping to the page
@@ -531,7 +531,7 @@ local function show(s, page, opts)
         s.reflowable = true
         stamp = stamp .. "@" .. reflow_key
       end
-      info.layout = reflow_key
+      info.layout = reflow
     end
     remember_info(s, stamp, info)
 
@@ -591,7 +591,7 @@ local function show(s, page, opts)
   local laid_out = s.laid_out
   if s.reflowable and not page and laid_out and laid_out.key ~= reflow_key then
     M.on_reflow(s)
-    s.job = mupdf.info(s.path, wanted, on_info, content, laid_out.count)
+    s.job = mupdf.info(s.path, wanted, on_info, content, laid_out.size)
     return
   end
   local known = known_info(s, stamp, wanted)
