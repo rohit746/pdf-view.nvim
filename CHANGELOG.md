@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A remembered position saved before `max_zoom` was lowered, or a hand-edited `positions.json`, opened the PDF zoomed
+  past what `+` allows, or with its centre off the page. A restored zoom is now kept within `1..max_zoom` and its
+  centre within the page.
+
 ## [0.5.0] - 2026-11-08
 
 ### Added
@@ -31,9 +37,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- A remembered position saved before `max_zoom` was lowered, or a hand-edited `positions.json`, opened the PDF zoomed
-  past what `+` allows, or with its centre off the page. A restored zoom is now kept within `1..max_zoom` and its
-  centre within the page.
 - Cancelling the password prompt of a password-protected PDF only held until the page was shown again: resizing the
   window, a split next to it, or the file changing on disk asked for the password again. The PDF now stays locked with
   its message until `:edit` (or `r`) asks again.
