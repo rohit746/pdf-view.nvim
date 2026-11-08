@@ -171,6 +171,59 @@ function M.viewport(page_w, page_h, win_cols, win_rows, cell_w, cell_h, zoom, cx
   }
 end
 
+---@class PdfView.SheetLayout
+---@field page? integer
+---@field x number where the page's top-left corner lies on the sheet, in points
+---@field y number
+---@field width number the page's size, in points
+---@field height number
+
+--- Pages side by side, `gap` points apart and centred on each other vertically, as one page: the sheet's size, and
+--- what its content is when every page says (`content`). `infos` with one page give that page.
+---@param infos PdfView.PageInfo[]
+---@param gap number
+---@return PdfView.PageInfo sheet with `parts` (`PdfView.SheetLayout`, page by page) and `last` when there are two
+function M.sheet(infos, gap)
+  if #infos == 1 then
+    return infos[1]
+  end
+  local height = 0
+  for _, info in ipairs(infos) do
+    height = math.max(height, info.height)
+  end
+  local parts, content = {}, { math.huge, math.huge, -math.huge, -math.huge }
+  local x = 0
+  for index, info in ipairs(infos) do
+    if index > 1 then
+      x = x + gap
+    end
+    local y = (height - info.height) / 2
+    parts[index] = { page = info.page, x = x, y = y, width = info.width, height = info.height }
+    local box = info.content
+    if content and box then
+      content = {
+        math.min(content[1], x + box[1]),
+        math.min(content[2], y + box[2]),
+        math.max(content[3], x + box[3]),
+        math.max(content[4], y + box[4]),
+      }
+    else
+      content = nil
+    end
+    x = x + info.width
+  end
+  return {
+    count = infos[1].count,
+    page = infos[1].page,
+    last = infos[#infos].page,
+    width = x,
+    height = height,
+    reflowable = false,
+    content = content,
+    parts = parts,
+  }
+end
+
 --- Text size, in points, that reflowable documents are laid out with.
 M.REFLOW_EM = 12
 --- How many pixels of a terminal cell's height one point of text takes at `text_scale` 1: twelve-point text is then

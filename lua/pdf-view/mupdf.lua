@@ -30,6 +30,8 @@ local CONTENT_MARGIN = 8
 --- page's top-left corner, with a margin of `CONTENT_MARGIN` (the whole page when it is blank). Only read when asked for
 ---@field layout? PdfView.Layout the layout a reflowable document was laid out to (set by `render`, not by
 --- mutool)
+---@field parts? PdfView.SheetLayout[] a spread of facing pages (`layout.sheet()`, not mutool): where each lies
+---@field last? integer the spread's last page
 
 --- The line of mutool's stderr that says why it failed: the last error, or else the last line. mutool ends with a
 --- summary such as "cannot draw 'file.pdf'" that does not say why, and a script's exception is followed by its stack.
@@ -523,6 +525,44 @@ function M.render_clip(path, page, clip, out, cb)
     clip.highlights or "",
     clip.recolor or "",
   }
+  return ask(path, request, rendered(out, cb))
+end
+
+---@class PdfView.SheetPart
+---@field page integer
+---@field scale_x number device pixels per point
+---@field scale_y number
+---@field dx number where the page's top-left corner lands in the image, in pixels
+---@field dy number
+---@field clip number[] `{ x0, y0, x1, y1 }`: the part of the image the page may draw on, in pixels
+---@field highlights? string as for `PdfView.Clip`
+
+--- Render several pages into one PNG of exactly `width` x `height` pixels, such as two facing pages side by side.
+---@param path string
+---@param width integer
+---@param height integer
+---@param parts PdfView.SheetPart[]
+---@param out string destination PNG
+---@param cb fun(err?: string, notes?: string)
+---@param recolor? string as for `PdfView.Clip`
+---@return PdfView.Job
+function M.render_sheet(path, width, height, parts, out, cb, recolor)
+  local list = {}
+  for index, part in ipairs(parts) do
+    list[index] = {
+      part.page,
+      part.scale_x,
+      part.scale_y,
+      part.dx,
+      part.dy,
+      part.clip[1],
+      part.clip[2],
+      part.clip[3],
+      part.clip[4],
+      part.highlights or "",
+    }
+  end
+  local request = { "sheet", math.floor(width), math.floor(height), out, recolor or "", list }
   return ask(path, request, rendered(out, cb))
 end
 

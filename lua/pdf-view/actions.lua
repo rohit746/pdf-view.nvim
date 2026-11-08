@@ -188,7 +188,7 @@ local function go(s, page, anchor, jump)
   if jump then
     record_jump(s)
   end
-  page = math.max(1, math.min(page, s.count or page))
+  page = session.spread_range(s, math.max(1, math.min(page, s.count or page)), s.count)
   if page == (s.target or s.page) and s.slot ~= 0 then
     if not (jump and anchor and uses_viewport(s)) then
       return
@@ -205,18 +205,22 @@ local function go(s, page, anchor, jump)
   show(s, page)
 end
 
---- The anchor that brings the point (`x`, `y`) of a page, as fractions of it, to the top left of the window, where a
---- link or a bookmark leads: the top of the page when it says nothing more, or when the whole page is on screen. The
---- window is measured with the page on screen, which is the size of the other pages of almost every document.
+--- The anchor that brings the point (`x`, `y`) of page `page`, as fractions of it, to the top left of the window,
+--- where a link or a bookmark leads: the top of the page when it says nothing more, or when the whole page is on
+--- screen. The window is measured with the page on screen, which is the size of the other pages of almost every
+--- document.
 ---@param s PdfView.Session
+---@param page integer
 ---@param x? number
 ---@param y? number
 ---@return PdfView.Anchor
-local function anchor_at(s, x, y)
+local function anchor_at(s, page, x, y)
   local win = y and uses_viewport(s) and s.geom and window_for(s)
   if not win then
     return TOP
   end
+  local sheet_x, sheet_y = session.sheet_point(s, page, x or 0, y --[[@as number]]) -- facing pages are one sheet
+  x, y = x and sheet_x, sheet_y
   local cols, rows = text_area(win)
   local cell = terminal.cell_size()
   local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)
@@ -275,8 +279,8 @@ local function set_zoom(s, zoom)
     -- current search match goes towards the match instead
     local found = s.search
     local match = found and found.current and found.matches[found.current]
-    if match and match.page == (s.target or s.page) then
-      s.cx, s.cy = match.cx, match.cy
+    if match and session.on_screen(s, match.page) then
+      s.cx, s.cy = session.sheet_point(s, match.page, match.cx, match.cy)
     else
       s.cx, s.cy = 0.5, 0.5
     end
@@ -333,7 +337,7 @@ local function move(s, dx, dy)
   else
     anchor = dx ~= 0 and { cx = 1, cy = 1 } or { cy = 1 }
   end
-  go(s, (s.target or s.page) + (forward and count or -count), anchor)
+  go(s, session.spread_step(s, s.target or s.page, forward and count or -count), anchor)
 end
 
 --- The mouse wheel moves the viewer it is over, as `move` does. These keys are mapped in the focused viewer only,
@@ -365,7 +369,7 @@ end
 ---@param match PdfView.Match
 ---@return boolean
 local function match_visible(s, match)
-  local win = s.page == match.page and s.geom and window_for(s)
+  local win = s.target == nil and session.on_screen(s, match.page) and s.geom and window_for(s)
   if not win then
     return false
   end
@@ -375,11 +379,17 @@ local function match_visible(s, match)
     return true -- the whole page is on screen
   end
   local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)
+  local ox, oy = 0, 0 -- where the page lies on a sheet of facing pages
+  for _, part in ipairs(s.parts or {}) do
+    if part.page == match.page then
+      ox, oy = part.x, part.y
+    end
+  end
   for _, rect in ipairs(match.rects) do
-    local inside = rect[1] * view.scale >= view.vx
-      and rect[3] * view.scale <= view.vx + view.view_w
-      and rect[2] * view.scale >= view.vy
-      and rect[4] * view.scale <= view.vy + view.view_h
+    local inside = (ox + rect[1]) * view.scale >= view.vx
+      and (ox + rect[3]) * view.scale <= view.vx + view.view_w
+      and (oy + rect[2]) * view.scale >= view.vy
+      and (oy + rect[4]) * view.scale <= view.vy + view.view_h
     if not inside then
       return false
     end
@@ -395,7 +405,7 @@ local function goto_match(s, index)
   record_jump(s)
   s.search.current = index
   if not match_visible(s, match) then
-    s.cx, s.cy = match.cx, match.cy
+    s.cx, s.cy = session.sheet_point(s, match.page, match.cx, match.cy)
   end
   s.target = match.page
   show(s, match.page)
@@ -458,7 +468,7 @@ local function step_match(s, reverse)
   end
   local sign = reverse and -found.dir or found.dir
   local index = found.current
-  if index and found.matches[index].page ~= (s.target or s.page) then
+  if index and not session.on_screen(s, found.matches[index].page) then
     index = nil -- the user has moved on: continue from where they are, not from the old match
   end
   local wrapped, steps = false, vim.v.count1
@@ -516,20 +526,28 @@ local function show_synced(s, boxes)
     s.synced = { id = next_sync, page = info.page, rects = rects }
     local first = rects[1]
     if uses_viewport(s) then
-      s.cy = (first[2] + first[4]) / 2 / info.height
+      local cx, cy = session.sheet_point(
+        s,
+        info.page,
+        (first[1] + first[3]) / 2 / info.width,
+        (first[2] + first[4]) / 2 / info.height
+      )
+      s.cy = cy
       local win = window_for(s)
       if win then
         local cols, rows = text_area(win)
         local cell = terminal.cell_size()
-        local view =
-          layout.viewport(info.width, info.height, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, info.content)
+        -- facing pages are measured with the sheet on screen
+        local spread = session.spread_mode(s) ~= "off" and s.geom
+        local w, h = spread and s.geom.w or info.width, spread and s.geom.h or info.height
+        local view = layout.viewport(w, h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, nil)
         if view.scroll_x then
-          s.cx = (first[1] + first[3]) / 2 / info.width
+          s.cx = cx
         end
       end
     end
-    s.target = info.page
-    show(s, info.page)
+    s.target = session.spread_range(s, info.page, info.count)
+    show(s, s.target)
   end)
 end
 
@@ -644,12 +662,12 @@ function M.forward_search(opts)
   try(1)
 end
 
---- The point of the page under the cell at `row`, `col` (0-based, in the window's text area) of the viewer `s`, in
---- points from the page's top-left corner. Nil off the page.
+--- The page under the cell at `row`, `col` (0-based, in the window's text area) of the viewer `s`, and the point of
+--- it there, in points from the page's top-left corner. Nil off the page.
 ---@param s PdfView.Session
 ---@param row integer
 ---@param col integer
----@return number? x, number? y
+---@return integer? page, number? x, number? y
 local function point_at(s, row, col)
   local fit, geom = s.fit, s.geom
   if not (fit and geom) then
@@ -659,10 +677,21 @@ local function point_at(s, row, col)
   if cx < 0 or cy < 0 or cx > fit.cols or cy > fit.rows then
     return nil
   end
+  local x, y
   if fit.scale then -- a viewport: the cells show its pixels from (x, y) on
-    return (fit.x + cx * fit.width / fit.cols) / fit.scale, (fit.y + cy * fit.height / fit.rows) / fit.scale
+    x, y = (fit.x + cx * fit.width / fit.cols) / fit.scale, (fit.y + cy * fit.height / fit.rows) / fit.scale
+  else
+    x, y = cx / fit.cols * geom.w, cy / fit.rows * geom.h
   end
-  return cx / fit.cols * geom.w, cy / fit.rows * geom.h
+  for _, part in ipairs(s.parts or {}) do -- facing pages: the one under the cell
+    if x >= part.x and x <= part.x + part.width and y >= part.y and y <= part.y + part.height then
+      return part.page, x - part.x, y - part.y
+    end
+  end
+  if s.parts then
+    return nil -- between the pages
+  end
+  return s.page, x, y
 end
 
 --- Open `source` at its line: in a window of the current tab that shows it, else in the previous window when that is
@@ -708,12 +737,11 @@ local function inverse_search(s, lhs)
   end
   s = over
   local info = vim.fn.getwininfo(mouse.winid)[1] -- `winrow` counts the winbar, `wincol` the sign and number columns
-  local x, y = point_at(s, mouse.winrow - 1 - info.winbar, mouse.wincol - 1 - info.textoff)
-  if not x then
+  local page, x, y = point_at(s, mouse.winrow - 1 - info.winbar, mouse.wincol - 1 - info.textoff)
+  if not page then
     return
   end
-  local page = s.page
-  synctex.edit(s.path, page, x, y --[[@as number]], function(err, source)
+  synctex.edit(s.path, page, x --[[@as number]], y --[[@as number]], function(err, source)
     if s.closed then
       return
     end
@@ -741,7 +769,7 @@ local function pick_outline(s)
       end,
     }, function(entry)
       if entry then
-        go(s, entry.page, anchor_at(s, entry.x, entry.y), true)
+        go(s, entry.page, anchor_at(s, entry.page, entry.x, entry.y), true)
       end
     end)
   end
@@ -764,20 +792,55 @@ local function pick_outline(s)
   end)
 end
 
+--- What `results` holds for each page on screen (two facing pages, or one), as `fetch` reads it, in page order.
+--- Stops at the first error.
+---@generic T
+---@param s PdfView.Session
+---@param fetch fun(path: string, page: integer, cb: fun(err?: string, result?: T))
+---@param done fun(err?: string, results?: T[])
+local function for_pages_on_screen(s, fetch, done)
+  local first, last = s.page, s.last or s.page
+  local results = {}
+  local function step(page)
+    if page > last then
+      return done(nil, results)
+    end
+    fetch(s.path, page, function(err, result)
+      if s.closed then
+        return
+      end
+      if err or result == nil then
+        return done(err or "no answer")
+      end
+      results[#results + 1] = result
+      step(page + 1)
+    end)
+  end
+  step(first)
+end
+
+--- "page 3", or "pages 3-4" for facing pages.
+---@param s PdfView.Session
+---@return string
+local function pages_on_screen(s)
+  return (s.last and s.last ~= s.page and "pages " or "page ") .. session.pages_label(s)
+end
+
 --- Pick one of the links on the page on screen and follow it: a link into the document jumps to where it leads, any
---- other (a web address, an e-mail) opens with `vim.ui.open()`.
+--- other (a web address, an e-mail) opens with `vim.ui.open()`. Facing pages offer the links of both.
 ---@param s PdfView.Session
 local function follow_link(s)
-  local page = s.page
-  mupdf.links(s.path, page, function(err, links)
-    if s.closed then
-      return
-    end
-    if err or not links then
+  local label = pages_on_screen(s)
+  for_pages_on_screen(s, mupdf.links, function(err, per_page)
+    if err or not per_page then
       return notify("cannot read the links of the page: " .. tostring(err), vim.log.levels.WARN)
     end
+    local links = {}
+    for _, list in ipairs(per_page) do
+      vim.list_extend(links, list)
+    end
     if #links == 0 then
-      return notify(("page %d has no links"):format(page))
+      return notify(("%s has no links"):format(label))
     end
     vim.ui.select(links, {
       prompt = "Links",
@@ -790,7 +853,7 @@ local function follow_link(s)
         return
       end
       if link.page then
-        return go(s, link.page, anchor_at(s, link.x, link.y), true)
+        return go(s, link.page, anchor_at(s, link.page, link.x, link.y), true)
       end
       local _, open_err = vim.ui.open(link.uri)
       if open_err then
@@ -800,27 +863,32 @@ local function follow_link(s)
   end)
 end
 
---- Read the text of the page on screen and hand its lines to `use`, without the empty lines at its end. A page
---- without text, such as a scanned one, only gets a notification.
+--- Read the text of the page on screen and hand its lines to `use`, without the empty lines at its end, with what it
+--- is called ("page 3", "pages 3-4" for facing pages, whose texts follow each other). A page without text, such as a
+--- scanned one, only gets a notification.
 ---@param s PdfView.Session
----@param use fun(lines: string[], page: integer)
+---@param use fun(lines: string[], label: string)
 local function with_page_text(s, use)
-  local page = s.page
-  mupdf.text(s.path, page, function(err, text)
-    if s.closed then
-      return
-    end
-    if err or not text then
+  local label = pages_on_screen(s)
+  for_pages_on_screen(s, mupdf.text, function(err, texts)
+    if err or not texts then
       return notify("cannot read the text of the page: " .. tostring(err), vim.log.levels.WARN)
     end
-    local lines = vim.split(text, "\n", { plain = true })
-    while #lines > 0 and not lines[#lines]:match("%S") do
-      lines[#lines] = nil
+    local lines = {}
+    for _, text in ipairs(texts) do
+      local own = vim.split(text, "\n", { plain = true })
+      while #own > 0 and not own[#own]:match("%S") do
+        own[#own] = nil
+      end
+      if #own > 0 and #lines > 0 then
+        lines[#lines + 1] = ""
+      end
+      vim.list_extend(lines, own)
     end
     if #lines == 0 then
-      return notify(("page %d has no text"):format(page))
+      return notify(("%s has no text"):format(label))
     end
-    use(lines, page)
+    use(lines, label)
   end)
 end
 
@@ -828,9 +896,9 @@ end
 ---@param s PdfView.Session
 local function yank_text(s)
   local register = vim.v.register
-  with_page_text(s, function(lines, page)
+  with_page_text(s, function(lines, label)
     vim.fn.setreg(register, lines, "l")
-    notify(('page %d: %d lines yanked into "%s'):format(page, #lines, register))
+    notify(('%s: %d lines yanked into "%s'):format(label, #lines, register))
   end)
 end
 
@@ -838,7 +906,7 @@ end
 --- named after the page it holds: `t` on another page fills it again, renames it and focuses its window.
 ---@param s PdfView.Session
 local function show_text(s)
-  with_page_text(s, function(lines, page)
+  with_page_text(s, function(lines, label)
     local buf
     for _, candidate in ipairs(vim.api.nvim_list_bufs()) do
       if vim.b[candidate].pdf_view_text_of == s.path then
@@ -851,10 +919,10 @@ local function show_text(s)
       vim.b[buf].pdf_view_text_of = s.path
     end
     local old_name = vim.api.nvim_buf_get_name(buf)
-    local name = ("pdf-view://%s (page %d)"):format(vim.fn.fnamemodify(s.path, ":t"), page)
+    local name = ("pdf-view://%s (%s)"):format(vim.fn.fnamemodify(s.path, ":t"), label)
     if old_name ~= name and not pcall(vim.api.nvim_buf_set_name, buf, name) then
       -- another document of the same file name holds that name: the full path tells them apart
-      pcall(vim.api.nvim_buf_set_name, buf, ("pdf-view://%s (page %d)"):format(s.path, page))
+      pcall(vim.api.nvim_buf_set_name, buf, ("pdf-view://%s (%s)"):format(s.path, label))
     end
     if old_name ~= "" and old_name ~= vim.api.nvim_buf_get_name(buf) then
       -- renaming leaves an empty alternate buffer under the old name, as `:file` does
@@ -947,6 +1015,7 @@ local ACTION_ORDER = {
   "mark",
   "goto_mark",
   "inverse_search",
+  "spread",
   "recolor",
   "reload",
   "close",
@@ -1015,14 +1084,14 @@ ACTIONS.scroll_left = {
 ACTIONS.next = {
   desc = "next page ({count} pages ahead)",
   run = function(s)
-    go(s, (s.target or s.page) + vim.v.count1, TOP)
+    go(s, session.spread_step(s, s.target or s.page, vim.v.count1), TOP)
   end,
 }
 
 ACTIONS.prev = {
   desc = "previous page ({count} pages back)",
   run = function(s)
-    go(s, (s.target or s.page) - vim.v.count1, TOP)
+    go(s, session.spread_step(s, s.target or s.page, -vim.v.count1), TOP)
   end,
 }
 
@@ -1162,6 +1231,21 @@ ACTIONS.goto_mark = {
 ACTIONS.inverse_search = {
   desc = "go to the TeX source of the point under the mouse (SyncTeX)",
   run = inverse_search,
+}
+
+ACTIONS.spread = {
+  desc = "show facing pages side by side, or one page at a time",
+  run = function(s)
+    if session.spread_mode(s) ~= "off" then
+      s.spread = "off"
+    else
+      local configured = config.options.spread
+      s.spread = configured ~= "off" and configured or "on"
+    end
+    -- the spread that holds the page on screen; one page at a time, the page that was on the left
+    s.target = session.spread_range(s, s.target or s.page, s.count)
+    show(s, s.target)
+  end,
 }
 
 ACTIONS.recolor = {

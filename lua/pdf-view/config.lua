@@ -34,12 +34,15 @@ local M = {}
 ---@field goto_mark string[] followed by a to z: go to that mark; doubled (`''`): to where the latest jump started
 ---@field inverse_search string[] go to the line of the TeX source that the point under the mouse was typeset from
 --- (SyncTeX)
+---@field spread string[] show facing pages side by side, or one page at a time (`spread`, or "on" when that is "off")
 ---@field recolor string[] switch the recolouring of the pages on and off (`recolor`, or "invert" when that is "off")
 ---@field reload string[] re-render the current page
 ---@field close string[] close the viewer buffer
 ---@field help string[] show the key summary
 
 ---@alias PdfView.Recolor "off"|"invert"|"colorscheme"
+
+---@alias PdfView.Spread "off"|"on"|"cover"
 
 ---@class PdfView.Config
 ---@field auto_open boolean open files with one of `extensions` (`:edit`, `nvim file.pdf`, ...) in the viewer
@@ -69,6 +72,8 @@ local M = {}
 ---@field highlight { match: string, current: string } `#rrggbb` colours multiplied onto search matches
 ---@field recolor PdfView.Recolor how pages are recoloured: not at all, with their brightness inverted but their hues
 --- kept (dark pages with light text), or in the colours of the `Normal` highlight (text and background)
+---@field spread PdfView.Spread show facing pages side by side: pages 1 and 2, 3 and 4 ("on"), or page 1 alone and then
+--- 2 and 3, 4 and 5, as a book opens ("cover"). E-books are always shown a page at a time
 ---@field cell_size? number[] `{ width, height }` of a terminal cell in pixels, when it cannot be detected
 ---@field keymaps PdfView.Keymaps|false buffer-local normal mode mappings, `false` for none
 
@@ -96,6 +101,7 @@ local defaults = {
   text_scale = 1,
   highlight = { match = "#ffe14d", current = "#ff8c1a" },
   recolor = "off",
+  spread = "off",
   cell_size = nil,
   keymaps = {
     -- not <Space>: it is often the leader key
@@ -131,6 +137,7 @@ local defaults = {
     mark = { "m" },
     goto_mark = { "'", "`" },
     inverse_search = { "<2-LeftMouse>" },
+    spread = { "d" },
     recolor = { "i" },
     reload = { "r" },
     close = { "q" },
@@ -231,6 +238,9 @@ local function validate(opts)
   end
   if opts.recolor ~= nil and not vim.tbl_contains({ "off", "invert", "colorscheme" }, opts.recolor) then
     fail("recolor", '"off", "invert" or "colorscheme"', opts.recolor)
+  end
+  if opts.spread ~= nil and not vim.tbl_contains({ "off", "on", "cover" }, opts.spread) then
+    fail("spread", '"off", "on" or "cover"', opts.spread)
   end
   if opts.reload_delay ~= nil and (type(opts.reload_delay) ~= "number" or opts.reload_delay < 0) then
     fail("reload_delay", "a non-negative number", opts.reload_delay)

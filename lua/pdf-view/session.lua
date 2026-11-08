@@ -10,6 +10,9 @@ local terminal = require("pdf-view.terminal")
 
 local M = {}
 
+--- Points of paper between two facing pages.
+M.SPREAD_GAP = 8
+
 local CACHE_LIMIT = 16
 -- image ids per viewer: the terminal keeps this many of the latest pages, so turning back to one sends nothing
 local IMAGE_IDS = 4
@@ -102,6 +105,10 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field unlocking? boolean the password prompt of a password-protected document is open
 ---@field locked? boolean the password prompt was cancelled: say so instead of asking again, until `actions.reload`
 ---@field recolor? PdfView.Recolor how the pages are recoloured, once toggled; until then `config.options.recolor`
+---@field spread? PdfView.Spread whether facing pages are shown side by side, once toggled; until then
+--- `config.options.spread`
+---@field last? integer the last page on screen: `page` + 1 when two facing pages are, else `page`
+---@field parts? PdfView.SheetLayout[] where the pages on screen lie in `geom`, when there are two side by side
 ---@field closed boolean
 
 ---@type table<integer, PdfView.Session>
@@ -162,6 +169,95 @@ local function recolor_spec(s)
   local fg = normal.fg or (dark and 0xffffff or 0x000000)
   local bg = normal.bg or (dark and 0x000000 or 0xffffff)
   return ("tint,%06x,%06x"):format(fg, bg)
+end
+
+--- Whether the pages of `s` are shown in spreads, and how: as configured, or as toggled in the viewer. E-books are
+--- laid out to the window, one page at a time.
+---@param s PdfView.Session
+---@return PdfView.Spread
+local function spread_mode(s)
+  if s.reflowable then
+    return "off"
+  end
+  return s.spread or config.options.spread
+end
+
+--- The first and the last page of the spread that holds `page`: pairs of pages from page 1 on ("on"), or from page 2
+--- on after page 1 alone ("cover", as a book opens). Just `page` when spreads are off.
+---@param s PdfView.Session
+---@param page integer
+---@param count? integer pages in the document, when known
+---@return integer first, integer last
+local function spread_range(s, page, count)
+  local mode = spread_mode(s)
+  if mode == "off" then
+    return page, page
+  end
+  local first
+  if mode == "cover" then
+    first = page == 1 and 1 or page - page % 2
+  else
+    first = page - (page - 1) % 2
+  end
+  local last = (mode == "cover" and first == 1) and 1 or first + 1
+  return first, count and math.min(last, count) or last
+end
+
+--- The first page of the spread `steps` spreads after (or, for a negative number, before) the one that holds `page`.
+--- Not clamped to the document.
+---@param s PdfView.Session
+---@param page integer
+---@param steps integer
+---@return integer
+local function spread_step(s, page, steps)
+  if spread_mode(s) == "off" then
+    return page + steps
+  end
+  local first = spread_range(s, page)
+  for _ = 1, math.abs(steps) do
+    if steps > 0 then
+      local _, last = spread_range(s, first)
+      first = last + 1
+    else
+      first = spread_range(s, math.max(1, first - 1))
+    end
+  end
+  return first
+end
+
+--- Whether `page` is on screen in `s`: the page, or one of the pages of the spread.
+---@param s PdfView.Session
+---@param page integer
+---@return boolean
+local function on_screen(s, page)
+  local first = s.target or s.page
+  local last = s.target and select(2, spread_range(s, s.target, s.count)) or (s.last or s.page)
+  return page >= first and page <= last
+end
+
+--- The point (`x`, `y`) of page `page`, as fractions of it, as fractions of the spread it is shown in: the same unless
+--- two pages are side by side. Measured with the pages on screen, which have the size of the other pages of almost
+--- every document.
+---@param s PdfView.Session
+---@param page integer
+---@param x number
+---@param y number
+---@return number x, number y
+local function sheet_point(s, page, x, y)
+  local first, last = spread_range(s, page, s.count)
+  if first == last or not s.geom then
+    return x, y
+  end
+  local parts = s.parts
+  if not (parts and #parts == last - first + 1) then
+    -- one page on screen: the spread is two pages of its size
+    local w, h = s.geom.w, s.geom.h
+    parts = { { x = 0, y = 0, width = w, height = h }, { x = w + M.SPREAD_GAP, y = 0, width = w, height = h } }
+  end
+  local part = parts[page - first + 1]
+  local width = parts[#parts].x + parts[#parts].width
+  local height = math.max(parts[1].height, parts[#parts].height)
+  return (part.x + x * part.width) / width, (part.y + y * part.height) / height
 end
 
 ---@param stat uv.fs_stat.result
@@ -310,10 +406,10 @@ local function update_winbar(s, win)
     found = ("/%s %s   "):format(needle, s.searching and "searching…" or search.progress(s.search))
   end
 
-  local text = (" %s%%=%s%d / %s%s "):format(
+  local text = (" %s%%=%s%s / %s%s "):format(
     escape(vim.fn.fnamemodify(s.path, ":t")),
     escape(found),
-    s.page,
+    M.pages_label(s),
     s.count or "?",
     #label > 0 and escape("  " .. table.concat(label, " ")) or ""
   )
@@ -430,7 +526,22 @@ local function destroy(s)
   pcall(vim.api.nvim_clear_autocmds, { group = augroup, buffer = s.buf })
 end
 
+--- "3" for the page on screen, "3-4" for two facing pages.
+---@param s PdfView.Session
+---@return string
+function M.pages_label(s)
+  if s.last and s.last ~= s.page then
+    return ("%d-%d"):format(s.page, s.last)
+  end
+  return tostring(s.page)
+end
+
 M.ns = ns
+M.spread_mode = spread_mode
+M.spread_range = spread_range
+M.spread_step = spread_step
+M.on_screen = on_screen
+M.sheet_point = sheet_point
 M.augroup = augroup
 M.define_highlight = define_highlight
 M.match_colors = match_colors

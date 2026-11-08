@@ -275,3 +275,35 @@ describe("layout.reflow", function()
     eq(true, tiny[1] >= 72 and tiny[2] >= 72)
   end)
 end)
+
+describe("layout.sheet", function()
+  it("gives a single page as it is", function()
+    local info = { count = 3, page = 2, width = 612, height = 792, reflowable = false }
+    eq(info, layout.sheet({ info }, 8))
+  end)
+
+  it("lays facing pages side by side, centred on each other, as one page", function()
+    local sheet = layout.sheet({
+      { count = 5, page = 2, width = 600, height = 800, reflowable = false, content = { 50, 60, 550, 700 } },
+      { count = 5, page = 3, width = 400, height = 600, reflowable = false, content = { 10, 10, 390, 590 } },
+    }, 8)
+    eq(2, sheet.page)
+    eq(3, sheet.last)
+    eq(5, sheet.count)
+    eq(1008, sheet.width)
+    eq(800, sheet.height)
+    eq({
+      { page = 2, x = 0, y = 0, width = 600, height = 800 },
+      { page = 3, x = 608, y = 100, width = 400, height = 600 },
+    }, sheet.parts)
+    eq({ 50, 60, 998, 700 }, sheet.content, "the content of both pages")
+  end)
+
+  it("has no content box unless both pages have one", function()
+    local sheet = layout.sheet({
+      { count = 2, page = 1, width = 600, height = 800, reflowable = false, content = { 0, 0, 600, 800 } },
+      { count = 2, page = 2, width = 600, height = 800, reflowable = false },
+    }, 8)
+    eq(nil, sheet.content)
+  end)
+end)

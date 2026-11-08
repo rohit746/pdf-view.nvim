@@ -52,6 +52,13 @@
 //     maps black to the first colour and white to the second, the shades in between to the shades between them (a
 //     page in the colours of the editor's text and background).
 //
+//   ["sheet", <width>, <height>, <out.png>, <recolor>, <parts>]
+//     Renders several pages into one PNG of <width> x <height> pixels, on grey: two facing pages side by side, say.
+//     <parts> is a list of [<page>, <scale_x>, <scale_y>, <dx>, <dy>, <x0>, <y0>, <x1>, <y1>, <highlights>]: page
+//     <page> is drawn at that scale with its top-left corner at (<dx>, <dy>) of the image, and only inside the
+//     rectangle (<x0>, <y0>)-(<x1>, <y1>) of it, so that a page does not paint over its neighbours. <highlights> and
+//     <recolor> are as for "render"; the result is its notes for the first part with highlights.
+//
 //   ["crop", <in.png>, <x>, <y>, <width>, <height>, <out>, <out_width>, <out_height>]
 //     Copies the rectangle (<x>, <y>, <width>, <height>) of the image <in.png>, in its pixels, to the PNG <out>,
 //     pixel for pixel, or stretched to <out_width> x <out_height> pixels when those are given. <out> is written as a
@@ -76,6 +83,8 @@ var PADDING = new Array(65537).join(" ");
 var SCAN = 600;
 // Lighter pixels count as paper: anti-aliasing leaves a faint grey next to content, scanning noise is darker.
 var WHITE = 250;
+// The grey between pages that are drawn together, so that white pages do not run into each other.
+var GAP = 192;
 // Display lists kept, most recent last: drawing a page again (scrolling, zooming) skips interpreting it.
 var KEEP = 3;
 // How much text, in characters other than spaces, stands for the point of a book that a page starts at: enough to be
@@ -237,18 +246,19 @@ function recolor(pixmap, how) {
   }
 }
 
-function render(number, scaleX, scaleY, x, y, width, height, out, highlights, how) {
+// Draw page <number> onto <device> with <ctm> applied after its top-left corner is moved to the origin, with
+// <highlights> on top. Returns the notes "render" answers with.
+function drawPage(device, number, scaleX, scaleY, offset, highlights) {
   var count = openDocument().countPages();
   if (!(number >= 1 && number <= count)) {
     throw new Error("page " + number + " does not exist (the document has " + count + ")");
   }
   var entry = load(number);
   var bounds = entry.bounds;
-  var ctm = Matrix.concat(Matrix.translate(-bounds[0], -bounds[1]), Matrix.scale(scaleX, scaleY));
-
-  var pixmap = new Pixmap(ColorSpace.DeviceRGB, [x, y, x + width, y + height], false);
-  pixmap.clear(255);
-  var device = new DrawDevice(Matrix.identity, pixmap);
+  var ctm = Matrix.concat(
+    Matrix.concat(Matrix.translate(-bounds[0], -bounds[1]), Matrix.scale(scaleX, scaleY)),
+    Matrix.translate(offset[0], offset[1])
+  );
   entry.list.run(device, ctm);
 
   var notes = "";
@@ -274,7 +284,34 @@ function render(number, scaleX, scaleY, x, y, width, height, out, highlights, ho
       }
     });
   }
+  return notes;
+}
 
+function render(number, scaleX, scaleY, x, y, width, height, out, highlights, how) {
+  var pixmap = new Pixmap(ColorSpace.DeviceRGB, [x, y, x + width, y + height], false);
+  pixmap.clear(255);
+  var device = new DrawDevice(Matrix.identity, pixmap);
+  var notes = drawPage(device, number, scaleX, scaleY, [0, 0], highlights);
+  device.close();
+  recolor(pixmap, how);
+  pixmap.saveAsPNG(out);
+  return notes;
+}
+
+function sheet(width, height, out, how, parts) {
+  var pixmap = new Pixmap(ColorSpace.DeviceRGB, [0, 0, width, height], false);
+  pixmap.clear(GAP);
+  var device = new DrawDevice(Matrix.identity, pixmap);
+  var notes = "";
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i];
+    var area = rectangle(p[5], p[6], p[7], p[8]);
+    device.clipPath(area, false, Matrix.identity);
+    device.fillPath(area, false, Matrix.identity, ColorSpace.DeviceRGB, [1, 1, 1], 1); // the paper
+    var drawn = drawPage(device, p[0], p[1], p[2], [p[3], p[4]], p[9]);
+    device.popClip();
+    notes = notes || drawn;
+  }
   device.close();
   recolor(pixmap, how);
   pixmap.saveAsPNG(out);
@@ -492,6 +529,8 @@ function answer(request) {
         request[10],
         request[11]
       );
+    case "sheet":
+      return sheet(request[2], request[3], request[4], request[5], request[6]);
     case "text":
       return JSON.stringify(plainText(request[2]));
     case "links":

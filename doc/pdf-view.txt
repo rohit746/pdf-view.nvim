@@ -101,6 +101,8 @@ between matches accept a count.
   '' ``                   back to where the latest jump started
   <2-LeftMouse>           open the TeX source at the line the point under
                           the mouse was typeset from: see |pdf-view-synctex|
+  d                       show facing pages side by side, or one page at a
+                          time: see |pdf-view-spread|
   i                       recolour the pages (dark mode), or stop: see
                           |pdf-view-recolor|
   r                       re-render the current page
@@ -173,6 +175,15 @@ Past either end of that list, `<C-o>` and `<C-i>` go on through Vim's own
 scrolling are not jumps. `m{a-z}` marks the page with its fit, zoom and
 view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and the jump list
 belong to the viewer and stay through |:edit|.
+
+                                                             *pdf-view-spread*
+`d` shows two facing pages side by side, and `d` again one page at a time.
+`spread` says how pages pair up, and whether a document starts out that
+way: "on" pairs pages 1 and 2, 3 and 4; "cover" shows page 1 alone, then 2
+and 3, 4 and 5, as a book with a cover opens. `d` pairs them as "on" when
+`spread` is "off". The pair is fitted, zoomed and scrolled as one page, and
+page turns move two pages. Search, links, the page text and SyncTeX cover
+both pages. E-books show one page at a time.
 
                                                             *pdf-view-recolor*
 `i` recolours the pages, and `i` again shows them as they are. `recolor`
@@ -268,6 +279,7 @@ CONFIGURATION                                              *pdf-view-config*
       text_scale = 1,          -- e-book text size, relative to the terminal's
       highlight = { match = "#ffe14d", current = "#ff8c1a" },
       recolor = "off",         -- "off" | "invert" | "colorscheme"
+      spread = "off",          -- "off" | "on" | "cover", see |pdf-view-spread|
       cell_size = nil,         -- { width, height } px if undetectable
       keymaps = { ... },       -- see README; `false` disables all
     })

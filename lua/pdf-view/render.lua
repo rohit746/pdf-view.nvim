@@ -145,6 +145,7 @@ local function present(s, win, png, info, fit, rows)
   end
 
   s.slot, s.page, s.count, s.target = slot, info.page, info.count, nil
+  s.last, s.parts = info.last or info.page, info.parts
   s.laid_out = info.layout and { key = table.concat(info.layout, "x"), size = info.layout } or nil
   s.geom = { w = info.width, h = info.height, box = info.content }
   s.fit = fit
@@ -155,8 +156,65 @@ local function present(s, win, png, info, fit, rows)
   pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
 end
 
+--- The highlights drawn onto page `page` of `s`: its search matches, and where a forward search landed.
+---@param s PdfView.Session
+---@param page integer
+---@return string? highlights as `worker.js` takes them, nil for none
+---@return string key changes whenever the highlights would, for render caches
+local function page_highlights(s, page)
+  local highlights, highlights_key = nil, ""
+  local colors = match_colors()
+  if s.search then
+    highlights, highlights_key = search.highlights(s.search, page, colors)
+  end
+  local synced = s.synced
+  if synced and synced.page == page then
+    -- where a forward search landed, in the colour of the current match
+    local parts = { highlights }
+    for _, rect in ipairs(synced.rects) do
+      parts[#parts + 1] = ("%.2f,%.2f,%.2f,%.2f,%s"):format(rect[1], rect[2], rect[3], rect[4], colors.current)
+    end
+    highlights = table.concat(parts, ";")
+    highlights_key = ("%s:sync%d:%s"):format(highlights_key, synced.id, colors.current)
+  end
+  return highlights, highlights_key
+end
+
+--- How the pages of a spread are drawn into an image of `width` x `height` pixels that shows the sheet scaled by
+--- (`scale_x`, `scale_y`) from its pixel (`x`, `y`) on: the parts of the render, and their cache key.
+---@param s PdfView.Session
+---@param info PdfView.PageInfo a sheet, with `parts`
+---@return PdfView.SheetPart[] parts, string key
+local function sheet_parts(s, info, scale_x, scale_y, x, y, width, height)
+  local parts, keys = {}, {}
+  for _, part in ipairs(info.parts) do
+    local dx, dy = part.x * scale_x - x, part.y * scale_y - y
+    local clip = {
+      math.max(0, dx),
+      math.max(0, dy),
+      math.min(width, dx + part.width * scale_x),
+      math.min(height, dy + part.height * scale_y),
+    }
+    if clip[3] > clip[1] and clip[4] > clip[2] then -- not scrolled out of view
+      local highlights, highlights_key = page_highlights(s, part.page)
+      parts[#parts + 1] = {
+        page = part.page,
+        scale_x = scale_x,
+        scale_y = scale_y,
+        dx = dx,
+        dy = dy,
+        clip = clip,
+        highlights = highlights,
+      }
+      keys[#keys + 1] = part.page .. "=" .. highlights_key
+    end
+  end
+  return parts, table.concat(keys, ",")
+end
+
 --- How page `info` is drawn into a window of `cols` x `rows` cells, with the centre of a zoomed view at (`cx`, `cy`):
---- how the image maps onto cells, the render cache key, and the render.
+--- how the image maps onto cells, the render cache key, and the render. `info` may be a sheet of facing pages
+--- (`layout.sheet()`), which is drawn as one page.
 ---@param s PdfView.Session
 ---@param info PdfView.PageInfo
 ---@param stamp string
@@ -169,21 +227,6 @@ end
 ---@return string cache_key
 ---@return fun(out: string, cb: fun(err?: string)): PdfView.Job render
 local function plan(s, info, stamp, cols, rows, cell, cx, cy)
-  local highlights, highlights_key = nil, ""
-  local colors = match_colors()
-  if s.search then
-    highlights, highlights_key = search.highlights(s.search, info.page, colors)
-  end
-  local synced = s.synced
-  if synced and synced.page == info.page then
-    -- where a forward search landed, in the colour of the current match
-    local parts = { highlights }
-    for _, rect in ipairs(synced.rects) do
-      parts[#parts + 1] = ("%.2f,%.2f,%.2f,%.2f,%s"):format(rect[1], rect[2], rect[3], rect[4], colors.current)
-    end
-    highlights = table.concat(parts, ";")
-    highlights_key = ("%s:sync%d:%s"):format(highlights_key, synced.id, colors.current)
-  end
   local recolor = recolor_spec(s)
 
   -- A whole fitted page is stretched to its cells. A zoomed or width/height-fitted page renders just the part that is
@@ -191,6 +234,19 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
   if uses_viewport(s) then
     local view =
       layout.viewport(info.width, info.height, cols, rows, cell.w, cell.h, s.zoom, cx, cy, s.mode, info.content)
+    if info.parts then
+      local parts, parts_key = sheet_parts(s, info, view.scale, view.scale, view.x, view.y, view.width, view.height)
+      local cache_key = table.concat(
+        { stamp, "sheet", ("%.5f"):format(view.scale), view.x, view.y, view.width, view.height, parts_key, recolor },
+        ":"
+      )
+      return view,
+        cache_key,
+        function(out, cb)
+          return mupdf.render_sheet(s.path, view.width, view.height, parts, out, cb, recolor)
+        end
+    end
+    local highlights, highlights_key = page_highlights(s, info.page)
     local cache_key = table.concat({
       stamp,
       info.page,
@@ -220,6 +276,17 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
   end
 
   local fit = layout.fit(info.width, info.height, cols, rows, cell.w, cell.h, config.options.max_pixels)
+  if info.parts then
+    local parts, parts_key =
+      sheet_parts(s, info, fit.width / info.width, fit.height / info.height, 0, 0, fit.width, fit.height)
+    local cache_key = table.concat({ stamp, "sheet", fit.width, fit.height, parts_key, recolor }, ":")
+    return fit,
+      cache_key,
+      function(out, cb)
+        return mupdf.render_sheet(s.path, fit.width, fit.height, parts, out, cb, recolor)
+      end
+  end
+  local highlights, highlights_key = page_highlights(s, info.page)
   local cache_key = table.concat({ stamp, info.page, fit.width, fit.height, highlights_key, recolor }, ":")
   return fit,
     cache_key,
@@ -239,6 +306,40 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
       end
       return mupdf.render(s.path, info.page, fit.width, fit.height, out, cb, recolor)
     end
+end
+
+--- The pages `first` to `last` as one sheet (`layout.sheet()`), with their geometry read from the file where it is
+--- not known yet. `track` is handed each request to mutool, to stop it with.
+---@param s PdfView.Session
+---@param stamp string
+---@param first integer
+---@param last integer
+---@param content boolean whether the part of the pages with content on it is needed
+---@param track fun(job: PdfView.Job)
+---@param cb fun(err?: string, sheet?: PdfView.PageInfo)
+local function sheet_of(s, stamp, first, last, content, track, cb)
+  local infos = {}
+  local function step(page)
+    if page > last then
+      return cb(nil, layout.sheet(infos, session.SPREAD_GAP))
+    end
+    local known = known_info(s, stamp, page)
+    if known and known.page == page and (known.content or not content) then
+      infos[#infos + 1] = known
+      return step(page + 1)
+    end
+    track(mupdf.info(s.path, page, function(err, info)
+      if err or not info then
+        return cb(err or "mutool returned no page information")
+      end
+      if not s.closed then
+        remember_info(s, stamp, info)
+      end
+      infos[#infos + 1] = info
+      step(page + 1)
+    end, content))
+  end
+  step(first)
 end
 
 --- Render into the render cache under `key`, calling `done` and whoever waits on `s.rendering[key]` when it is done.
@@ -293,8 +394,8 @@ local function prefetch(s, stamp, cols, rows, cell)
   s.prefetch = run
   local todo = {}
   for _, neighbour in ipairs(NEIGHBOURS) do
-    local page = s.page + neighbour[1]
-    if page >= 1 and page <= (s.count or 0) then
+    local page = session.spread_step(s, s.page, neighbour[1])
+    if page >= 1 and page <= (s.count or 0) and page ~= s.page then
       todo[#todo + 1] = { page = page, cy = neighbour[2] }
     end
   end
@@ -308,10 +409,9 @@ local function prefetch(s, stamp, cols, rows, cell)
       end
       return
     end
-    local function on_info(err, info)
-      if info and not err and not s.closed then
-        remember_info(s, stamp, info) -- even when stopped: the geometry is read once
-      end
+    -- the geometry is kept even when stopped meanwhile: it is read once
+    local first, last = session.spread_range(s, next_page.page, s.count)
+    sheet_of(s, stamp, first, last, content, function() end, function(err, info)
       if run.stopped or s.closed or err or not info then
         return step()
       end
@@ -323,12 +423,7 @@ local function prefetch(s, stamp, cols, rows, cell)
       start_render(s, key, render, function()
         step()
       end)
-    end
-    local known = known_info(s, stamp, next_page.page)
-    if known and (known.content or not content) then
-      return on_info(nil, known)
-    end
-    mupdf.info(s.path, next_page.page, on_info, content)
+    end)
   end
   step()
 end
@@ -528,6 +623,8 @@ local function show(s, page, opts)
     stamp = stamp .. "@" .. reflow_key
   end
 
+  local draw
+
   ---@param err? string
   ---@param info? PdfView.PageInfo
   local function on_info(err, info)
@@ -546,7 +643,27 @@ local function show(s, page, opts)
       info.layout = reflow
     end
     remember_info(s, stamp, info)
+    local first, last = session.spread_range(s, info.page, info.count)
+    if first ~= info.page or last ~= info.page then
+      -- facing pages: the spread that holds the page, drawn as one
+      return sheet_of(s, stamp, first, last, s.mode == "content", function(job)
+        s.job = job
+      end, function(sheet_err, sheet)
+        if gen ~= s.gen then
+          return
+        end
+        s.job = nil
+        if sheet_err or not sheet then
+          return fail(sheet_err or "mutool returned no page information")
+        end
+        draw(sheet)
+      end)
+    end
+    draw(info)
+  end
 
+  ---@param info PdfView.PageInfo
+  draw = function(info)
     local fit, cache_key, render = plan(s, info, stamp, cols, rows, cell, s.cx, s.cy)
 
     local function shown(png)
