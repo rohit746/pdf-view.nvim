@@ -209,7 +209,9 @@ a translucent fill instead, which dulls the text under a match a little). The co
 ### Outline
 
 `gO` lists the document's bookmarks, indented by depth, through `vim.ui.select` (a picker such as snacks.nvim's if you
-use one) and jumps to the chosen page. Documents without bookmarks say so.
+use one) and jumps to the chosen page. When a bookmark leads to a point of its page, as one for a section in the middle
+of a page does, a zoomed or width-fitted page starts with that point at the top of the window. Documents without
+bookmarks say so.
 
 <div align="center">
 
@@ -220,8 +222,9 @@ use one) and jumps to the chosen page. Documents without bookmarks say so.
 ### Links
 
 `f` lists the links on the page on screen, top to bottom, with the text under each and where it leads, through
-`vim.ui.select`. A link to a page of the document goes there (a jump, so `<C-o>` comes back); a web address or an e-mail
-opens with `vim.ui.open()`. A page without links says so.
+`vim.ui.select`. A link to a page of the document goes there (a jump, so `<C-o>` comes back), with the point it leads to,
+like a figure or a citation, at the top of the window when the page is zoomed or fitted to its width; a web address or
+an e-mail opens with `vim.ui.open()`. A page without links says so.
 
 ### Page text
 

@@ -1554,6 +1554,28 @@ describe("viewer reflowable documents", function()
   end)
 end)
 
+--- Where the top left corner of the window is on the page on screen, as fractions of the page.
+---@param s PdfView.Session
+---@return { x: number, y: number, scroll_x: boolean, scroll_y: boolean }
+local function corner(s)
+  local cols, rows = require("pdf-view.session").text_area(vim.api.nvim_get_current_win())
+  local cell = terminal.cell_size()
+  local view = require("pdf-view.layout").viewport(
+    s.geom.w,
+    s.geom.h,
+    cols,
+    rows,
+    cell.w,
+    cell.h,
+    s.zoom,
+    s.cx,
+    s.cy,
+    s.mode,
+    s.geom.box
+  )
+  return { x = view.vx / view.full_w, y = view.vy / view.full_h, scroll_x = view.scroll_x, scroll_y = view.scroll_y }
+end
+
 describe("viewer outline", function()
   setup()
 
@@ -1641,6 +1663,24 @@ describe("viewer outline", function()
     harness.near(top, s.cy, 1e-9, "the bookmark's page from its top")
   end)
 
+  it("brings the point a bookmark leads to to the top of the window", function()
+    reset()
+    local path = dir .. "/outline-at.pdf"
+    fixture.write(path, pages(3), { outline = { { title = "Figure", page = 3, top = 500 } } })
+    local s = open(path)
+    press("w")
+    settle(s)
+    with_stub(vim.ui, "select", function(items, _, callback)
+      callback(items[1])
+    end, function()
+      press("gO")
+      on_page(s, 3)
+    end)
+    local at = corner(s)
+    truthy(at.scroll_y, "a width fit scrolls")
+    harness.near(292 / 792, at.y, 0.005, "500 points from the bottom of the page at the top of the window")
+  end)
+
   it("tells the user when there is no outline", function()
     reset()
     local s = open(make("no-outline", pages(2)))
@@ -1708,6 +1748,31 @@ describe("viewer links", function()
     eq("Links", offered.opts.prompt)
     eq({ "Website  (https://example.com/)", "Results  (p. 3)" }, vim.tbl_map(offered.opts.format_item, offered.items))
     on_page(s, 3)
+    press(vim.keycode("<C-o>"))
+    on_page(s, 1)
+  end)
+
+  it("brings the point a link leads to to the top left of the window", function()
+    reset()
+    local s = open(make("links-at", {
+      vim.tbl_extend(
+        "force",
+        LETTER,
+        { links = { { rect = { 70, 290, 250, 330 }, page = 3, top = 500, left = 61.2 } } }
+      ),
+      LETTER,
+      LETTER,
+    }))
+    press("w+")
+    settle(s)
+    follow(function(items)
+      return items[1]
+    end)
+    on_page(s, 3)
+    local at = corner(s)
+    truthy(at.scroll_x and at.scroll_y, "a zoomed width fit scrolls both ways")
+    harness.near(0.1, at.x, 0.005, "61.2 points from the left of the page at the left of the window")
+    harness.near(292 / 792, at.y, 0.005, "500 points from the bottom of the page at the top of the window")
     press(vim.keycode("<C-o>"))
     on_page(s, 1)
   end)

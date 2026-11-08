@@ -196,6 +196,28 @@ local function go(s, page, anchor, jump)
   show(s, page)
 end
 
+--- The anchor that brings the point (`x`, `y`) of a page, as fractions of it, to the top left of the window, where a
+--- link or a bookmark leads: the top of the page when it says nothing more, or when the whole page is on screen. The
+--- window is measured with the page on screen, which is the size of the other pages of almost every document.
+---@param s PdfView.Session
+---@param x? number
+---@param y? number
+---@return PdfView.Anchor
+local function anchor_at(s, x, y)
+  local win = y and uses_viewport(s) and s.geom and window_for(s)
+  if not win then
+    return TOP
+  end
+  local cols, rows = text_area(win)
+  local cell = terminal.cell_size()
+  local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)
+  local anchor = { cy = view.scroll_y and y + view.view_h / 2 / view.full_h or 0 }
+  if x and view.scroll_x then
+    anchor.cx = x + view.view_w / 2 / view.full_w
+  end
+  return anchor
+end
+
 ---@param s PdfView.Session
 function M.reload(s)
   purge_cache(s)
@@ -459,7 +481,7 @@ local function clear_search(s)
   end
 end
 
---- Pick one of the document's bookmarks and go to its page.
+--- Pick one of the document's bookmarks and go to where it leads.
 ---@param s PdfView.Session
 local function pick_outline(s)
   local function choose(entries)
@@ -473,7 +495,7 @@ local function pick_outline(s)
       end,
     }, function(entry)
       if entry then
-        go(s, entry.page, TOP, true)
+        go(s, entry.page, anchor_at(s, entry.x, entry.y), true)
       end
     end)
   end
@@ -496,7 +518,7 @@ local function pick_outline(s)
   end)
 end
 
---- Pick one of the links on the page on screen and follow it: a link to a page of the document jumps there, any
+--- Pick one of the links on the page on screen and follow it: a link into the document jumps to where it leads, any
 --- other (a web address, an e-mail) opens with `vim.ui.open()`.
 ---@param s PdfView.Session
 local function follow_link(s)
@@ -522,7 +544,7 @@ local function follow_link(s)
         return
       end
       if link.page then
-        return go(s, link.page, TOP, true)
+        return go(s, link.page, anchor_at(s, link.x, link.y), true)
       end
       local _, open_err = vim.ui.open(link.uri)
       if open_err then
