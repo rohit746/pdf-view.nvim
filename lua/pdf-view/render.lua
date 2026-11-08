@@ -83,7 +83,7 @@ local function present(s, win, png, info, fit, rows)
   local id = s.ids[slot]
   if held then
     kitty.send(kitty.unplace(id)) -- the terminal still has the page: only its placement is made again
-  else
+  elseif not terminal.printed() then -- an iTerm2 or sixel image is sent as it is printed (see `positioned`)
     local sent, commands = pcall(kitty.transmit, id, png, terminal.transmission())
     if not sent then
       return display_message(s, win, "pdf-view: " .. tostring(commands))
@@ -356,9 +356,54 @@ local function unlock(s, win, why, retry)
   retry()
 end
 
+--- In a terminal that cannot show pages: `reason` in the window, and under it the text of the page, which the page
+--- keys turn like pages. A document is still readable over a plain SSH session.
+---@param s PdfView.Session
+---@param win integer
+---@param page? integer
+---@param reason string
+local function show_text_instead(s, win, page, reason)
+  s.gen = s.gen + 1
+  local gen = s.gen
+  if s.job then
+    s.job:kill(15)
+    s.job = nil
+  end
+  if s.page_text ~= reason then
+    display_message(s, win, reason) -- until the text is read, and for good when it cannot be
+  end
+  local function shown_here()
+    return gen == s.gen and vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == s.buf
+  end
+  s.job = mupdf.info(s.path, page or s.target or s.page, function(err, info)
+    if gen ~= s.gen then
+      return
+    end
+    s.job = nil
+    if err or not info then
+      return display_message(s, win, reason)
+    end
+    s.job = mupdf.text(s.path, info.page, function(text_err, text)
+      if gen ~= s.gen then
+        return
+      end
+      s.job = nil
+      if text_err or not shown_here() then
+        return display_message(s, win, reason)
+      end
+      text = vim.trim(text or "")
+      display_message(s, win, reason .. "\n\n" .. (text ~= "" and text or "(no text on this page)"))
+      s.page_text = reason
+      s.page, s.count, s.target = info.page, info.count, nil
+      update_winbar(s, win)
+    end)
+  end)
+end
+
 ---@param s PdfView.Session
 ---@param page? integer defaults to the current page
----@param opts? { retries?: integer, keep?: boolean } `retries`: attempts left after a failure; `keep`: on failure leave the old page on screen
+---@param opts? { retries?: integer, keep?: boolean, asked?: boolean } `retries`: attempts left after a failure; `keep`: on
+--- failure leave the old page on screen; `asked`: the terminal was just asked what it can draw
 local function show(s, page, opts)
   opts = opts or {}
   if s.closed then
@@ -389,9 +434,32 @@ local function show(s, page, opts)
   apply_window_options(s, win)
 
   local supported, reason = terminal.check()
-  if not supported then
-    return display_message(s, win, reason --[[@as string]])
+  if supported == nil and opts.asked then
+    -- asked already, and the answer did not settle it: do not ask again and again
+    supported, reason =
+      false,
+      "pdf-view: the terminal's answers do not tell whether it can show pages. "
+        .. "Set `protocol` or `force = true` in setup()."
   end
+  if supported == nil then
+    -- the terminal is asked what it draws (see `terminal.ask()`); the latest page asked for meanwhile is shown then
+    local first = not s.waiting_for_terminal
+    s.waiting_for_terminal = { page = page, opts = opts }
+    if first then
+      terminal.ask(function()
+        local latest = s.waiting_for_terminal
+        s.waiting_for_terminal = nil
+        if latest then
+          show(s, latest.page, vim.tbl_extend("force", latest.opts, { asked = true }))
+        end
+      end)
+    end
+    return
+  end
+  if not supported then
+    return show_text_instead(s, win, page, reason --[[@as string]])
+  end
+  s.page_text = nil
   terminal.prepare()
 
   s.gen = s.gen + 1

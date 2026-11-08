@@ -107,3 +107,25 @@ describe("kitty", function()
     eq(ESC .. "_Ga=d,d=i,i=9,q=2" .. ESC .. "\\", kitty.unplace(9))
   end)
 end)
+
+describe("iterm2", function()
+  local iterm2 = require("pdf-view.iterm2")
+
+  it("prints an image stretched to a size in cells, without moving the cursor", function()
+    eq(
+      ESC
+        .. "]1337;File=inline=1;size=3;width=40;height=12;preserveAspectRatio=0;doNotMoveCursor=1:"
+        .. vim.base64.encode("PNG")
+        .. "\a",
+      iterm2.image("PNG", 40, 12)
+    )
+  end)
+
+  it("reads the image from a file", function()
+    local path = fixture.tmpdir() .. "/page.png"
+    local file = assert(io.open(path, "wb"))
+    file:write("\137PNG data")
+    file:close()
+    eq(iterm2.image("\137PNG data", 3, 2), iterm2.image_file(path, 3, 2))
+  end)
+end)

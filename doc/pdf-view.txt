@@ -5,13 +5,16 @@ INTRODUCTION                                                     *pdf-view*
 
 pdf-view.nvim shows PDF pages as images inside a normal buffer. Pages are
 rendered with MuPDF's `mutool` and drawn with the Kitty graphics protocol
-(Unicode placeholders), so the page follows splits, tabs and resizes. Inside
-zellij the page is placed at its window's position instead, see
-|pdf-view-zellij|.
+(Unicode placeholders), so the page follows splits, tabs and resizes. In
+WezTerm, Konsole and zellij the page is placed at its window's position
+instead, see |pdf-view-positioned| and |pdf-view-zellij|. iTerm2 and VS Code
+get iTerm2 inline images, see |pdf-view-iterm2|. foot, Windows Terminal,
+xterm, Contour and mlterm get sixel, see |pdf-view-sixel|. Elsewhere the
+viewer shows the text of the page, see |pdf-view-text-only|.
 
 Requirements: Neovim 0.11+, 'termguicolors', `mutool` (with JavaScript), and
-kitty or Ghostty (optionally inside tmux, or zellij 0.45+). Run
-`:checkhealth pdf-view`.
+kitty or Ghostty (optionally inside tmux, or zellij 0.45+), WezTerm, Konsole,
+iTerm2, VS Code, or a terminal with sixel. Run `:checkhealth pdf-view`.
 
 ==============================================================================
 USAGE                                                      *pdf-view-usage*
@@ -152,8 +155,9 @@ an e-mail opens with |vim.ui.open()|. A page without links says so.
 the clipboard, `"ay` for register a), linewise: a line per line of text and
 an empty line between blocks. `t` shows the same text in a scratch buffer in
 a vertical split next to the viewer, to quote from or search with Neovim's
-own tools; `t` again on that page goes back to it. A scanned page has no text
-and says so.
+own tools. Each document has one such buffer, named after the page it holds:
+`t` on another page fills it with that page and goes back to its split. A
+scanned page has no text and says so.
 
                                                               *pdf-view-marks*
 `gg`, `G`, `{count}G`, outline picks, search matches and marks are jumps. Each
@@ -207,6 +211,7 @@ CONFIGURATION                                              *pdf-view-config*
       transmission = "auto",   -- "auto" | "file" | "direct"
       tmux_passthrough = true, -- tmux set -p allow-passthrough on
       placement = "auto",      -- "auto" | "placeholders" | "positioned"
+      protocol = "auto",       -- "auto" | "kitty" | "iterm2" | "sixel"
       force = false,           -- skip terminal detection
       max_pixels = 4096,       -- cap for either side of a fitted page
       zoom_step = 1.25,        -- factor of one zoom step
@@ -222,6 +227,79 @@ CONFIGURATION                                              *pdf-view-config*
 <
 
 Unknown or mistyped options raise an error.
+
+==============================================================================
+POSITIONED PLACEMENTS                                  *pdf-view-positioned*
+
+WezTerm and Konsole have the Kitty graphics protocol but not its Unicode
+placeholders. There the buffer is left blank and the page is placed at the
+screen position of its window, cut around floating windows and the popup
+menu, and placed again after Neovim redraws the window. 'termguicolors' is
+not needed.
+
+The terminal is asked once whether it has Kitty graphics. WezTerm answers
+only with `config.enable_kitty_graphics = true` in wezterm.lua; without it
+the viewer says so. Konsole hides an image under any cell background but its
+own, so there the page is drawn over the text, and it is sent as bytes
+because Konsole reads no image files.
+
+Inside tmux the page goes to the outer terminal at the position of Neovim's
+pane, and is taken away when the tmux window is left: that needs
+`set -g focus-events on` in tmux.conf.
+
+Another terminal with Kitty graphics can be tried with
+`placement = "positioned"`; it is asked as well.
+
+==============================================================================
+ITERM2 AND VS CODE                                         *pdf-view-iterm2*
+
+iTerm2 and VS Code's terminal have no Kitty graphics, but they draw iTerm2
+inline images (OSC 1337). They are recognised by `$TERM_PROGRAM` (iTerm2
+also by `$LC_TERMINAL`, which ssh passes on), and inside tmux by the name the
+terminal gave tmux. VS Code needs `"terminal.integrated.enableImages": true`
+in its settings.
+
+Such an image is printed into the cells at the window's position, and goes
+when they are written over: Neovim drawing the window, a message that
+scrolls the screen. The page is printed again after that, each time with the
+whole PNG, which costs more than a Kitty placement, over SSH especially.
+Around a floating window or the popup menu the page is printed in parts,
+each cut out of the rendered page by mutool. What a page leaves uncovered
+is erased; when that may be under another window (a split, a hidden
+viewer), the screen is cleared and drawn again (|:mode|). Inside tmux an image
+passes through in one piece, and tmux drops one over its input buffer: a page
+whose PNG is over about 750 KB stays blank unless the buffer is raised with
+`set -s input-buffer-size 4194304` (tmux 3.6).
+
+`protocol = "iterm2"` uses these images in another terminal that draws them.
+WezTerm and Konsole draw them too, but keep Kitty graphics by default.
+
+==============================================================================
+SIXEL                                                       *pdf-view-sixel*
+
+foot, Windows Terminal (1.22+), xterm, Contour and mlterm draw sixel images.
+They are recognised by `$TERM`, `$TERMINAL_NAME`, `$MLTERM`, `$WT_SESSION` and
+`$XTERM_VERSION`, and inside tmux by the name the terminal gave tmux. On
+Neovim 0.12 a terminal that is not recognised is asked for its device
+attributes (DA1), and gets sixel when it lists it. 'termguicolors' is not
+needed.
+
+A sixel image is printed and kept in step with the screen like an iTerm2
+image (|pdf-view-iterm2|). It is drawn pixel for pixel, so every part of the
+page is cut out by mutool at its size on screen and encoded once, in Lua,
+with a fixed palette. The cell size must be right: where the terminal does
+not report it, set `cell_size`. xterm draws sixel only as a VT340
+(`xterm -ti vt340`, or `XTerm*decTerminalID: vt340`). Sixel is larger than a
+PNG; inside tmux, raise tmux's input buffer as for iTerm2 images.
+
+`protocol = "sixel"` uses sixel in another terminal. WezTerm and Konsole
+draw it too, but keep Kitty graphics by default.
+
+==============================================================================
+TERMINALS WITHOUT IMAGES                                *pdf-view-text-only*
+
+In a terminal that can show no images, the viewer says why at the top of the
+window and shows the text of the page under it. The page keys turn the pages.
 
 ==============================================================================
 ZELLIJ                                                     *pdf-view-zellij*
@@ -240,8 +318,9 @@ windows of a tab page; and text that the page is not cut around shows on top
 of it. In zellij 0.45.1 the page is sent again whenever a float over it moves
 or changes size.
 
-`placement` chooses explicitly: "placeholders" (the default outside zellij)
-or "positioned" (the default inside it).
+`placement` chooses explicitly: "placeholders" (the default in kitty and
+Ghostty outside zellij) or "positioned" (the default inside zellij, and in
+WezTerm and Konsole).
 
 ==============================================================================
 SNACKS.NVIM                                              *pdf-view-snacks*

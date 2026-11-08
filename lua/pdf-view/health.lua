@@ -117,6 +117,13 @@ local function check_mutool()
 end
 
 local function check_transmission()
+  if terminal.protocol() == "iterm2" then
+    vim.health.info("image transmission: bytes (an iTerm2 inline image carries its PNG every time it is printed)")
+    return
+  elseif terminal.protocol() == "sixel" then
+    vim.health.info("image transmission: bytes (a sixel image carries its pixels every time it is printed)")
+    return
+  end
   local mode, probe = terminal.transmission(), terminal.probe
   local blank = 'If pages stay blank, set `transmission = "direct"` in setup().'
   if config.options.transmission ~= "auto" then
@@ -129,6 +136,8 @@ local function check_transmission()
         'terminal is a flatpak. Pages still show, a little slower. Set `transmission = "direct"` to skip the check.',
       }
     )
+  elseif mode == "direct" and terminal.bytes_only() then
+    vim.health.info("image transmission: direct (the terminal does not read image files)")
   elseif mode == "direct" then
     vim.health.info("image transmission: direct (over SSH)")
   elseif probe and probe.state == "ok" then
@@ -152,23 +161,113 @@ local function check_transmission()
   end
 end
 
-local function check_terminal()
-  local detected = terminal.detect()
-  if config.options.force then
-    vim.health.warn("`force = true`: terminal detection is skipped")
-  elseif detected.name then
+--- What is known of a terminal for Kitty graphics: whether it has Unicode placeholders, or answers a graphics query.
+---@param detected PdfView.Terminal
+---@param positioned boolean
+local function check_kitty_terminal(detected, positioned)
+  if detected.placeholders then
     vim.health.ok("terminal: " .. detected.name)
+  elseif detected.name or (positioned and config.options.placement == "positioned") then
+    local name = detected.name or ("`" .. (detected.term or "") .. "`")
+    local asked = false
+    terminal.ask_graphics(function()
+      asked = true
+    end)
+    vim.wait(2000, function()
+      return asked
+    end, 10)
+    local answer = terminal.graphics()
+    if answer then
+      vim.health.ok(("terminal: %s (it answered a Kitty graphics query)"):format(name))
+    elseif answer == nil then
+      vim.health.info(("terminal: %s (it cannot be asked whether it has Kitty graphics here)"):format(name))
+    elseif detected.name == "wezterm" then
+      vim.health.error("terminal: WezTerm, but it did not answer a Kitty graphics query", {
+        "WezTerm has Kitty graphics turned off by default. Add `config.enable_kitty_graphics = true` to wezterm.lua",
+        "and restart WezTerm.",
+      })
+    else
+      vim.health.error(("terminal: %s, but it did not answer a Kitty graphics query"):format(name))
+    end
   else
     vim.health.error(
       ("terminal not recognised (TERM_PROGRAM=%s, TERM=%s)"):format(vim.env.TERM_PROGRAM or "", vim.env.TERM or ""),
       {
-        "Use kitty or Ghostty, directly or inside tmux or zellij: they have Kitty graphics and Unicode placeholders.",
-        "WezTerm and iTerm2 lack Unicode placeholders. Set `force = true` to try anyway.",
+        "Use kitty or Ghostty (directly or inside tmux or zellij), or WezTerm or Konsole: they have Kitty graphics.",
+        'Or iTerm2 or VS Code, with iTerm2 inline images. Another terminal with them: `protocol = "iterm2"`.',
+        "Or foot, Windows Terminal, xterm (as a VT340), Contour or mlterm, with sixel; another terminal that lists",
+        'sixel in its device attributes gets it too. Another terminal with sixel: `protocol = "sixel"`.',
+        'Another terminal with Kitty graphics can be tried with `placement = "positioned"`, or `force = true`.',
       }
     )
   end
+end
 
+-- how the terminals that get iTerm2 inline images or sixel are named in the report
+local IMAGE_TERMINALS = {
+  iterm2 = "iTerm2",
+  vscode = "VS Code",
+  wezterm = "WezTerm",
+  konsole = "Konsole",
+  foot = "foot",
+  xterm = "xterm",
+  ["windows-terminal"] = "Windows Terminal",
+  contour = "Contour",
+  mlterm = "mlterm",
+}
+
+--- What is known of a terminal for sixel: whether it lists sixel graphics in its device attributes.
+---@param name string
+local function check_sixel_terminal(name)
+  local asked = false
+  terminal.ask_sixel(function()
+    asked = true
+  end)
+  vim.wait(2000, function()
+    return asked
+  end, 10)
+  local answer = terminal.sixel()
+  if answer then
+    vim.health.ok(("terminal: %s, with sixel (it lists sixel graphics in its device attributes)"):format(name))
+  elseif answer == nil then
+    vim.health.info(("terminal: %s, with sixel (it cannot be asked whether it draws sixel here)"):format(name))
+  elseif terminal.detect().name == "xterm" and not terminal.in_tmux() then
+    vim.health.error("terminal: xterm, but not as a VT340, so it draws no sixel images", {
+      "Start it with `xterm -ti vt340`, or set `XTerm*decTerminalID: vt340` in ~/.Xresources.",
+    })
+  else
+    vim.health.error(("terminal: %s, but it does not list sixel graphics in its device attributes"):format(name))
+  end
+end
+
+local function check_terminal()
+  local detected = terminal.detect()
   local positioned = terminal.placement() == "positioned"
+  local printed = terminal.printed()
+  if config.options.force then
+    vim.health.warn("`force = true`: terminal detection is skipped")
+  end
+  if terminal.protocol() == "sixel" then
+    local name = IMAGE_TERMINALS[detected.name] or detected.name or ("`" .. (detected.term or "") .. "`")
+    if config.options.force then
+      vim.health.ok(("terminal: %s, with sixel"):format(name))
+    else
+      check_sixel_terminal(name)
+    end
+    if detected.name == "konsole" then
+      vim.health.warn("Konsole draws sixel images over the row below them", {
+        'Remove `protocol = "sixel"`: Konsole shows pages better with Kitty graphics.',
+      })
+    end
+  elseif printed then
+    local name = IMAGE_TERMINALS[detected.name] or detected.name or ("`" .. (detected.term or "") .. "`")
+    vim.health.ok(("terminal: %s, with iTerm2 inline images (OSC 1337)"):format(name))
+    if detected.name == "vscode" then
+      vim.health.info('VS Code shows them only with `"terminal.integrated.enableImages": true` in its settings')
+    end
+  elseif not config.options.force then
+    check_kitty_terminal(detected, positioned)
+  end
   if terminal.in_zellij() then
     local version = terminal.zellij_version()
     if version and vim.version.lt(version, { 0, 45, 0 }) then
@@ -182,10 +281,47 @@ local function check_terminal()
     end
     vim.health.info("zellij must not have `support_kitty_graphics_protocol false` in its configuration")
   end
-  if positioned then
+  if printed then
+    vim.health.ok("pages are printed at the position of their window, and again after Neovim draws over them")
+  elseif positioned then
     vim.health.ok("pages are placed at the position of their window (Unicode placeholders are not used)")
   else
     vim.health.ok("pages are drawn with Unicode placeholders")
+  end
+
+  if terminal.in_tmux() and positioned and not terminal.in_zellij() then
+    -- tmux knows nothing of a positioned page, and only focus events tell Neovim that its window was left, or shown
+    -- again (and drawn again by tmux, without an iTerm2 image)
+    local focus = vim.system({ "tmux", "show-options", "-gv", "focus-events" }, { text = true }):wait(1000)
+    if vim.trim(focus.stdout or "") == "on" then
+      vim.health.ok(
+        printed and "tmux focus-events: on (a page is printed again when its tmux window is shown again)"
+          or "tmux focus-events: on (a page is taken off the screen while its tmux window is not shown)"
+      )
+    else
+      local effect = printed and "a page stays blank after switching back to its tmux window"
+        or "a page stays on the screen over another tmux window"
+      vim.health.warn("tmux focus-events is off: " .. effect, { "Add `set -g focus-events on` to tmux.conf." })
+    end
+  end
+
+  if terminal.in_tmux() and printed then
+    -- an inline or sixel image passes through tmux in one piece, which tmux drops when it is over its input buffer
+    local size = tonumber(
+      vim.trim(
+        vim.system({ "tmux", "show-options", "-sv", "input-buffer-size" }, { text = true }):wait(1000).stdout or ""
+      )
+    ) or 1048576
+    if size < 4194304 then
+      local limit = terminal.protocol() == "sixel" and ("whose sixel is over %d KiB"):format(math.floor(size / 1024))
+        or ("whose PNG is over %d KiB"):format(math.floor(size * 3 / 4 / 1024))
+      vim.health.info(
+        ("tmux drops an image over its input buffer (%d KiB), so a page %s stays blank. "):format(
+          math.floor(size / 1024),
+          limit
+        ) .. "If one does, add `set -s input-buffer-size 4194304` to tmux.conf (tmux 3.6 has it)."
+      )
+    end
   end
 
   if terminal.in_tmux() then
@@ -227,7 +363,12 @@ local function check_terminal()
   end
 
   local cell = terminal.cell_size()
-  if cell.source == "fallback" then
+  if cell.source == "fallback" and terminal.protocol() == "sixel" then
+    vim.health.error(("the terminal did not report its pixel size; assuming %dx%d px cells"):format(cell.w, cell.h), {
+      "A sixel image is drawn pixel for pixel, so pages come out the wrong size.",
+      "Set `cell_size = { width, height }` in setup() to the size of a cell in pixels.",
+    })
+  elseif cell.source == "fallback" then
     vim.health.warn(("the terminal did not report its pixel size; assuming %dx%d px cells"):format(cell.w, cell.h), {
       "Pages are rendered at this guessed resolution. Set `cell_size = { width, height }` in setup() for sharper output.",
     })

@@ -52,7 +52,10 @@ local M = {}
 ---@field tmux_passthrough boolean let the plugin run `tmux set -p allow-passthrough on` for its pane
 ---@field placement "auto"|"placeholders"|"positioned" how the page is put on screen: as Unicode placeholder text,
 --- or at the screen position of its window (for zellij, which has no placeholders). "auto" is "positioned" in zellij
----@field force boolean skip terminal detection and assume the Kitty graphics protocol works
+---@field protocol "auto"|"kitty"|"iterm2"|"sixel" the image protocol: Kitty graphics, iTerm2 inline images (OSC 1337),
+--- or sixel. "auto" is "iterm2" in iTerm2 and VS Code, "sixel" in foot, Windows Terminal, xterm, Contour, mlterm and
+--- a terminal that says it draws sixel, else "kitty"
+---@field force boolean skip terminal detection and assume the image protocol works
 ---@field max_pixels integer cap for either side of a rendered page image (zoomed views are window-sized)
 ---@field zoom_step number factor of one zoom step, greater than 1
 ---@field max_zoom number largest zoom, relative to the fit-to-window size
@@ -79,6 +82,7 @@ local defaults = {
   transmission = "auto",
   tmux_passthrough = true,
   placement = "auto",
+  protocol = "auto",
   force = false,
   max_pixels = 4096,
   zoom_step = 1.25,
@@ -202,6 +206,9 @@ local function validate(opts)
   end
   if opts.placement ~= nil and not vim.tbl_contains({ "auto", "placeholders", "positioned" }, opts.placement) then
     fail("placement", '"auto", "placeholders" or "positioned"', opts.placement)
+  end
+  if opts.protocol ~= nil and not vim.tbl_contains({ "auto", "kitty", "iterm2", "sixel" }, opts.protocol) then
+    fail("protocol", '"auto", "kitty", "iterm2" or "sixel"', opts.protocol)
   end
   if opts.recolor ~= nil and not vim.tbl_contains({ "off", "invert", "colorscheme" }, opts.recolor) then
     fail("recolor", '"off", "invert" or "colorscheme"', opts.recolor)

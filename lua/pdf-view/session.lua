@@ -6,6 +6,7 @@ local kitty = require("pdf-view.kitty")
 local mupdf = require("pdf-view.mupdf")
 local positioned = require("pdf-view.positioned")
 local search = require("pdf-view.search")
+local terminal = require("pdf-view.terminal")
 
 local M = {}
 
@@ -85,14 +86,17 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field grid_key? string
 ---@field grid? PdfView.Placeholders
 ---@field picture? PdfView.Picture the image on screen, when it is placed at the window's position (zellij)
----@field placed? { id: integer, count: integer, key: string, base: integer } the placements of `picture` the
---- terminal has: ids `base + 1` to `base + count`
+---@field placed? { id: integer, count: integer, key: string, base: integer, rects?: PdfView.Rect[] } the placements
+--- of `picture` the terminal has: ids `base + 1` to `base + count`. With iTerm2 images, `rects` are where it was
+--- printed on screen
 ---@field lost? boolean the terminal no longer has `picture`: send it again before placing it
 ---@field dirty? boolean the screen may have moved or dropped the placements: place them again
 ---@field cut_key? string the last placements of `picture` that were cut around a float, since it was sent
 ---@field watcher? PdfView.Watcher
 ---@field mapped? string[] the keys mapped in the buffer by `actions.set_keymaps`
 ---@field waiting_for_ui? boolean the first render is waiting for a UI to attach
+---@field waiting_for_terminal? { page?: integer, opts?: table } the page to show once the terminal has said what it draws
+---@field page_text? string the terminal cannot show pages: the reason, shown above the text of the page instead
 ---@field unlocking? boolean the password prompt of a password-protected document is open
 ---@field locked? boolean the password prompt was cancelled: say so instead of asking again, until `actions.reload`
 ---@field recolor? PdfView.Recolor how the pages are recoloured, once toggled; until then `config.options.recolor`
@@ -402,7 +406,7 @@ local function destroy(s)
   if s.watcher then
     s.watcher.stop()
   end
-  if s.slot ~= 0 then
+  if s.slot ~= 0 and not terminal.printed() then
     for _, id in ipairs(s.ids) do
       kitty.send(kitty.delete(id))
     end

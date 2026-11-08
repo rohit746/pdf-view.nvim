@@ -23,6 +23,11 @@ kitty.write = function(data)
 end
 vim.env.TMUX = nil
 vim.env.ZELLIJ = nil
+-- the terminal the tests run in is not asked about: they pretend to run in kitty
+local real_detect = terminal.detect
+terminal.detect = function()
+  return { name = "kitty", term = "xterm-kitty", placeholders = true }
+end
 
 local ns = vim.api.nvim_create_namespace("pdf-view")
 local dir = fixture.tmpdir()
@@ -286,10 +291,19 @@ describe("viewer", function()
     terminal.detect = function()
       return { term = "xterm-256color" }
     end
+    terminal.forget()
+    local asked = vim.fn.has("nvim-0.12") == 1
+    if asked then
+      -- it is asked whether it draws sixel, and says it does not
+      vim.defer_fn(function()
+        vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = "\27[?62;22c" } })
+      end, 20)
+    end
     open(make("unsupported", pages(1)))
     local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
     truthy(text:find("Unicode placeholder", 1, true), text)
-    eq(0, #writes, "nothing is sent to an unsupported terminal")
+    eq(asked and { "\27[c" } or {}, writes, "no image is sent to an unsupported terminal")
+    terminal.forget()
     terminal.detect = detect
     setup()
   end)
@@ -1818,8 +1832,59 @@ describe("viewer page text", function()
     eq({ "Page 1" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
     eq(2, #vim.api.nvim_tabpage_list_wins(0))
 
+    -- another page: the same buffer and split take its text and its page number, no second split opens
+    vim.api.nvim_set_current_win(viewer_win)
+    press("2gg")
+    on_page(s, 2)
+    press("t")
+    wait_for(function()
+      return vim.api.nvim_get_current_win() ~= viewer_win
+    end, "the text split for page 2")
+    eq(buf, vim.api.nvim_get_current_buf())
+    eq("pdf-view://show.pdf (page 2)", vim.api.nvim_buf_get_name(buf))
+    eq({ "Page 2", "", "Far below" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    eq(2, #vim.api.nvim_tabpage_list_wins(0))
+    eq(-1, vim.fn.bufnr("pdf-view://show.pdf (page 1)"), "renaming leaves no buffer behind under the old name")
+
     vim.cmd.close()
     eq(false, vim.api.nvim_buf_is_valid(buf), "closing the split wipes the scratch buffer")
+  end)
+
+  it("keeps a text buffer for each document, also for documents of the same file name", function()
+    reset()
+    vim.fn.mkdir(dir .. "/other", "p")
+    local first = open(texts("same"))
+    press("t")
+    wait_for(function()
+      return vim.api.nvim_get_current_buf() ~= first.buf
+    end, "the text split of the first document")
+    local first_text = vim.api.nvim_get_current_buf()
+    vim.cmd.wincmd("p")
+
+    local second = open(texts("other/same"))
+    press("2gg")
+    on_page(second, 2)
+    press("t")
+    wait_for(function()
+      local buf = vim.api.nvim_get_current_buf()
+      return buf ~= second.buf and buf ~= first_text
+    end, "the text split of the second document")
+    local second_text = vim.api.nvim_get_current_buf()
+    eq({ "Page 2", "", "Far below" }, vim.api.nvim_buf_get_lines(second_text, 0, -1, false))
+    eq("pdf-view://same.pdf (page 1)", vim.api.nvim_buf_get_name(first_text))
+    eq({ "Page 1" }, vim.api.nvim_buf_get_lines(first_text, 0, -1, false))
+
+    -- the second document's page 1 takes the name the first one holds: its full path tells them apart
+    vim.cmd.wincmd("p")
+    press("gg")
+    on_page(second, 1)
+    press("t")
+    wait_for(function()
+      return vim.api.nvim_get_current_buf() == second_text
+    end, "the text split of the second document again")
+    eq({ "Page 1" }, vim.api.nvim_buf_get_lines(second_text, 0, -1, false))
+    eq(("pdf-view://%s (page 1)"):format(second.path), vim.api.nvim_buf_get_name(second_text))
+    eq("pdf-view://same.pdf (page 1)", vim.api.nvim_buf_get_name(first_text))
   end)
 
   it("says so when the page has no text, and changes nothing", function()
@@ -2570,9 +2635,10 @@ describe("viewer in tmux", function()
   --- Run `body` inside a pretend tmux whose attached client, and that client's $TERM, can be changed.
   ---@param body fun(attach: fun(pid: string, termname: string))
   local function in_tmux(body)
-    local saved_tmux, saved_system = vim.env.TMUX, vim.system
+    local saved_tmux, saved_system, saved_detect = vim.env.TMUX, vim.system, terminal.detect
     local client = { pid = "100", termname = "xterm-kitty" }
     vim.env.TMUX = "/tmp/tmux-1000/default,1,0"
+    terminal.detect = real_detect -- tmux names the terminal of the attached client
     ---@diagnostic disable-next-line: duplicate-set-field
     vim.system = function(cmd, opts, on_exit)
       if cmd[1] ~= "tmux" then
@@ -2597,7 +2663,7 @@ describe("viewer in tmux", function()
       vim.api.nvim_exec_autocmds("FocusGained", {})
       vim.wait(100) -- the client is asked in the background
     end)
-    vim.env.TMUX, vim.system = saved_tmux, saved_system
+    vim.env.TMUX, vim.system, terminal.detect = saved_tmux, saved_system, saved_detect
     if not ok then
       error(err, 0)
     end
@@ -2698,6 +2764,7 @@ end
 
 describe("viewer in zellij", function()
   setup({ placement = "positioned" })
+  vim.env.ZELLIJ = "0"
   local quiet = vim.fn.has("nvim-0.12") == 1 and 1 or 2
 
   it("leaves the buffer blank and places the page at its window's position", function()
@@ -2919,6 +2986,412 @@ describe("viewer in zellij", function()
     end)
   end
 
+  vim.env.ZELLIJ = nil
+  setup()
+end)
+
+describe("viewer with positioned placements outside zellij (WezTerm, Konsole)", function()
+  local detect = terminal.detect
+  local function as_terminal(name)
+    terminal.detect = function()
+      return { name = name, term = name, placeholders = false }
+    end
+  end
+  as_terminal("wezterm")
+  setup()
+
+  it("places the page at its window's position, under the text", function()
+    reset()
+    eq("positioned", terminal.placement(), "chosen for a terminal without placeholders")
+    open(make("wezterm-basic", pages(1)))
+    eq(false, sent("U=1"), "no virtual placement")
+    local batch = last_batch()
+    eq(1, #batch)
+    eq(-1, batch[1].keys.z)
+  end)
+
+  it("keeps the page in the terminal while its window shows another buffer", function()
+    reset()
+    local s = open(make("wezterm-hide", pages(1)))
+    local id = s.ids[s.slot]
+    writes = {}
+    vim.cmd.enew()
+    vim.cmd.redraw()
+    wait_for(function()
+      return sent(("a=d,d=i,i=%d,q=2"):format(id))
+    end, "the page taken away")
+    eq(false, s.lost, "a terminal keeps an image without placements")
+
+    writes = {}
+    vim.cmd.buffer(s.buf)
+    vim.cmd.redraw()
+    wait_for(function()
+      return #last_batch() == 1
+    end, "the page placed again")
+    eq({}, transmitted(), "not sent again")
+  end)
+
+  it("cuts the page around a floating window without sending it again when the float moves", function()
+    reset()
+    local s = open(make("wezterm-float", pages(1)))
+    local image = image_rect(s)
+    local float = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, {
+      relative = "editor",
+      row = image.row + 2,
+      col = image.col + 3,
+      width = 4,
+      height = 2,
+      border = "single",
+    })
+    local before = #writes
+    vim.cmd.redraw()
+    wait_for(function()
+      return select(2, last_batch()) > before
+    end, "the page placed around the float")
+    -- above, left of, right of and below the float: pieces of equal size are not split as for zellij
+    eq(4, #last_batch())
+    writes = {}
+    vim.api.nvim_win_set_config(float, { relative = "editor", row = image.row + 3, col = image.col + 3 })
+    vim.cmd.redraw()
+    wait_for(function()
+      return #last_batch() == 4
+    end, "the page placed around the moved float")
+    eq({}, transmitted(), "the terminal still has the page")
+    vim.api.nvim_win_close(float, true)
+    eq(s.picture ~= nil, true)
+  end)
+
+  it("does not send the page again after a message scrolled the screen, when replies cannot be read", function()
+    reset()
+    local positioned = require("pdf-view.positioned")
+    local replies = positioned.replies
+    positioned.replies = false -- as on Neovim 0.11
+    local ok, err = pcall(function()
+      open(make("wezterm-scrolled", pages(1)))
+      writes = {}
+      vim.v.scrollstart = "Unknown"
+      vim.cmd("redraw!")
+      wait_for(function()
+        return #last_batch() == 1
+      end, "placed again")
+      eq({}, transmitted(), "the terminal scrolled the image with the text")
+    end)
+    positioned.replies = replies
+    vim.v.scrollstart = ""
+    if not ok then
+      error(err, 0)
+    end
+  end)
+
+  it("places the page over the text in Konsole, which hides it under a coloured cell", function()
+    reset()
+    as_terminal("konsole")
+    setup({ transmission = "auto" })
+    eq("direct", terminal.transmission(), "Konsole takes no image files")
+    open(make("konsole-basic", pages(1)))
+    local batch = last_batch()
+    eq(1, #batch)
+    eq(nil, batch[1].keys.z)
+    truthy(sent("t=d"), "sent as bytes")
+    as_terminal("wezterm")
+  end)
+
+  terminal.detect = detect
+  setup()
+end)
+
+describe("viewer with iTerm2 inline images (iTerm2, VS Code)", function()
+  local detect = terminal.detect
+  terminal.detect = function()
+    return { name = "iterm2", term = "iterm.app", placeholders = false }
+  end
+  setup()
+
+  --- The images printed by the writes from `from` on: `{ row, col, args, png }`, rows and columns 1-based.
+  local function prints(from)
+    local list = {}
+    for index = from or 1, #writes do
+      for row, col, args, data in writes[index]:gmatch("\27%[(%d+);(%d+)H\27%]1337;File=([^:]*):([^\a]*)\a") do
+        local parsed = {}
+        for key, value in args:gmatch("(%w+)=(%w+)") do
+          parsed[key] = tonumber(value) or value
+        end
+        list[#list + 1] = { row = tonumber(row), col = tonumber(col), args = parsed, png = vim.base64.decode(data) }
+      end
+    end
+    return list
+  end
+
+  --- The cells erased by the writes, as "row:col", 1-based.
+  local function erased()
+    local cells = {}
+    for _, data in ipairs(writes) do
+      for row, col, count in data:gmatch("\27%[(%d+);(%d+)H\27%[(%d+)X") do
+        for offset = 0, tonumber(count) - 1 do
+          cells[row .. ":" .. (tonumber(col) + offset)] = true
+        end
+      end
+    end
+    return cells
+  end
+
+  --- The cells of `rects`, as "row:col", 1-based.
+  local function cells_of(rects)
+    local cells = {}
+    for _, r in ipairs(rects) do
+      for row = r.row, r.row + r.rows - 1 do
+        for col = r.col, r.col + r.cols - 1 do
+          cells[(row + 1) .. ":" .. (col + 1)] = true
+        end
+      end
+    end
+    return cells
+  end
+
+  local function printed(s, count)
+    wait_for(function()
+      return s.placed ~= nil and s.placed.rects ~= nil and #s.placed.rects == count and not s.dirty
+    end, count .. " pieces printed")
+  end
+
+  it("prints the page at its window's position, and sends no Kitty graphics", function()
+    reset()
+    eq("iterm2", terminal.protocol())
+    eq("positioned", terminal.placement())
+    local s = open(make("iterm2-basic", pages(1)))
+    printed(s, 1)
+    eq({ "" }, vim.fn.uniq(vim.api.nvim_buf_get_lines(0, 0, -1, false)), "the buffer is blank")
+    local list = prints()
+    local last, image = list[#list], image_rect(s)
+    eq({ image.row + 1, image.col + 1 }, { last.row, last.col })
+    eq({ s.picture.cols, s.picture.rows, 0, 1 }, {
+      last.args.width,
+      last.args.height,
+      last.args.preserveAspectRatio,
+      last.args.doNotMoveCursor,
+    })
+    eq(slurp(s.picture.path), last.png, "the rendered page, as it is")
+    eq(false, sent("\27_G"), "no Kitty graphics command")
+    truthy(writes[#writes]:find("^\0277") and writes[#writes]:find("\0278$"), "the cursor is saved and restored")
+  end)
+
+  it("prints the parts around a float as PNGs of their own, and the whole page once it closes", function()
+    reset()
+    local s = open(make("iterm2-float", pages(1)))
+    printed(s, 1)
+    local image = image_rect(s)
+    local float = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, {
+      relative = "editor",
+      row = image.row + 2,
+      col = image.col + 3,
+      width = 4,
+      height = 2,
+      border = "single",
+    })
+    writes = {}
+    vim.cmd.redraw()
+    printed(s, 4)
+    local list = prints()
+    local area = 0
+    for index = #list - 3, #list do
+      local piece = list[index]
+      area = area + piece.args.width * piece.args.height
+      local function u32(offset)
+        local a, b, c, d = piece.png:byte(offset, offset + 3)
+        return ((a * 256 + b) * 256 + c) * 256 + d
+      end
+      local w, h = u32(17), u32(21)
+      truthy(w < s.picture.width or h < s.picture.height, "a part of the page, not all of it")
+    end
+    eq(image.rows * image.cols - 6 * 4, area, "every cell but the float's (with its border)")
+    eq({}, erased(), "nothing to erase: the float was drawn over the page")
+
+    writes = {}
+    vim.api.nvim_win_close(float, true)
+    vim.cmd.redraw()
+    printed(s, 1)
+    eq(slurp(s.picture.path), prints()[#prints()].png, "whole again")
+  end)
+
+  it("erases what the zoomed page leaves uncovered when it zooms out", function()
+    reset()
+    local s = open(make("iterm2-zoom", pages(1)))
+    printed(s, 1)
+    press("+")
+    wait_for(function()
+      return s.zoom > 1 and s.job == nil and s.placed and s.placed.id == s.picture.id and not s.dirty
+    end, "zoomed in")
+    local zoomed = vim.deepcopy(s.placed.rects)
+    writes = {}
+    press("0")
+    wait_for(function()
+      return s.zoom == 1 and s.job == nil and next(erased()) ~= nil
+    end, "the zoomed page erased")
+    local expected = cells_of(zoomed)
+    for cell in pairs(cells_of(s.placed.rects)) do
+      expected[cell] = nil
+    end
+    eq(expected, erased(), "exactly the cells the fitted page does not cover")
+  end)
+
+  it("clears the screen when the window shows another buffer, which may not draw over all of the page", function()
+    reset()
+    local s = open(make("iterm2-hide", pages(1)))
+    printed(s, 1)
+    local cleared = 0
+    with_stub(vim.cmd, "mode", function()
+      cleared = cleared + 1
+    end, function()
+      vim.cmd.enew()
+      vim.cmd.redraw()
+      wait_for(function()
+        return cleared > 0
+      end, ":mode")
+      eq({}, erased(), "nothing erased by hand: the other buffer is drawn there")
+
+      writes = {}
+      vim.cmd.buffer(s.buf)
+      vim.cmd.redraw()
+      printed(s, 1)
+    end)
+  end)
+
+  it("erases the page for a message in its place", function()
+    reset()
+    local path = make("iterm2-message", pages(1))
+    local s = open(path)
+    printed(s, 1)
+    local rects = vim.deepcopy(s.placed.rects)
+    writes = {}
+    os.remove(path)
+    press("r")
+    wait_for(function()
+      return vim.api.nvim_buf_get_lines(0, 0, 1, false)[1]:find("pdf%-view:") ~= nil
+    end, "the message")
+    eq(cells_of(rects), erased())
+    eq({}, prints())
+  end)
+
+  terminal.detect = detect
+  setup()
+end)
+
+describe("viewer in a terminal that cannot show pages", function()
+  it("shows the text of the page under the reason, and turns the pages", function()
+    reset()
+    setup({ force = false, protocol = "kitty", placement = "placeholders" })
+    local detect = terminal.detect
+    terminal.detect = function()
+      return { name = "wezterm", term = "wezterm", placeholders = false }
+    end
+    local ok, err = pcall(function()
+      local s = open(make("text-instead", pages(3)))
+      local function text()
+        return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
+      end
+      wait_for(function()
+        return text():find("Page 1", 1, true) ~= nil
+      end, "the text of page 1")
+      truthy(text():find("^pdf%-view: wezterm has no Unicode placeholders"), text())
+      eq({ 1, 3 }, { s.page, s.count })
+      eq(0, s.slot, "no image")
+      press(vim.keycode("<PageDown>"))
+      wait_for(function()
+        return text():find("Page 2", 1, true) ~= nil
+      end, "the text of page 2")
+      eq(2, s.page)
+      truthy(not text():find("Page 1", 1, true), text())
+      press("G")
+      wait_for(function()
+        return s.page == 3 and text():find("Page 3", 1, true) ~= nil
+      end, "the last page")
+      eq({}, writes, "nothing sent to the terminal")
+    end)
+    terminal.detect = detect
+    setup()
+    assert(ok, err)
+  end)
+end)
+
+describe("viewer with sixel (foot, Windows Terminal, xterm)", function()
+  local detect = terminal.detect
+  terminal.detect = function()
+    return { name = "foot", term = "foot", placeholders = false }
+  end
+  setup()
+
+  --- The sixel images printed by the writes from `from` on: `{ row, col, width, height }`, rows and columns 1-based,
+  --- the size in pixels from the raster attributes.
+  local function sixels(from)
+    local list = {}
+    for index = from or 1, #writes do
+      for row, col, width, height in writes[index]:gmatch('\27%[(%d+);(%d+)H\27P0;1;0q"1;1;(%d+);(%d+)') do
+        list[#list + 1] = { tonumber(row), tonumber(col), tonumber(width), tonumber(height) }
+      end
+    end
+    return list
+  end
+
+  local function printed(s, count)
+    wait_for(function()
+      return s.placed ~= nil and s.placed.rects ~= nil and #s.placed.rects == count and not s.dirty
+    end, count .. " pieces printed")
+  end
+
+  it("prints the page at its window's position, pixel for pixel at the size of its cells", function()
+    reset()
+    eq("sixel", terminal.protocol())
+    eq("positioned", terminal.placement())
+    local s = open(make("sixel-basic", pages(1)))
+    printed(s, 1)
+    local image = image_rect(s)
+    eq({ { image.row + 1, image.col + 1, image.cols * 10, image.rows * 20 } }, sixels())
+    eq(false, sent("\27_G"), "no Kitty graphics command")
+    eq(false, sent("\27]1337"), "no iTerm2 image")
+    truthy(writes[#writes]:find("^\0277") and writes[#writes]:find("\0278$"), "the cursor is saved and restored")
+
+    writes = {}
+    vim.cmd("mode") -- the screen is drawn again: the page is printed again, without encoding it again
+    vim.cmd.redraw()
+    printed(s, 1)
+    eq(1, #sixels())
+    local files = 0
+    for _, file in pairs(s.picture.crops) do
+      files = files + ((type(file) == "string" and file:find("%.six$")) and 1 or 0)
+    end
+    eq(1, files, "encoded once")
+  end)
+
+  it("prints the parts around a float as images of their own, at their size on screen", function()
+    reset()
+    local s = open(make("sixel-float", pages(1)))
+    printed(s, 1)
+    local image = image_rect(s)
+    local float = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, {
+      relative = "editor",
+      row = image.row + 2,
+      col = image.col + 3,
+      width = 4,
+      height = 2,
+      border = "single",
+    })
+    writes = {}
+    vim.cmd.redraw()
+    printed(s, 4)
+    local area = 0
+    for _, print in ipairs(sixels()) do
+      area = area + print[3] * print[4]
+    end
+    eq((image.rows * image.cols - 6 * 4) * 10 * 20, area, "every pixel but the float's (with its border)")
+
+    writes = {}
+    vim.api.nvim_win_close(float, true)
+    vim.cmd.redraw()
+    printed(s, 1)
+    eq({ { image.row + 1, image.col + 1, image.cols * 10, image.rows * 20 } }, sixels(), "whole again")
+  end)
+
+  terminal.detect = detect
   setup()
 end)
 
