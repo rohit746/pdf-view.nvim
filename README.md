@@ -256,7 +256,9 @@ Search highlights are recoloured with the page.
 
 `gg`, `G`, `{count}G`, outline picks, search matches (`/`, `?`, `n`, `N`) and marks are jumps: each viewer keeps a jump
 list of where they started, as Vim does for lines. `<C-o>` goes back through it and `<C-i>` (or `<Tab>`) forward, and
-`''` swaps with the position before the latest jump. Page turns and scrolling are not jumps.
+`''` swaps with the position before the latest jump. Page turns and scrolling are not jumps. Past either end of the
+viewer's list, `<C-o>` and `<C-i>` go on through Vim's own jump list, so `<C-o>` goes back to the file the PDF was
+opened from.
 
 `m{a-z}` marks where the viewer is: the page, its fit, zoom and the centre of the view. `'{a-z}` or `` `{a-z} `` goes
 back to it, as it was. Marks and the jump list belong to the viewer, and they stay through `:edit`.

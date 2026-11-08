@@ -142,7 +142,9 @@ local function record_jump(s)
   s.marks["'"] = where
 end
 
---- Move `count` entries through the jump list: back for a negative count, forward for a positive one.
+--- Move `count` entries through the jump list: back for a negative count, forward for a positive one. Past either
+--- end of the list the rest of the count goes to Vim's own jump list, as `<C-o>` would: back to the file the viewer
+--- was opened from, or forward to the one `<C-o>` came from.
 ---@param s PdfView.Session
 ---@param count integer
 local function walk_jumps(s, count)
@@ -153,13 +155,19 @@ local function walk_jumps(s, count)
     push_jump(s, here(s))
     index = #jumps
   end
-  local to = index + count
-  if to < 1 or to > #jumps then
-    return
+  -- the entries there are in that direction: after a new jump (`#jumps + 1`) there is none forward
+  local room = count < 0 and index - 1 or math.max(0, #jumps - index)
+  local steps = math.min(math.abs(count), room)
+  local rest = math.abs(count) - steps
+  if steps > 0 then
+    local to = index + (count < 0 and -steps or steps)
+    s.marks["'"] = here(s)
+    s.jump_index = to
+    restore(s, jumps[to])
   end
-  s.marks["'"] = here(s)
-  s.jump_index = to
-  restore(s, jumps[to])
+  if rest > 0 then
+    vim.api.nvim_feedkeys(rest .. vim.keycode(count < 0 and "<C-o>" or "<C-i>"), "n", false)
+  end
 end
 
 --- Where on the new page a zoomed view starts, as a fraction of the page. Missing fields keep their value.

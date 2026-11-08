@@ -25,6 +25,9 @@ All notable changes to this project are documented here. The format follows
 - A viewer switched away from (`:bnext`, `:enew`) kept its pages in the terminal, which drops the oldest images
   without a word once it holds too many (kitty and Ghostty keep about 320 MB), and switching back could show a blank
   page. A viewer in no window now frees its images, and sends its page again when a window shows it.
+- `<C-o>` in a viewer did nothing once its own jump list had no earlier entry, so it could not go back to the file the
+  PDF was opened from (`gf`, `:edit`). Past either end of the viewer's jump list, `<C-o>` and `<C-i>` now go on through
+  Vim's jump list with the rest of the count.
 
 ## [0.5.1] - 2026-11-08
 
