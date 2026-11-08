@@ -2244,6 +2244,26 @@ describe("viewer robustness", function()
     vim.o.foldmethod = "manual"
   end)
 
+  it("sets only the window options that changed when it turns a page", function()
+    reset()
+    local s = open(make("optionset", pages(3)))
+    local set = {}
+    local id = vim.api.nvim_create_autocmd("OptionSet", {
+      callback = function(args)
+        set[#set + 1] = args.match
+      end,
+    })
+    press("j")
+    on_page(s, 2)
+    vim.api.nvim_del_autocmd(id)
+    eq({ "winbar" }, set, "only the page number in the winbar changes")
+
+    vim.wo.number = true -- e.g. another plugin
+    press("j")
+    on_page(s, 3)
+    eq(false, vim.wo.number, "an option changed meanwhile is set back")
+  end)
+
   it("keeps search highlighting off the page, and the window's own 'winhighlight'", function()
     reset()
     local search = vim.api.nvim_get_hl(0, { name = "Search" })

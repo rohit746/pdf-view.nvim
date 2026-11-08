@@ -270,6 +270,17 @@ local function uses_viewport(s)
   return s.mode ~= "page" or s.zoom > 1
 end
 
+--- Set the window-local value of `name` in `win`, unless it has that value already. The local value is compared:
+--- for global-local options ('scrolloff', 'winbar') the window would otherwise follow later changes to the global one.
+---@param win integer
+---@param name string
+---@param value any
+local function set_window_option(win, name, value)
+  if vim.api.nvim_get_option_value(name, { scope = "local", win = win }) ~= value then
+    vim.api.nvim_set_option_value(name, value, { scope = "local", win = win })
+  end
+end
+
 ---@param s PdfView.Session
 ---@param win integer
 local function update_winbar(s, win)
@@ -304,7 +315,7 @@ local function update_winbar(s, win)
     s.count or "?",
     #label > 0 and escape("  " .. table.concat(label, " ")) or ""
   )
-  vim.api.nvim_set_option_value("winbar", text, { scope = "local", win = win })
+  set_window_option(win, "winbar", text)
 end
 
 --- 'winhighlight' for a viewer's window: `current` (what the window has, e.g. from another plugin) with the
@@ -325,17 +336,15 @@ local function muted_winhighlight(current)
 end
 
 --- Window-local (`:setlocal`) values: Neovim restores the previous ones when the window shows another buffer.
+--- Each is set only when it differs: every render calls this, and each set fires OptionSet for other plugins.
 ---@param s PdfView.Session
 ---@param win integer
 local function apply_window_options(s, win)
   for name, value in pairs(WINDOW_OPTIONS) do
-    vim.api.nvim_set_option_value(name, value, { scope = "local", win = win })
+    set_window_option(win, name, value)
   end
   local winhighlight = vim.api.nvim_get_option_value("winhighlight", { win = win })
-  local muted = muted_winhighlight(winhighlight)
-  if muted ~= winhighlight then
-    vim.api.nvim_set_option_value("winhighlight", muted, { scope = "local", win = win })
-  end
+  set_window_option(win, "winhighlight", muted_winhighlight(winhighlight))
   update_winbar(s, win)
 end
 

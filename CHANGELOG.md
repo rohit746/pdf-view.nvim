@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Every page turn and scroll step set about 15 window options again, firing `OptionSet` for other plugins
+  (statuslines and the like) each time. Only options whose value differs are set now.
+
 ## [0.5.1] - 2026-11-08
 
 ### Fixed
