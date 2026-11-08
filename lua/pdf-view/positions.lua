@@ -67,6 +67,9 @@ function M.set(path, position)
       return type(entries[key]) == "table" and tonumber(entries[key].time) or 0
     end
     table.sort(paths, function(a, b)
+      if a == b then
+        return false -- a comparator must never call an entry less than itself
+      end
       local ta, tb = time(a), time(b)
       if ta ~= tb then
         return ta > tb

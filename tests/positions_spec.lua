@@ -38,6 +38,32 @@ describe("positions", function()
     eq(2, positions.get("/new.pdf").page)
   end)
 
+  it("does not call an entry less than itself when breaking a tie", function()
+    use("self-compare")
+    -- more than LIMIT entries, all stored in the same second, so every comparison
+    -- is a tie and the entry just written is one side of it
+    local entries = {}
+    local now = os.time()
+    for index = 1, 100 do
+      entries["/old" .. index .. ".pdf"] = { page = index, mode = "page", zoom = 1, cx = 0.5, cy = 0.5, time = now }
+    end
+    vim.fn.mkdir(vim.fs.dirname(positions.file), "p")
+    vim.fn.writefile({ vim.json.encode(entries) }, positions.file)
+
+    local sort = table.sort
+    local comparator
+    table.sort = function(list, compare)
+      comparator = comparator or compare
+      return sort(list, compare)
+    end
+    local ok, err = pcall(positions.set, "/new.pdf", { page = 2, mode = "page", zoom = 1, cx = 0.5, cy = 0.5 })
+    table.sort = sort
+
+    assert(ok, err)
+    truthy(comparator, "set() should have sorted the entries")
+    eq(false, comparator("/new.pdf", "/new.pdf"), "the entry just written must not compare less than itself")
+  end)
+
   it("ignores a corrupt file and malformed entries", function()
     use("corrupt")
     vim.fn.mkdir(vim.fs.dirname(positions.file), "p")
