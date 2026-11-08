@@ -107,6 +107,8 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field recolor? PdfView.Recolor how the pages are recoloured, once toggled; until then `config.options.recolor`
 ---@field spread? PdfView.Spread whether facing pages are shown side by side, once toggled; until then
 --- `config.options.spread`
+---@field scrolled? boolean the view was scrolled there with `continuous` on, so it may reach past the page's
+--- edges, into the pages next to it; a jump or a change of fit or zoom keeps it inside the page again
 ---@field last? integer the last page on screen: `page` + 1 when two facing pages are, else `page`
 ---@field parts? PdfView.SheetLayout[] where the pages on screen lie in `geom`, when there are two side by side
 ---@field closed boolean
@@ -368,6 +370,13 @@ local function uses_viewport(s)
   return s.mode ~= "page" or s.zoom > 1
 end
 
+--- Whether scrolling `s` goes on from one page into the next (`continuous`): it does for a zoomed or fitted page.
+---@param s PdfView.Session
+---@return boolean
+local function continuous(s)
+  return config.options.continuous and uses_viewport(s)
+end
+
 --- Set the window-local value of `name` in `win`, unless it has that value already. The local value is compared:
 --- for global-local options ('scrolloff', 'winbar') the window would otherwise follow later changes to the global one.
 ---@param win integer
@@ -537,6 +546,7 @@ function M.pages_label(s)
 end
 
 M.ns = ns
+M.continuous = continuous
 M.spread_mode = spread_mode
 M.spread_range = spread_range
 M.spread_step = spread_step

@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format follows
 - SyncTeX, for LaTeX documents built with it: `:PdfViewForward` in a `.tex` buffer shows where the cursor's line is
   typeset, highlighted, in a split if the PDF is not on screen, and a double-click on a page opens the source at the
   line that point was typeset from. Works with vimtex.
+- Continuous scrolling: with `continuous = true`, `j` and `k` on a zoomed or width-fitted page go on past its end
+  into the next page, showing the bottom of one and the top of the next together.
 - Facing pages: `d` shows two pages side by side, fitted, zoomed and turned as one, and `spread = "on"` or `"cover"`
   (page 1 alone, as a book opens) starts documents that way.
 

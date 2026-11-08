@@ -72,6 +72,8 @@ local M = {}
 ---@field highlight { match: string, current: string } `#rrggbb` colours multiplied onto search matches
 ---@field recolor PdfView.Recolor how pages are recoloured: not at all, with their brightness inverted but their hues
 --- kept (dark pages with light text), or in the colours of the `Normal` highlight (text and background)
+---@field continuous boolean scrolling a page taller than the window (zoomed, or fitted to its width) goes on into
+--- the next page, with the end of one page and the start of the next on screen together, instead of turning the page
 ---@field spread PdfView.Spread show facing pages side by side: pages 1 and 2, 3 and 4 ("on"), or page 1 alone and then
 --- 2 and 3, 4 and 5, as a book opens ("cover"). E-books are always shown a page at a time
 ---@field cell_size? number[] `{ width, height }` of a terminal cell in pixels, when it cannot be detected
@@ -102,6 +104,7 @@ local defaults = {
   highlight = { match = "#ffe14d", current = "#ff8c1a" },
   recolor = "off",
   spread = "off",
+  continuous = false,
   cell_size = nil,
   keymaps = {
     -- not <Space>: it is often the leader key
@@ -207,8 +210,16 @@ local function validate(opts)
       error(("pdf-view: unknown option `%s`"):format(key), 3)
     end
   end
-  local booleans =
-    { "auto_open", "live_reload", "winbar", "hide_cursor", "remember_position", "tmux_passthrough", "force" }
+  local booleans = {
+    "auto_open",
+    "live_reload",
+    "winbar",
+    "hide_cursor",
+    "remember_position",
+    "tmux_passthrough",
+    "force",
+    "continuous",
+  }
   for _, key in ipairs(booleans) do
     if opts[key] ~= nil and type(opts[key]) ~= "boolean" then
       fail(key, "a boolean", opts[key])

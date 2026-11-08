@@ -75,8 +75,11 @@ end
 ---@field min_y number how far up the viewport can travel
 ---@field max_x number how far the viewport can travel right
 ---@field max_y number how far the viewport can travel down
+---@field reach_h number how tall the part of the zoomed page the viewport travels over is: the content in a "content"
+--- fit, else the page
 ---@field scroll_x boolean whether the page is wider than the window, so horizontal movement scrolls
 ---@field scroll_y boolean
+---@field parts? PdfView.SheetPart[] the pages a continuous view draws, one below the other (set by `render`)
 ---@field cx number viewport centre as a fraction of the page width, clamped to what is reachable
 ---@field cy number
 
@@ -102,8 +105,10 @@ end
 ---@param mode? PdfView.FitMode what zoom 1 means, "page" by default
 ---@param box? number[] `{ x0, y0, x1, y1 }` in points from the page's top-left corner, for "content"; the whole page
 --- when missing
+---@param free? boolean a page taller than the window is not kept inside it vertically: the viewport is centred on
+--- `cy` wherever that is, past the page's edges too, for continuous scrolling, which shows the pages next to it there
 ---@return PdfView.Viewport
-function M.viewport(page_w, page_h, win_cols, win_rows, cell_w, cell_h, zoom, cx, cy, mode, box)
+function M.viewport(page_w, page_h, win_cols, win_rows, cell_w, cell_h, zoom, cx, cy, mode, box, free)
   local max_cols = math.max(1, math.min(win_cols, M.MAX_CELLS))
   local max_rows = math.max(1, math.min(win_rows, M.MAX_CELLS))
   local box_w, box_h = max_cols * cell_w, max_rows * cell_h
@@ -139,7 +144,9 @@ function M.viewport(page_w, page_h, win_cols, win_rows, cell_w, cell_h, zoom, cx
     vx = math.min(math.max(cx * full_w - view_w / 2, min_x), max_x)
     cx = (vx + view_w / 2) / full_w
   end
-  if scroll_y then
+  if scroll_y and free then
+    vy = cy * full_h - view_h / 2
+  elseif scroll_y then
     vy = math.min(math.max(cy * full_h - view_h / 2, min_y), max_y)
     cy = (vy + view_h / 2) / full_h
   end
@@ -164,6 +171,7 @@ function M.viewport(page_w, page_h, win_cols, win_rows, cell_w, cell_h, zoom, cx
     min_y = min_y,
     max_x = max_x,
     max_y = max_y,
+    reach_h = reach_h,
     scroll_x = scroll_x,
     scroll_y = scroll_y,
     cx = cx,

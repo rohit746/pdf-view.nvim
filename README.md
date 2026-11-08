@@ -179,6 +179,12 @@ mode applies to every page (each page is fitted by its own size), survives resiz
 mode shows `width 125%` in the winbar. `-` steps back out to the fitted size first and to the whole page after that;
 `0` goes straight to the whole page.
 
+With `continuous = true`, scrolling does not stop at the end of a page: `j` goes on into the next one, with the bottom
+of one page and the top of the next on screen together, and `k` back up into the previous one, as in a PDF reader's
+continuous mode. It applies wherever `j`/`k` scroll (a zoomed page, or one fitted to its width); a page that fits the
+window still turns. The winbar, `y`, `t` and `f` go by the page at the top of the window, and a jump (`gg`, `G`, a
+search match, a link) starts at the top of its page as usual.
+
 Papers often have wide margins. `c` fits the part of the page that has something on it, plus a few points of paper,
 so the text is as large as the window allows. Everything that is not white counts as content: text, images and
 figures. Each page is cropped to its own content, which is found the first time a page is shown in this mode (one
@@ -330,6 +336,7 @@ require("pdf-view").setup({
   text_scale = 1,          -- text size of EPUB, FB2 and MOBI books, relative to the terminal's
   highlight = { match = "#ffe14d", current = "#ff8c1a" }, -- multiplied onto search matches
   recolor = "off",         -- "invert": dark pages, hues kept; "colorscheme": in the Normal colours. `i` toggles it
+  continuous = false,      -- scrolling goes on from the end of a page into the next one
   spread = "off",          -- "on": facing pages side by side, 1-2, 3-4; "cover": 1 alone, then 2-3. `d` toggles it
   cell_size = nil,         -- { width, height } in px, only if your terminal does not report its pixel size
   keymaps = {              -- a list per action; `false` for no mappings at all

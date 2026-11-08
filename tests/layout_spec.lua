@@ -1,5 +1,5 @@
 local harness = require("tests.harness")
-local eq, near = harness.eq, harness.near
+local eq, near, truthy = harness.eq, harness.near, harness.truthy
 local layout = require("pdf-view.layout")
 
 local LETTER = { 612, 792 }
@@ -305,5 +305,19 @@ describe("layout.sheet", function()
       { count = 2, page = 2, width = 600, height = 800, reflowable = false },
     }, 8)
     eq(nil, sheet.content)
+  end)
+end)
+
+describe("layout.viewport for continuous scrolling", function()
+  it("follows the centre past the page's edges when free", function()
+    -- a width fit of a letter page in 80 x 20 cells of 10 x 20 px: 800 px wide, 1035 px tall, a 400 px window
+    local bound = layout.viewport(612, 792, 80, 20, 10, 20, 1, 0.5, 1.2, "width")
+    local free = layout.viewport(612, 792, 80, 20, 10, 20, 1, 0.5, 1.2, "width", nil, true)
+    eq(bound.max_y, bound.vy, "kept inside the page")
+    near(1.2 * free.full_h - 200, free.vy, 1e-6, "past the bottom of the page")
+    eq(1.2, free.cy)
+    near(free.full_h, free.reach_h, 1e-6)
+    local above = layout.viewport(612, 792, 80, 20, 10, 20, 1, 0.5, -0.1, "width", nil, true)
+    truthy(above.vy < 0, "past the top")
   end)
 end)

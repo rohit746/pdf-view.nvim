@@ -4178,3 +4178,95 @@ describe("viewer spreads", function()
     setup()
   end)
 end)
+
+describe("viewer continuous scrolling", function()
+  local COLOURS = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }
+  local RGB = { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 } }
+
+  local function coloured(name)
+    local list = {}
+    for index = 1, 3 do
+      list[index] = vim.tbl_extend("force", LETTER, { label = "", color = COLOURS[index] })
+    end
+    return make(name, list)
+  end
+
+  --- The colours of the image on screen near its top and its bottom edge, half way across.
+  local function ends(s)
+    local png = s.images[s.ids[s.slot]]
+    local width, height = fixture.png_size(png)
+    local x = math.floor(width / 2)
+    return fixture.pixels(png, { { x, 2 }, { x, height - 3 } })
+  end
+
+  --- Press `key` until `done()`, at most `limit` times.
+  local function until_done(s, key, done, limit)
+    for _ = 1, limit do
+      if done() then
+        return
+      end
+      press(key)
+      settle(s)
+    end
+    truthy(done(), "pressed " .. key .. " " .. limit .. " times")
+  end
+
+  it("scrolls from the end of a page into the next, with both on screen", function()
+    setup({ continuous = true })
+    reset()
+    local s = open(coloured("continuous"))
+    press("w")
+    settle(s)
+    until_done(s, "j", function()
+      local colours = ends(s)
+      return s.page == 1 and vim.deep_equal(colours, { RGB[1], RGB[2] })
+    end, 20)
+    eq(1, s.page, "the page at the top of the window")
+
+    -- on into page 2, and back up the same way
+    local cy = s.cy
+    until_done(s, "j", function()
+      return s.page == 2
+    end, 20)
+    local steps = 0
+    until_done(s, "k", function()
+      steps = steps + 1
+      return s.page == 1
+    end, 20)
+    truthy(math.abs(s.cy - cy) < 1, "back on page 1, cy = " .. s.cy)
+
+    -- the end of the document stops it: the last page's bottom at the bottom of the window
+    press("G")
+    settle(s)
+    eq(3, s.page)
+    eq(nil, s.scrolled, "a jump keeps the view inside the page")
+    eq({ RGB[3], RGB[3] }, ends(s), "the top of the page, alone")
+    until_done(s, "j", function()
+      local before = s.cy
+      press("j")
+      settle(s)
+      return s.cy == before
+    end, 20)
+    eq(3, s.page)
+    eq({ RGB[3], RGB[3] }, ends(s))
+
+    -- and the start of the document
+    press("gg")
+    settle(s)
+    press("k")
+    settle(s)
+    eq(1, s.page)
+    eq({ RGB[1], RGB[1] }, ends(s))
+    setup()
+  end)
+
+  it("turns pages that fit the window, as without it", function()
+    setup({ continuous = true })
+    reset()
+    local s = open(coloured("continuous-page"))
+    press("j")
+    on_page(s, 2)
+    eq(nil, s.scrolled)
+    setup()
+  end)
+end)
