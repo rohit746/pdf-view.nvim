@@ -24,7 +24,8 @@ LaTeX or Typst build, say — the page refreshes by itself.
   [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) using Unicode placeholders, so the
   image behaves like text: it follows splits, tabs, resizes and works inside tmux. zellij, WezTerm and Konsole have no
   placeholders, so there the page is placed at its window's position instead ([Positioned placements](#positioned-placements)).
-  iTerm2 and VS Code get [iTerm2 inline images](#iterm2-and-vs-code).
+  iTerm2 and VS Code get [iTerm2 inline images](#iterm2-and-vs-code); foot, Windows Terminal, xterm, Contour and
+  mlterm get [sixel](#sixel). In a terminal that can show none of these, the viewer shows the text of the page.
 - No dependency on other plugins, ImageMagick or Ghostscript.
 - Opening a PDF never reads its bytes into a buffer, and `:w` can never overwrite it. `:w {file}` saves a copy.
 
@@ -37,7 +38,7 @@ LaTeX or Typst build, say — the page refreshes by itself.
 ## Requirements
 
 - Neovim 0.11 or newer, with `termguicolors` (the image id travels in a 24-bit foreground colour; zellij, WezTerm,
-  Konsole, iTerm2 and VS Code do not need it).
+  Konsole, iTerm2, VS Code and the sixel terminals do not need it).
 - `mutool` from MuPDF, built with JavaScript support (the Homebrew `mupdf`, Debian/Ubuntu and Arch `mupdf-tools`
   packages are):
   `brew install mupdf` · `apt install mupdf-tools` · `pacman -S mupdf-tools`
@@ -47,12 +48,15 @@ LaTeX or Typst build, say — the page refreshes by itself.
   `config.enable_kitty_graphics = true` in `wezterm.lua`.
 - Or a terminal with iTerm2 inline images: [iTerm2](https://iterm2.com), or VS Code's terminal with
   `"terminal.integrated.enableImages": true` in its settings ([iTerm2 and VS Code](#iterm2-and-vs-code)).
+- Or a terminal with sixel: [foot](https://codeberg.org/dnkl/foot), Windows Terminal 1.22 or newer, xterm started as
+  a VT340 (`xterm -ti vt340`), [Contour](https://contour-terminal.org) or [mlterm](https://github.com/arakiken/mlterm)
+  ([Sixel](#sixel)).
 - Inside tmux (3.3a or newer): the plugin runs `tmux set -p allow-passthrough on` for its own pane. To manage it
   yourself, set `tmux_passthrough = false` and add `set -g allow-passthrough on` to `tmux.conf`. tmux must also pass
   24-bit colour on: if `:checkhealth pdf-view` says it doesn't, add `set -as terminal-features ',xterm-kitty:RGB'`
   (with your outer `$TERM`) to `tmux.conf`.
 - Inside zellij (0.45 or newer): nothing to configure. See [zellij](#zellij) for how it differs.
-- WezTerm, Konsole, iTerm2 or VS Code inside tmux: also `set -g focus-events on`, so that a page leaves the screen when
+- WezTerm, Konsole, iTerm2, VS Code or a sixel terminal inside tmux: also `set -g focus-events on`, so that a page leaves the screen when
   you switch to another tmux window, and comes back with it.
 
 > [!TIP]
@@ -272,7 +276,8 @@ require("pdf-view").setup({
   tmux_passthrough = true, -- run `tmux set -p allow-passthrough on` for this pane
   placement = "auto",      -- "placeholders"; "positioned": at the window's position. auto = positioned in zellij,
                            -- WezTerm and Konsole
-  protocol = "auto",       -- "kitty"; "iterm2": iTerm2 inline images. auto = iterm2 in iTerm2 and VS Code
+  protocol = "auto",       -- "kitty"; "iterm2": iTerm2 inline images; "sixel". auto = iterm2 in iTerm2 and VS Code,
+                           -- sixel in foot, Windows Terminal, xterm, Contour, mlterm
   force = false,           -- skip terminal detection
   max_pixels = 4096,       -- cap for either side of a fitted page (zoomed views are window-sized anyway)
   zoom_step = 1.25,        -- factor of one zoom step
@@ -393,6 +398,33 @@ it cannot be moved or taken away, and it goes when its cells are written over. S
 `protocol = "iterm2"` uses these images in another terminal that draws them. WezTerm and Konsole draw them too, but
 keep Kitty graphics by default: Konsole leaves parts of old images on screen.
 
+## Sixel
+
+foot, Windows Terminal (1.22 or newer), xterm, Contour and mlterm have neither Kitty graphics nor iTerm2 images, but
+they draw sixel images. They are told apart by `$TERM` (foot, Contour, mlterm), `$TERMINAL_NAME` (Contour), `$MLTERM`,
+`$WT_SESSION` (Windows Terminal) and `$XTERM_VERSION` (xterm), and inside tmux by the name the terminal gave tmux. A
+terminal that is not recognised but lists sixel in its device attributes (DA1, which Neovim 0.12 can read) gets sixel
+too; on Neovim 0.11 set `protocol = "sixel"`.
+
+A sixel image is printed into the cells like an [iTerm2 image](#iterm2-and-vs-code), and kept in step with the screen
+the same way. It is drawn pixel for pixel, so mutool cuts every part of the page out at its size on screen, and the
+plugin encodes it once, in Lua, with a fixed palette of greys and colours (no other program is needed). So:
+
+- The terminal's cell size has to be right: it is read from the terminal (`TIOCGWINSZ`). Where it is not reported
+  (`:checkhealth pdf-view` says so), set `cell_size = { width, height }` in pixels.
+- xterm draws sixel only as a VT340: start it with `xterm -ti vt340`, or set `XTerm*decTerminalID: vt340` in
+  `~/.Xresources`.
+- Sixel is several times the size of a PNG. Inside tmux an image passes through in one piece, and tmux drops one that
+  is over its input buffer (1 MB); `set -s input-buffer-size 4194304` raises it (tmux 3.6).
+
+`protocol = "sixel"` uses sixel in another terminal. WezTerm draws it well; Konsole draws an image over the row below
+it, and both keep Kitty graphics by default.
+
+## Terminals without images
+
+In a terminal that can show none of these, over a plain SSH session for instance, the viewer says why at the top of
+the window and shows the text of the page under it. The page keys turn the pages as usual.
+
 ## zellij
 
 zellij 0.45 implements the Kitty graphics protocol itself, but not its Unicode placeholders. Inside zellij (detected
@@ -431,7 +463,8 @@ Set `placement = "placeholders"` once your zellij supports Unicode placeholders
 In zellij, WezTerm and Konsole, steps 3 and 4 differ. The buffer stays blank, and the image is placed (`a=p`) at the
 screen position of the window, under the text, after moving the cursor there; see
 [Positioned placements](#positioned-placements). In iTerm2 and VS Code nothing is uploaded: the PNG is printed at that
-position as an inline image (`OSC 1337`); see [iTerm2 and VS Code](#iterm2-and-vs-code).
+position as an inline image (`OSC 1337`); see [iTerm2 and VS Code](#iterm2-and-vs-code). With sixel the page is cut
+to its size on screen, encoded and printed there; see [Sixel](#sixel).
 
 When zoomed, step 2 renders only the rectangle of the enlarged page that is on screen, so a window-sized PNG is all
 that is ever drawn and uploaded, however deep the zoom, and scrolling costs the same as turning a page.
@@ -461,9 +494,10 @@ lua/pdf-view/
   mupdf.lua       async wrapper around mutool, and the worker that keeps a document open
   kitty.lua       graphics protocol encoding, tmux passthrough
   placeholder.lua Unicode placeholder text
-  positioned.lua  zellij, WezTerm, Konsole, iTerm2, VS Code: the page placed at its window's position, kept in step with
-                  floats and redraws
+  positioned.lua  zellij, WezTerm, Konsole, iTerm2, VS Code, sixel: the page placed at its window's position, kept in
+                  step with floats and redraws
   iterm2.lua      iTerm2 inline images (OSC 1337)
+  sixel.lua       sixel encoding of the pixels mutool writes
   terminal.lua    terminal detection, cell size, tmux
   watch.lua       file watching
   health.lua      :checkhealth pdf-view

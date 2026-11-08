@@ -52,10 +52,12 @@
 //     maps black to the first colour and white to the second, the shades in between to the shades between them (a
 //     page in the colours of the editor's text and background).
 //
-//   ["crop", <in.png>, <x>, <y>, <width>, <height>, <out.png>]
-//     Copies the rectangle (<x>, <y>, <width>, <height>) of the image <in.png>, in its pixels, to the PNG <out.png>,
-//     pixel for pixel. It does not open the document: it cuts a page that was rendered already into the pieces that
-//     are not covered by a floating window, for a terminal that cannot show part of an image (iTerm2 inline images).
+//   ["crop", <in.png>, <x>, <y>, <width>, <height>, <out>, <out_width>, <out_height>]
+//     Copies the rectangle (<x>, <y>, <width>, <height>) of the image <in.png>, in its pixels, to the PNG <out>,
+//     pixel for pixel, or stretched to <out_width> x <out_height> pixels when those are given. <out> is written as a
+//     binary PNM (P6) instead when its name ends in ".pnm". It does not open the document: it cuts a page that was
+//     rendered already into the pieces that are not covered by a floating window, for a terminal that cannot show
+//     part of an image (iTerm2 inline images), and gives a sixel encoder the pixels of a page at its size on screen.
 //
 //   ["text", <page>]
 //     The text of a page, as a JSON string: a line per line of text and an empty line after each block, in reading
@@ -277,15 +279,24 @@ function render(number, scaleX, scaleY, x, y, width, height, out, highlights, ho
   return notes;
 }
 
-function crop(file, x, y, width, height, out) {
+function crop(file, x, y, width, height, out, outWidth, outHeight) {
   var image = new Image(file);
-  var pixmap = new Pixmap(ColorSpace.DeviceRGB, [x, y, x + width, y + height], false);
+  var sx = outWidth > 0 ? outWidth / width : 1;
+  var sy = outHeight > 0 ? outHeight / height : 1;
+  var pixmap = new Pixmap(ColorSpace.DeviceRGB, [0, 0, Math.round(width * sx), Math.round(height * sy)], false);
   pixmap.clear(255);
   var device = new DrawDevice(Matrix.identity, pixmap);
-  // an image fills the unit square: scaled to its size in pixels, one image pixel lands on one pixel of the pixmap
-  device.fillImage(image, [image.getWidth(), 0, 0, image.getHeight(), 0, 0], 1);
+  // an image fills the unit square: scaled to its size in pixels, one image pixel lands on one pixel of the pixmap,
+  // or on sx x sy of them; the rectangle's corner lands on the pixmap's
+  var w = image.getWidth();
+  var h = image.getHeight();
+  device.fillImage(image, [w * sx, 0, 0, h * sy, -x * sx, -y * sy], 1);
   device.close();
-  pixmap.saveAsPNG(out);
+  if (/\.pnm$/.test(out)) {
+    pixmap.saveAsPNM(out);
+  } else {
+    pixmap.saveAsPNG(out);
+  }
   return "";
 }
 
@@ -356,7 +367,7 @@ function pageLinks(number) {
 function answer(request) {
   if (request[3] === "crop") {
     // needs no document, so it works the same whatever the document's password and layout
-    return crop(request[4], request[5], request[6], request[7], request[8], request[9]);
+    return crop(request[4], request[5], request[6], request[7], request[8], request[9], request[10], request[11]);
   }
   password = request[2];
   layout(request[1]);

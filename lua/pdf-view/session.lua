@@ -95,7 +95,8 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field watcher? PdfView.Watcher
 ---@field mapped? string[] the keys mapped in the buffer by `actions.set_keymaps`
 ---@field waiting_for_ui? boolean the first render is waiting for a UI to attach
----@field waiting_for_terminal? { page?: integer, opts?: table } the page to show once the terminal has said whether it has Kitty graphics
+---@field waiting_for_terminal? { page?: integer, opts?: table } the page to show once the terminal has said what it draws
+---@field page_text? string the terminal cannot show pages: the reason, shown above the text of the page instead
 ---@field unlocking? boolean the password prompt of a password-protected document is open
 ---@field locked? boolean the password prompt was cancelled: say so instead of asking again, until `actions.reload`
 ---@field recolor? PdfView.Recolor how the pages are recoloured, once toggled; until then `config.options.recolor`
@@ -405,7 +406,7 @@ local function destroy(s)
   if s.watcher then
     s.watcher.stop()
   end
-  if s.slot ~= 0 and terminal.protocol() ~= "iterm2" then
+  if s.slot ~= 0 and not terminal.printed() then
     for _, id in ipairs(s.ids) do
       kitty.send(kitty.delete(id))
     end

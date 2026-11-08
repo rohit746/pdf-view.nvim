@@ -245,6 +245,10 @@ local TERMINAL_VARS = {
   "WEZTERM_EXECUTABLE",
   "KONSOLE_VERSION",
   "LC_TERMINAL",
+  "TERMINAL_NAME",
+  "MLTERM",
+  "WT_SESSION",
+  "XTERM_VERSION",
   "TMUX",
   "ZELLIJ",
 }
@@ -338,6 +342,52 @@ describe("terminal.detect", function()
     end)
   end)
 
+  it("sends sixel images to the terminals that draw them, at the window's position", function()
+    config.setup()
+    for _, case in ipairs({
+      { { TERM = "foot" }, "foot" },
+      { { TERM = "foot-extra" }, "foot" },
+      { { TERM = "xterm-256color", XTERM_VERSION = "XTerm(390)" }, "xterm" },
+      { { TERM = "xterm-256color", WT_SESSION = "8e4f6c3a" }, "windows-terminal" },
+      { { TERM = "contour", TERMINAL_NAME = "contour" }, "contour" },
+      { { TERM = "xterm-256color", TERMINAL_NAME = "contour" }, "contour" },
+      { { TERM = "mlterm" }, "mlterm" },
+      { { TERM = "xterm-256color", MLTERM = "3.9.3" }, "mlterm" },
+    }) do
+      with_env(case[1], function()
+        eq(case[2], terminal.detect().name, vim.inspect(case[1]))
+        eq(false, terminal.detect().placeholders)
+        eq("sixel", terminal.protocol(), vim.inspect(case[1]))
+        eq("positioned", terminal.placement())
+      end)
+    end
+    with_env({ TERM = "foot", ZELLIJ = "0" }, function()
+      eq("kitty", terminal.protocol(), "zellij draws Kitty graphics itself")
+    end)
+    with_env({ TERM = "xterm-kitty", KITTY_WINDOW_ID = "1", XTERM_VERSION = "XTerm(390)" }, function()
+      eq("kitty", terminal.detect().name, "kitty started from an xterm")
+    end)
+    with_env({ TERM = "tmux-256color", TERM_PROGRAM = "tmux" }, function()
+      in_tmux("xterm-256color XTerm(390)\n", function()
+        eq("xterm", terminal.detect().name, "by the name xterm gave tmux")
+        eq("sixel", terminal.protocol())
+      end)
+    end)
+    config.setup({ protocol = "sixel" })
+    with_env({ TERM = "xterm-kitty", KITTY_WINDOW_ID = "1" }, function()
+      eq("sixel", terminal.protocol())
+      eq("positioned", terminal.placement(), "sixel images have no placeholders")
+    end)
+    config.setup()
+  end)
+
+  it("reads the device attributes", function()
+    eq({ 65, 4, 6, 18, 22, 52 }, terminal.da1_attributes(ESC .. "[?65;4;6;18;22;52c"))
+    eq({ 62, 22 }, terminal.da1_attributes(ESC .. "[?62;22c"))
+    eq(nil, terminal.da1_attributes(ESC .. "[?1;0;1024S"))
+    eq(nil, terminal.da1_attributes(ESC .. "_Gi=1;OK" .. ESC .. "\\"))
+  end)
+
   it("recognises iTerm2 behind tmux by the name the client gave", function()
     config.setup()
     with_env({ TERM = "tmux-256color", TERM_PROGRAM = "tmux" }, function()
@@ -423,13 +473,26 @@ describe("terminal.check", function()
     end)
   end)
 
-  it("refuses a terminal it does not recognise", function()
+  it("refuses a terminal it does not recognise, which does not say it draws sixel", function()
     with_terminal(function(written)
       with_env({ TERM = "xterm-256color" }, function()
+        if vim.fn.has("nvim-0.12") == 1 then
+          eq(nil, (terminal.check()), "it is asked first")
+          local done = false
+          terminal.ask(function()
+            done = true
+          end)
+          eq({ ESC .. "[c" }, written, "only whether it draws sixel: placeholders are not set to positioned")
+          reply(ESC .. "[?62;22c")
+          harness.wait_for(function()
+            return done
+          end, "the answer")
+          eq(false, terminal.sixel())
+        end
         local ok, reason = terminal.check()
         eq(false, ok)
         truthy(reason:find("`xterm-256color` does not look like", 1, true), reason)
-        eq({}, written, "nothing is asked")
+        eq(vim.fn.has("nvim-0.12") == 1 and 1 or 0, #written, "not asked again")
       end)
     end)
   end)
@@ -492,16 +555,109 @@ describe("terminal.check", function()
     end)
   end)
 
+  it("gives sixel to a terminal it does not recognise that says it draws sixel", function()
+    with_terminal(function(written)
+      with_env({ TERM = "xterm-256color" }, function()
+        eq(nil, (terminal.check()))
+        local done = false
+        terminal.ask(function()
+          done = true
+        end)
+        reply(ESC .. "[?65;4;6;18;22c")
+        harness.wait_for(function()
+          return done
+        end, "the answer")
+        eq(true, terminal.sixel())
+        eq("sixel", terminal.protocol())
+        eq("positioned", terminal.placement())
+        eq(true, (terminal.check()))
+        eq({ ESC .. "[c" }, written)
+      end)
+    end)
+  end)
+
+  it("asks xterm whether it draws sixel, and says how to make it", function()
+    with_terminal(function(written)
+      with_env({ TERM = "xterm-256color", XTERM_VERSION = "XTerm(390)" }, function()
+        eq(nil, (terminal.check()))
+        local done = false
+        terminal.ask(function()
+          done = true
+        end)
+        eq({ ESC .. "[c" }, written, "no Kitty graphics query: the answer would not change anything")
+        reply(ESC .. "[?64;1;2;6;9;15;16;17;18;21;22;28c") -- a VT420, xterm's default
+        harness.wait_for(function()
+          return done
+        end, "the answer")
+        local ok, reason = terminal.check()
+        eq(false, ok)
+        truthy(reason:find("xterm -ti vt340", 1, true), reason)
+      end)
+    end)
+  end)
+
+  it("takes a sixel terminal that does not answer at its name", function()
+    with_terminal(function(written)
+      with_env({ TERM = "foot" }, function()
+        eq(nil, (terminal.check()))
+        local done = false
+        terminal.ask(function()
+          done = true
+        end)
+        harness.wait_for(function()
+          return done
+        end, "the question to time out")
+        eq(nil, terminal.sixel())
+        eq(true, (terminal.check()))
+        eq(1, #written, "asked once")
+      end)
+    end)
+  end)
+
+  it("asks what the protocol set by hand needs, and then knows", function()
+    with_terminal(function(written)
+      for _, case in ipairs({
+        { { TERM_PROGRAM = "WezTerm" }, "sixel", ESC .. "[?65;4;6c", "[c" },
+        { { TERM = "foot" }, "kitty", ESC .. "_Gi=16777213;OK" .. ESC .. "\\", "i=16777213" },
+      }) do
+        config.setup({ protocol = case[2] })
+        with_env(case[1], function()
+          eq(nil, (terminal.check()), case[2])
+          local done = false
+          terminal.ask(function()
+            done = true
+          end)
+          eq(1, #written, "asked one question")
+          truthy(written[1]:find(case[4], 1, true), written[1])
+          reply(case[3])
+          harness.wait_for(function()
+            return done
+          end, "the answer")
+          eq(true, (terminal.check()), case[2])
+        end)
+        for index = #written, 1, -1 do
+          written[index] = nil
+        end
+      end
+    end)
+  end)
+
   it("asks any terminal when the placement is set to positioned, without `force`", function()
     with_terminal(function(written)
       config.setup({ placement = "positioned" })
-      with_env({ TERM = "foot" }, function()
+      with_env({ TERM = "st-256color" }, function()
         eq(nil, (terminal.check()))
-        terminal.ask_graphics(function() end)
+        local done = false
+        terminal.ask(function()
+          done = true
+        end)
         reply(ESC .. "_Gi=16777213;OK" .. ESC .. "\\")
+        reply(ESC .. "[?62;22c")
         harness.wait_for(function()
-          return terminal.graphics() ~= nil
-        end, "the answer")
+          return done
+        end, "both answers")
+        eq(true, terminal.graphics())
+        eq("kitty", terminal.protocol())
         eq(true, (terminal.check()))
         eq(1, queries(written))
       end)

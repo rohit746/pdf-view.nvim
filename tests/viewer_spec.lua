@@ -291,10 +291,19 @@ describe("viewer", function()
     terminal.detect = function()
       return { term = "xterm-256color" }
     end
+    terminal.forget()
+    local asked = vim.fn.has("nvim-0.12") == 1
+    if asked then
+      -- it is asked whether it draws sixel, and says it does not
+      vim.defer_fn(function()
+        vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = "\27[?62;22c" } })
+      end, 20)
+    end
     open(make("unsupported", pages(1)))
     local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
     truthy(text:find("Unicode placeholder", 1, true), text)
-    eq(0, #writes, "nothing is sent to an unsupported terminal")
+    eq(asked and { "\27[c" } or {}, writes, "no image is sent to an unsupported terminal")
+    terminal.forget()
     terminal.detect = detect
     setup()
   end)
@@ -3231,6 +3240,125 @@ describe("viewer with iTerm2 inline images (iTerm2, VS Code)", function()
     end, "the message")
     eq(cells_of(rects), erased())
     eq({}, prints())
+  end)
+
+  terminal.detect = detect
+  setup()
+end)
+
+describe("viewer in a terminal that cannot show pages", function()
+  it("shows the text of the page under the reason, and turns the pages", function()
+    reset()
+    setup({ force = false, protocol = "kitty", placement = "placeholders" })
+    local detect = terminal.detect
+    terminal.detect = function()
+      return { name = "wezterm", term = "wezterm", placeholders = false }
+    end
+    local ok, err = pcall(function()
+      local s = open(make("text-instead", pages(3)))
+      local function text()
+        return table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
+      end
+      wait_for(function()
+        return text():find("Page 1", 1, true) ~= nil
+      end, "the text of page 1")
+      truthy(text():find("^pdf%-view: wezterm has no Unicode placeholders"), text())
+      eq({ 1, 3 }, { s.page, s.count })
+      eq(0, s.slot, "no image")
+      press(vim.keycode("<PageDown>"))
+      wait_for(function()
+        return text():find("Page 2", 1, true) ~= nil
+      end, "the text of page 2")
+      eq(2, s.page)
+      truthy(not text():find("Page 1", 1, true), text())
+      press("G")
+      wait_for(function()
+        return s.page == 3 and text():find("Page 3", 1, true) ~= nil
+      end, "the last page")
+      eq({}, writes, "nothing sent to the terminal")
+    end)
+    terminal.detect = detect
+    setup()
+    assert(ok, err)
+  end)
+end)
+
+describe("viewer with sixel (foot, Windows Terminal, xterm)", function()
+  local detect = terminal.detect
+  terminal.detect = function()
+    return { name = "foot", term = "foot", placeholders = false }
+  end
+  setup()
+
+  --- The sixel images printed by the writes from `from` on: `{ row, col, width, height }`, rows and columns 1-based,
+  --- the size in pixels from the raster attributes.
+  local function sixels(from)
+    local list = {}
+    for index = from or 1, #writes do
+      for row, col, width, height in writes[index]:gmatch('\27%[(%d+);(%d+)H\27P0;1;0q"1;1;(%d+);(%d+)') do
+        list[#list + 1] = { tonumber(row), tonumber(col), tonumber(width), tonumber(height) }
+      end
+    end
+    return list
+  end
+
+  local function printed(s, count)
+    wait_for(function()
+      return s.placed ~= nil and s.placed.rects ~= nil and #s.placed.rects == count and not s.dirty
+    end, count .. " pieces printed")
+  end
+
+  it("prints the page at its window's position, pixel for pixel at the size of its cells", function()
+    reset()
+    eq("sixel", terminal.protocol())
+    eq("positioned", terminal.placement())
+    local s = open(make("sixel-basic", pages(1)))
+    printed(s, 1)
+    local image = image_rect(s)
+    eq({ { image.row + 1, image.col + 1, image.cols * 10, image.rows * 20 } }, sixels())
+    eq(false, sent("\27_G"), "no Kitty graphics command")
+    eq(false, sent("\27]1337"), "no iTerm2 image")
+    truthy(writes[#writes]:find("^\0277") and writes[#writes]:find("\0278$"), "the cursor is saved and restored")
+
+    writes = {}
+    vim.cmd("mode") -- the screen is drawn again: the page is printed again, without encoding it again
+    vim.cmd.redraw()
+    printed(s, 1)
+    eq(1, #sixels())
+    local files = 0
+    for _, file in pairs(s.picture.crops) do
+      files = files + ((type(file) == "string" and file:find("%.six$")) and 1 or 0)
+    end
+    eq(1, files, "encoded once")
+  end)
+
+  it("prints the parts around a float as images of their own, at their size on screen", function()
+    reset()
+    local s = open(make("sixel-float", pages(1)))
+    printed(s, 1)
+    local image = image_rect(s)
+    local float = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, {
+      relative = "editor",
+      row = image.row + 2,
+      col = image.col + 3,
+      width = 4,
+      height = 2,
+      border = "single",
+    })
+    writes = {}
+    vim.cmd.redraw()
+    printed(s, 4)
+    local area = 0
+    for _, print in ipairs(sixels()) do
+      area = area + print[3] * print[4]
+    end
+    eq((image.rows * image.cols - 6 * 4) * 10 * 20, area, "every pixel but the float's (with its border)")
+
+    writes = {}
+    vim.api.nvim_win_close(float, true)
+    vim.cmd.redraw()
+    printed(s, 1)
+    eq({ { image.row + 1, image.col + 1, image.cols * 10, image.rows * 20 } }, sixels(), "whole again")
   end)
 
   terminal.detect = detect

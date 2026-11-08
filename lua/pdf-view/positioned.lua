@@ -10,12 +10,15 @@
 --- the screen is sent again before it is placed again. A terminal keeps its images until they are deleted, and says
 --- so when it has lost one (see `hook()`).
 ---
---- iTerm2 inline images (see `iterm2`) are printed into the cells instead, and cannot be cut or taken away by id: a
---- piece cut around a float is a PNG of its own, cropped by mutool, the image is printed again after every redraw of
---- its window (which may have written over it), and what it leaves behind is erased (see `refresh_printed()`).
+--- iTerm2 inline images (see `iterm2`) and sixel images (see `sixel`) are printed into the cells instead, and cannot
+--- be cut or taken away by id: a piece cut around a float is an image of its own, cropped by mutool, the image is
+--- printed again after every redraw of its window (which may have written over it), and what it leaves behind is
+--- erased (see `refresh_printed()`). A sixel image is drawn pixel for pixel, so every piece of it, the whole page
+--- too, is cut out at its size on screen and encoded once.
 local iterm2 = require("pdf-view.iterm2")
 local kitty = require("pdf-view.kitty")
 local mupdf = require("pdf-view.mupdf")
+local sixel = require("pdf-view.sixel")
 local terminal = require("pdf-view.terminal")
 
 local M = {}
@@ -44,8 +47,9 @@ M.replies = vim.fn.has("nvim-0.12") == 1
 ---@field col integer columns left of the image
 ---@field exact boolean one image pixel per screen pixel, so a part needs no scaling
 ---@field sent_again? integer hrtime of the last time it was sent again
----@field crops? table<string, string|boolean> iTerm2 images: the PNG of each part cut out of it, by the part's
---- rectangle in image pixels; true while mutool cuts it, false when it could not
+---@field crops? table<string, string|boolean> printed images: the file of each part cut out of it (a PNG for iTerm2,
+--- the encoded sixel), by the part's rectangle in image pixels and its size on screen; true while mutool cuts it,
+--- false when it could not
 
 ---@class PdfView.Rect
 ---@field row integer 0-based screen row of the top edge
@@ -235,7 +239,7 @@ local function visible(s)
   local image = { row = top + pic.row, col = left + pic.col, rows = pic.rows, cols = pic.cols }
   -- the window can be smaller than the image until the page is fitted to it again. An image printed down to the
   -- last row could scroll the screen, in a terminal that moves the cursor below it.
-  local lines = terminal.protocol() == "iterm2" and vim.o.lines - 1 or vim.o.lines
+  local lines = terminal.printed() and vim.o.lines - 1 or vim.o.lines
   local row0, col0 = math.max(image.row, top, 0), math.max(image.col, left, 0)
   local row1 = math.min(image.row + image.rows, top + area_rows, lines)
   local col1 = math.min(image.col + image.cols, left + area_cols, vim.o.columns)
@@ -308,7 +312,7 @@ function M.refresh(s)
   if s.closed or not pic then
     return
   end
-  if terminal.protocol() == "iterm2" then
+  if terminal.printed() then
     return refresh_printed(s)
   end
   local pieces, image = visible(s)
@@ -481,7 +485,7 @@ function M.show(s, pic)
   local old = s.picture
   s.picture, s.lost, s.dirty, s.cut_key = pic, false, true, nil
   shown[s.buf] = s
-  if terminal.protocol() == "iterm2" then
+  if terminal.printed() then
     pic.crops = {}
     -- printed over the old one, erasing what that leaves uncovered, once Neovim has drawn the window: that may
     -- write over it, and it would have to be printed again
@@ -501,7 +505,7 @@ end
 ---@param s PdfView.Session
 function M.clear(s)
   local pic = s.picture
-  if terminal.protocol() == "iterm2" then
+  if terminal.printed() then
     if s.placed and not tmux_hidden then
       local _, _, win, area = visible(s)
       local stale, outside = leftovers(s, {}, win, area)
@@ -522,7 +526,7 @@ end
 --- Forget session `s`, whose images are deleted by its owner.
 ---@param s PdfView.Session
 function M.forget(s)
-  if terminal.protocol() == "iterm2" then
+  if terminal.printed() then
     if s.placed and s.placed.rects and #s.placed.rects > 0 and not tmux_hidden then
       redraw_screen() -- its window shows something else now, which may leave some of the page uncovered
     end
@@ -536,7 +540,7 @@ local check_pending = false
 
 --- Mark every picture on screen as lost, to be sent again: the screen was left or scrolled under it.
 local function all_lost()
-  local printed = terminal.protocol() == "iterm2"
+  local printed = terminal.printed()
   for _, s in pairs(shown) do
     if printed then
       s.placed = nil -- the screen was drawn again from scratch, which took the image away
@@ -572,7 +576,7 @@ local function check()
   -- A message that scrolled the screen took iTerm2 images with it in some terminals (VS Code), and Neovim puts back
   -- what was under the message without drawing the lines of the window again. Once the message has gone, the pages
   -- are printed again.
-  if vim.v.scrollstart ~= "" and terminal.protocol() == "iterm2" and not prompting() then
+  if vim.v.scrollstart ~= "" and terminal.printed() and not prompting() then
     vim.v.scrollstart = ""
     all_lost()
   end
@@ -590,16 +594,22 @@ end
 
 local crop_counter = 0
 
---- The PNG of the part `part` of the picture of `s`: nil while mutool cuts it out (`s` is refreshed once it has),
---- false when it could not.
+--- The file to print the part `part` of the picture of `s` from: nil while mutool cuts it out (`s` is refreshed once
+--- it has), false when it could not. For iTerm2 it is a PNG, which the terminal stretches to the part's cells. For
+--- sixel it is the part stretched to `size` (in screen pixels) and encoded, with the dither starting at `offset`.
 ---@param s PdfView.Session
 ---@param pic PdfView.Picture
 ---@param part PdfView.Crop
+---@param size? integer[] sixel: width and height on screen
+---@param offset? integer[] sixel: where the part starts on screen, in pixels from the picture's top-left corner
 ---@return string|false|nil
-local function cut(s, pic, part)
+local function cut(s, pic, part, size, offset)
   local crops = pic.crops or {}
   pic.crops = crops
   local name = ("%d,%d,%d,%d"):format(part.x, part.y, part.w, part.h)
+  if size then
+    name = ("%s:%dx%d"):format(name, size[1], size[2])
+  end
   local file = crops[name]
   if type(file) == "string" and vim.uv.fs_stat(file) then
     return file
@@ -610,22 +620,55 @@ local function cut(s, pic, part)
   end
   crops[name] = true
   crop_counter = crop_counter + 1
-  local out = ("%s/pdf-view-%d-part-%d.png"):format(vim.fs.dirname(vim.fn.tempname()), s.buf, crop_counter)
+  local out = ("%s/pdf-view-%d-part-%d.%s"):format(
+    vim.fs.dirname(vim.fn.tempname()),
+    s.buf,
+    crop_counter,
+    size and "pnm" or "png"
+  )
   mupdf.crop(s.path, pic.path, part, out, function(err)
     if s.closed or s.picture ~= pic then
       os.remove(out)
       return
     end
-    crops[name] = not err and out or false
+    local result = (not err and out or false) --[[@as string|false]]
+    if result and size then
+      -- encoded once, here: printing it again only reads the file
+      local encoded = out:gsub("%.pnm$", ".six")
+      local ok = pcall(function()
+        local data = sixel.encode_file(out, offset and offset[1], offset and offset[2])
+        local file_out = assert(io.open(encoded, "wb"))
+        file_out:write(data)
+        file_out:close()
+      end)
+      os.remove(out)
+      result = ok and encoded or false
+    end
+    crops[name] = result
     s.dirty = true
     schedule_check()
-  end)
+  end, size)
   return nil
 end
 
---- `refresh()` for iTerm2 images: print the pieces of the picture of `s` that are on screen, each as a PNG of its own,
---- and erase what it left behind elsewhere. They are printed again whenever `s.dirty` says that Neovim drew the
---- window again, which may have written over them.
+--- Command that prints the file `file` of a part (see `cut()`) at the cursor, over `cols` x `rows` cells.
+---@param file string
+---@param cols integer
+---@param rows integer
+---@return string
+local function print_part(file, cols, rows)
+  if terminal.protocol() == "sixel" then
+    local handle = assert(io.open(file, "rb"))
+    local data = handle:read("*a")
+    handle:close()
+    return data
+  end
+  return iterm2.image_file(file, cols, rows)
+end
+
+--- `refresh()` for printed images (iTerm2, sixel): print the pieces of the picture of `s` that are on screen, each as
+--- an image of its own, and erase what it left behind elsewhere. They are printed again whenever `s.dirty` says that
+--- Neovim drew the window again, which may have written over them.
 ---@param s PdfView.Session
 refresh_printed = function(s)
   local pic = s.picture --[[@as PdfView.Picture]]
@@ -643,16 +686,26 @@ refresh_printed = function(s)
   end
 
   local files = {}
+  local pixels = terminal.protocol() == "sixel" and terminal.cell_size() or nil
   for index, piece in ipairs(pieces) do
     local whole = image
       and piece.row == image.row
       and piece.col == image.col
       and piece.rows == image.rows
       and piece.cols == image.cols
-    if whole then
+    if whole and not pixels then
       files[index] = pic.path
     else
-      local file = cut(s, pic, crop(pic, image --[[@as PdfView.Rect]], piece, true))
+      local size, offset
+      if pixels then
+        -- cells are whole pixels; what the terminal reports can include its padding, which makes them a fraction
+        -- larger, and a page that size would reach into the row below
+        local w, h = math.max(1, math.floor(pixels.w)), math.max(1, math.floor(pixels.h))
+        ---@cast image PdfView.Rect
+        size = { piece.cols * w, piece.rows * h }
+        offset = { (piece.col - image.col) * w, (piece.row - image.row) * h }
+      end
+      local file = cut(s, pic, crop(pic, image --[[@as PdfView.Rect]], piece, true), size, offset)
       if file == nil then
         return -- printed once every piece is cut out; until then the old one stays
       end
@@ -682,7 +735,7 @@ refresh_printed = function(s)
     local file = files[index]
     local ok, command = false, nil
     if file then
-      ok, command = pcall(iterm2.image_file, file, piece.cols, piece.rows)
+      ok, command = pcall(print_part, file, piece.cols, piece.rows)
     end
     if ok then
       -- the cursor is saved and restored around each print: Neovim does not know it is moved
@@ -752,7 +805,7 @@ function M.hook()
       local s = shown[buf]
       if not s then
         return false
-      elseif terminal.protocol() == "iterm2" then
+      elseif terminal.printed() then
         return true -- an iTerm2 image is written over only by lines drawn over it (see on_line)
       end
       s.dirty = true -- a clear or a scroll in zellij moves or drops the placement under redrawn text
@@ -775,7 +828,7 @@ function M.hook()
       schedule_check()
     end,
   })
-  if terminal.protocol() == "iterm2" then
+  if terminal.printed() then
     vim.api.nvim_create_autocmd("VimResized", {
       group = augroup,
       desc = "Print PDF pages again after the terminal was resized",
