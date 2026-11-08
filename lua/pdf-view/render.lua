@@ -147,6 +147,7 @@ local function present(s, win, png, info, fit, rows)
   s.slot, s.page, s.count, s.target = slot, info.page, info.count, nil
   s.laid_out = info.layout and { key = table.concat(info.layout, "x"), size = info.layout } or nil
   s.geom = { w = info.width, h = info.height, box = info.content }
+  s.fit = fit
   if fit.cx then
     s.cx, s.cy = fit.cx, fit.cy -- what was reachable, after clamping to the page
   end
@@ -169,8 +170,19 @@ end
 ---@return fun(out: string, cb: fun(err?: string)): PdfView.Job render
 local function plan(s, info, stamp, cols, rows, cell, cx, cy)
   local highlights, highlights_key = nil, ""
+  local colors = match_colors()
   if s.search then
-    highlights, highlights_key = search.highlights(s.search, info.page, match_colors())
+    highlights, highlights_key = search.highlights(s.search, info.page, colors)
+  end
+  local synced = s.synced
+  if synced and synced.page == info.page then
+    -- where a forward search landed, in the colour of the current match
+    local parts = { highlights }
+    for _, rect in ipairs(synced.rects) do
+      parts[#parts + 1] = ("%.2f,%.2f,%.2f,%.2f,%s"):format(rect[1], rect[2], rect[3], rect[4], colors.current)
+    end
+    highlights = table.concat(parts, ";")
+    highlights_key = ("%s:sync%d:%s"):format(highlights_key, synced.id, colors.current)
   end
   local recolor = recolor_spec(s)
 

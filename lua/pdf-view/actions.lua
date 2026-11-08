@@ -6,6 +6,7 @@ local mupdf = require("pdf-view.mupdf")
 local render = require("pdf-view.render")
 local search = require("pdf-view.search")
 local session = require("pdf-view.session")
+local synctex = require("pdf-view.synctex")
 local terminal = require("pdf-view.terminal")
 
 local M = {}
@@ -483,10 +484,247 @@ end
 ---@param s PdfView.Session
 local function clear_search(s)
   cancel_search(s)
-  if s.search then
-    s.search = nil
+  if s.search or s.synced then
+    s.search, s.synced = nil, nil
     show(s)
   end
+end
+
+local next_sync = 0
+
+--- Show where a forward search landed in the viewer `s`: the page of the first box, with the boxes on it highlighted
+--- and, when the page is zoomed or fitted to its width, in the middle of the window. A jump, so `<C-o>` comes back.
+---@param s PdfView.Session
+---@param boxes PdfView.SyncBox[]
+local function show_synced(s, boxes)
+  local page = boxes[1].page
+  local rects = {}
+  for _, box in ipairs(boxes) do
+    if box.page == page then
+      rects[#rects + 1] = box.rect
+    end
+  end
+  mupdf.info(s.path, page, function(err, info)
+    if s.closed then
+      return
+    end
+    if err or not info then
+      return notify("cannot read page " .. page .. ": " .. tostring(err), vim.log.levels.WARN)
+    end
+    record_jump(s)
+    next_sync = next_sync + 1
+    s.synced = { id = next_sync, page = info.page, rects = rects }
+    local first = rects[1]
+    if uses_viewport(s) then
+      s.cy = (first[2] + first[4]) / 2 / info.height
+      local win = window_for(s)
+      if win then
+        local cols, rows = text_area(win)
+        local cell = terminal.cell_size()
+        local view =
+          layout.viewport(info.width, info.height, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, info.content)
+        if view.scroll_x then
+          s.cx = (first[1] + first[3]) / 2 / info.width
+        end
+      end
+    end
+    s.target = info.page
+    show(s, info.page)
+  end)
+end
+
+--- The PDFs a forward search from `file` tries, most likely first: the one vimtex builds, those open in viewers (on
+--- screen first), and the PDF of the same name next to the file.
+---@param file string
+---@return string[]
+local function sync_candidates(file)
+  local candidates, seen = {}, {}
+  local function add(path)
+    if type(path) ~= "string" or path == "" then
+      return
+    end
+    path = vim.fn.fnamemodify(path, ":p")
+    if not seen[path] and vim.fn.filereadable(path) == 1 then
+      seen[path] = true
+      candidates[#candidates + 1] = path
+    end
+  end
+  if vim.fn.exists("b:vimtex") == 1 then -- not `vim.b.vimtex`: its functions do not convert to Lua
+    local ok, out = pcall(vim.api.nvim_eval, "b:vimtex.out()")
+    if ok then
+      add(out)
+    end
+  end
+  local tab = vim.api.nvim_get_current_tabpage()
+  local shown, hidden = {}, {}
+  for _, s in pairs(session.sessions) do
+    local on_screen = false
+    for _, win in ipairs(vim.fn.win_findbuf(s.buf)) do
+      on_screen = on_screen or vim.api.nvim_win_get_tabpage(win) == tab
+    end
+    table.insert(on_screen and shown or hidden, s.path)
+  end
+  table.sort(shown)
+  table.sort(hidden)
+  vim.list_extend(shown, hidden)
+  for _, path in ipairs(shown) do
+    add(path)
+  end
+  add(vim.fn.fnamemodify(file, ":r") .. ".pdf")
+  return candidates
+end
+
+--- Forward search (SyncTeX): show where line `line`, column `col` of the TeX file `file` (the current buffer and
+--- cursor by default) is typeset, in the viewer of `pdf`. Without `pdf`, the PDFs of `sync_candidates()` are tried in
+--- turn. A PDF that is in no window of the current tab opens in a vertical split; the cursor stays in the source.
+---@param opts? { pdf?: string, file?: string, line?: integer, col?: integer }
+function M.forward_search(opts)
+  opts = opts or {}
+  local file = opts.file or vim.api.nvim_buf_get_name(0)
+  if file == "" then
+    return notify("forward search: the buffer has no file", vim.log.levels.WARN)
+  end
+  file = vim.fn.fnamemodify(file, ":p")
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local line, col = opts.line or cursor[1], opts.col or (cursor[2] + 1)
+  local candidates = opts.pdf and { vim.fn.fnamemodify(opts.pdf, ":p") } or sync_candidates(file)
+  if #candidates == 0 then
+    return notify(("forward search: no PDF found for %s"):format(vim.fn.fnamemodify(file, ":~:.")), vim.log.levels.WARN)
+  end
+  local source_win = vim.api.nvim_get_current_win()
+  local last_err
+  local function try(index)
+    local pdf = candidates[index]
+    if not pdf then
+      local where = ("%s:%d"):format(vim.fn.fnamemodify(file, ":t"), line)
+      return notify(
+        last_err and ("forward search: %s"):format(last_err)
+          or ("forward search: %s is not in the SyncTeX data of %s (build with `-synctex=1`)"):format(
+            where,
+            table.concat(
+              vim.tbl_map(function(path)
+                return vim.fn.fnamemodify(path, ":t")
+              end, candidates),
+              ", "
+            )
+          ),
+        vim.log.levels.WARN
+      )
+    end
+    synctex.view(pdf, file, line, col, function(err, boxes)
+      if err or not boxes or #boxes == 0 then
+        last_err = err and err:match("^cannot run") and err or last_err
+        return try(index + 1)
+      end
+      local s
+      for _, candidate in pairs(session.sessions) do
+        if candidate.path == pdf and not candidate.closed then
+          s = candidate
+        end
+      end
+      local tab = vim.api.nvim_get_current_tabpage()
+      local shown = false
+      for _, win in ipairs(s and vim.fn.win_findbuf(s.buf) or {}) do
+        shown = shown or vim.api.nvim_win_get_tabpage(win) == tab
+      end
+      if not shown then
+        -- next to the source, and back to it: the cursor stays where the search started
+        local from = vim.api.nvim_win_is_valid(source_win) and source_win or 0
+        vim.api.nvim_win_call(from, function()
+          vim.cmd("vertical rightbelow split")
+          require("pdf-view.viewer").open(pdf)
+        end)
+        s = session.sessions[vim.fn.bufnr(pdf)]
+      end
+      if s then
+        show_synced(s, boxes)
+      end
+    end)
+  end
+  try(1)
+end
+
+--- The point of the page under the cell at `row`, `col` (0-based, in the window's text area) of the viewer `s`, in
+--- points from the page's top-left corner. Nil off the page.
+---@param s PdfView.Session
+---@param row integer
+---@param col integer
+---@return number? x, number? y
+local function point_at(s, row, col)
+  local fit, geom = s.fit, s.geom
+  if not (fit and geom) then
+    return nil
+  end
+  local cx, cy = col - fit.pad_left + 0.5, row - fit.pad_top + 0.5
+  if cx < 0 or cy < 0 or cx > fit.cols or cy > fit.rows then
+    return nil
+  end
+  if fit.scale then -- a viewport: the cells show its pixels from (x, y) on
+    return (fit.x + cx * fit.width / fit.cols) / fit.scale, (fit.y + cy * fit.height / fit.rows) / fit.scale
+  end
+  return cx / fit.cols * geom.w, cy / fit.rows * geom.h
+end
+
+--- Open `source` at its line: in a window of the current tab that shows it, else in the previous window when that is
+--- not a viewer, else in a vertical split.
+---@param source PdfView.SyncSource
+local function open_source(source)
+  local target
+  local buf = vim.fn.bufnr(source.file)
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if buf ~= -1 and vim.api.nvim_win_get_buf(win) == buf then
+      target = win
+      break
+    end
+  end
+  if not target then
+    local previous = vim.fn.win_getid(vim.fn.winnr("#"))
+    local current = vim.api.nvim_get_current_win()
+    if previous ~= 0 and previous ~= current and not session.sessions[vim.api.nvim_win_get_buf(previous)] then
+      target = previous
+    end
+  end
+  if target then
+    vim.api.nvim_set_current_win(target)
+    if vim.api.nvim_win_get_buf(target) ~= buf then
+      vim.cmd.edit(vim.fn.fnameescape(source.file))
+    end
+  else
+    vim.cmd("vertical leftabove split " .. vim.fn.fnameescape(source.file))
+  end
+  local last = vim.api.nvim_buf_line_count(0)
+  pcall(vim.api.nvim_win_set_cursor, 0, { math.min(source.line, last), math.max(0, source.column - 1) })
+  vim.cmd("normal! zv")
+end
+
+--- Inverse search (SyncTeX): open the TeX source at the line that the point under the mouse was typeset from.
+---@param s PdfView.Session
+---@param lhs string the key that was pressed
+local function inverse_search(s, lhs)
+  local mouse = vim.fn.getmousepos()
+  local over = mouse.winid ~= 0 and session.sessions[vim.api.nvim_win_get_buf(mouse.winid)]
+  if not over then
+    return vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+  end
+  s = over
+  local info = vim.fn.getwininfo(mouse.winid)[1] -- `winrow` counts the winbar, `wincol` the sign and number columns
+  local x, y = point_at(s, mouse.winrow - 1 - info.winbar, mouse.wincol - 1 - info.textoff)
+  if not x then
+    return
+  end
+  local page = s.page
+  synctex.edit(s.path, page, x, y --[[@as number]], function(err, source)
+    if s.closed then
+      return
+    end
+    if err then
+      return notify("inverse search: " .. err, vim.log.levels.WARN)
+    end
+    if not source then
+      return notify(("inverse search: SyncTeX knows no source for this point of page %d"):format(page))
+    end
+    open_source(source)
+  end)
 end
 
 --- Pick one of the document's bookmarks and go to where it leads.
@@ -708,6 +946,7 @@ local ACTION_ORDER = {
   "jump_forward",
   "mark",
   "goto_mark",
+  "inverse_search",
   "recolor",
   "reload",
   "close",
@@ -918,6 +1157,11 @@ ACTIONS.mark = {
 ACTIONS.goto_mark = {
   desc = "'{a-z}: go to a mark; '' to where the latest jump started",
   run = goto_mark,
+}
+
+ACTIONS.inverse_search = {
+  desc = "go to the TeX source of the point under the mouse (SyncTeX)",
+  run = inverse_search,
 }
 
 ACTIONS.recolor = {

@@ -67,6 +67,9 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field cy number centre of the viewport as a fraction of the page height
 ---@field geom? { w: number, h: number, box?: number[] } size in points of the page on screen, and the part of it with
 --- content (`PdfView.PageInfo.content`) once that was read
+---@field fit? PdfView.Fit|PdfView.Viewport how the page on screen maps onto the window's cells
+---@field synced? { id: integer, page: integer, rects: number[][] } where the latest forward search (SyncTeX) landed,
+--- highlighted until `<Esc>` or the file changes
 ---@field gen integer incremented by every render request
 ---@field job? PdfView.Job in-flight mutool process
 ---@field ids integer[] Kitty image ids: a new page goes to one that is not on screen, so a page swap never shows a

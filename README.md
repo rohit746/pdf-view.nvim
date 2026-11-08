@@ -152,6 +152,7 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `<C-o>` `<C-i>` `<Tab>`      | back / forward through the jump list (takes a count)                            |
 | `m{a-z}`                     | mark the page, with its fit, zoom and view                                      |
 | `'{a-z}` `` `{a-z} ``        | go to a mark; `''` goes back to where the latest jump started                   |
+| double-click                 | open the TeX source at the line the point was typeset from; see [SyncTeX](#synctex) |
 | `i`                          | recolour the pages (dark mode), or stop; see [Dark mode](#dark-mode)            |
 | `r`                          | re-render the current page                                                      |
 | `q`                          | close the viewer (never quits Neovim)                                           |
@@ -263,6 +264,32 @@ opened from.
 `m{a-z}` marks where the viewer is: the page, its fit, zoom and the centre of the view. `'{a-z}` or `` `{a-z} `` goes
 back to it, as it was. Marks and the jump list belong to the viewer, and they stay through `:edit`.
 
+### SyncTeX
+
+For a LaTeX document built with SyncTeX on (`latexmk -synctex=1`, which vimtex does by default, `pdflatex
+-synctex=1`, `tectonic --synctex`), the viewer goes from the source to the PDF and back, with the `synctex` tool that
+TeX Live and MiKTeX install:
+
+- `:PdfViewForward` in a `.tex` buffer (forward search) shows where the cursor's line is typeset: the page, with the
+  line highlighted and, on a zoomed or width-fitted page, in the middle of the window. The cursor stays in the
+  source, and a PDF that is in no window opens in a split next to it. The PDF is vimtex's, else one open in a viewer
+  whose SyncTeX data has the file, else the PDF named after the file; `:PdfViewForward {file.pdf}` names it. `<Esc>`
+  in the viewer removes the highlight. It is a jump, so `<C-o>` in the viewer goes back.
+- Double-click a point of a page (inverse search) to open the source at the line it was typeset from: in a window that
+  shows that file, else in the previous window, else in a split.
+
+For a key in TeX buffers, or with vimtex in place of its own viewer:
+
+```lua
+vim.g.vimtex_view_enabled = 0 -- with vimtex: let pdf-view show the PDF
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "tex",
+  callback = function(args)
+    vim.keymap.set("n", "<localleader>lv", "<Cmd>PdfViewForward<CR>", { buffer = args.buf, desc = "Forward search" })
+  end,
+})
+```
+
 ## Configuration
 
 `setup()` is optional. These are the defaults:
@@ -277,6 +304,7 @@ require("pdf-view").setup({
   hide_cursor = true,      -- hide the cursor while a viewer is focused (it would sit on top of the page)
   remember_position = true, -- reopen a PDF at its last page, fit and zoom, also after restarting Neovim
   mutool = "mutool",       -- executable
+  synctex = "synctex",     -- executable, for SyncTeX
   transmission = "auto",   -- "file": the terminal reads the PNG itself; "direct": send the bytes (SSH). auto = SSH-aware
   tmux_passthrough = true, -- run `tmux set -p allow-passthrough on` for this pane
   placement = "auto",      -- "placeholders"; "positioned": at the window's position. auto = positioned in zellij,
@@ -325,6 +353,7 @@ require("pdf-view").setup({
     jump_forward = { "<C-i>", "<Tab>" },
     mark = { "m" },       -- then a to z
     goto_mark = { "'", "`" }, -- then a to z, or ' for the latest jump
+    inverse_search = { "<2-LeftMouse>" }, -- SyncTeX: to the source of the point under the mouse
     recolor = { "i" },
     reload = { "r" },
     close = { "q" },

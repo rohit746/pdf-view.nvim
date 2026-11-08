@@ -99,6 +99,8 @@ between matches accept a count.
   m{a-z}                  mark the page, with its fit, zoom and view
   '{a-z} `{a-z}           go to a mark
   '' ``                   back to where the latest jump started
+  <2-LeftMouse>           open the TeX source at the line the point under
+                          the mouse was typeset from: see |pdf-view-synctex|
   i                       recolour the pages (dark mode), or stop: see
                           |pdf-view-recolor|
   r                       re-render the current page
@@ -181,6 +183,40 @@ black in the text colour of the |hl-Normal| group and white in its background,
 so the page blends in with the colorscheme. Those pages are drawn again on
 |ColorScheme|. Search highlights are recoloured with the page.
 
+                                                            *pdf-view-synctex*
+                                                            *:PdfViewForward*
+For a LaTeX document built with SyncTeX on (`latexmk -synctex=1`, which
+vimtex does by default, `pdflatex -synctex=1`, `tectonic --synctex`), the
+viewer goes from the source to the PDF and back with the `synctex` tool of
+TeX Live and MiKTeX (the `synctex` option names it).
+
+:PdfViewForward [{file}]
+                        Forward search: show where the cursor's line of the
+                        TeX file in the current buffer is typeset. The page
+                        is shown with the line highlighted and, zoomed or
+                        fitted to the width, in the middle of the window. The
+                        cursor stays in the source; a PDF that is in no
+                        window opens in a vertical split. The PDF is {file},
+                        else vimtex's, else one open in a viewer whose
+                        SyncTeX data has the line, else the PDF named after
+                        the TeX file. `<Esc>` in the viewer removes the
+                        highlight, and `<C-o>` there goes back.
+
+Double-click a point of a page (keymap `inverse_search`) for inverse search:
+the source opens at the line the point was typeset from, in a window that
+shows that file, else in the previous window, else in a vertical split.
+
+To use it in place of vimtex's own viewer: >lua
+    vim.g.vimtex_view_enabled = 0
+    vim.api.nvim_create_autocmd("FileType", {
+      pattern = "tex",
+      callback = function(args)
+        vim.keymap.set("n", "<localleader>lv", "<Cmd>PdfViewForward<CR>",
+          { buffer = args.buf })
+      end,
+    })
+<
+
 ==============================================================================
 LUA API                                                      *pdf-view-api*
 
@@ -194,6 +230,11 @@ require("pdf-view").open({path})                     *pdf-view.open()*
 
 require("pdf-view").reload({buf})                    *pdf-view.reload()*
     Re-render the page shown in {buf} (default: current buffer).
+
+require("pdf-view").forward_search({opts})   *pdf-view.forward_search()*
+    Forward search, as |:PdfViewForward|. {opts} may name the `pdf`, and
+    the `file`, `line` and `col` to show in place of the current buffer and
+    the cursor.
 
 require("pdf-view").status({buf})                    *pdf-view.status()*
     Returns "page / pages" for a viewer buffer ("page / pages width x1.25"
@@ -213,6 +254,7 @@ CONFIGURATION                                              *pdf-view-config*
       hide_cursor = true,      -- hide the cursor while a viewer is focused
       remember_position = true, -- reopen at the last page, also after a restart
       mutool = "mutool",
+      synctex = "synctex",     -- for |pdf-view-synctex|
       transmission = "auto",   -- "auto" | "file" | "direct"
       tmux_passthrough = true, -- tmux set -p allow-passthrough on
       placement = "auto",      -- "auto" | "placeholders" | "positioned"

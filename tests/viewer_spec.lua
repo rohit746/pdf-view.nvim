@@ -3893,3 +3893,159 @@ describe("viewer recolouring", function()
     setup()
   end)
 end)
+
+describe("viewer SyncTeX", function()
+  -- a stand-in for `synctex`: it logs its arguments and prints what the test put in `<dir>/synctex-<subcommand>`
+  local fake = dir .. "/synctex"
+  local log = dir .. "/synctex.log"
+  local script = io.open(fake, "w")
+  assert(script)
+  script:write(
+    "#!/bin/sh\n",
+    ('printf "%%s\\n" "$*" >> "%s"\n'):format(log),
+    ('cat "%s/synctex-$1" 2>/dev/null\n'):format(dir)
+  )
+  script:close()
+  vim.uv.fs_chmod(fake, 493) -- 0755
+
+  local function answer(subcommand, lines)
+    local file = assert(io.open(dir .. "/synctex-" .. subcommand, "w"))
+    file:write(table.concat(lines, "\n"), "\n")
+    file:close()
+  end
+
+  local function logged()
+    local text = slurp(log) or ""
+    return vim.split(vim.trim(text), "\n", { plain = true, trimempty = true })
+  end
+
+  --- A PDF and the TeX file it was "built" from, next to it.
+  local function project(name)
+    local pdf = make(name, pages(3, { color = { 1, 1, 1 } }))
+    local tex = dir .. "/" .. name .. ".tex"
+    local lines = {}
+    for index = 1, 20 do
+      lines[index] = "line " .. index
+    end
+    vim.fn.writefile(lines, tex)
+    return vim.uv.fs_realpath(pdf), vim.uv.fs_realpath(tex)
+  end
+
+  local function session_of(path)
+    for _, s in pairs(viewer.sessions) do
+      if s.path == path then
+        return s
+      end
+    end
+  end
+
+  it(
+    "forward search shows where the cursor's line is typeset, in a split, and leaves the cursor in the source",
+    function()
+      setup({ synctex = fake })
+      reset()
+      os.remove(log)
+      local pdf, tex = project("sync-forward")
+      answer("view", {
+        "SyncTeX result begin",
+        "Output:" .. pdf,
+        "Page:2",
+        "x:72",
+        "y:400",
+        "h:72",
+        "v:400",
+        "W:300",
+        "H:40",
+        "SyncTeX result end",
+      })
+      vim.cmd.edit(vim.fn.fnameescape(tex))
+      local source = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_cursor(0, { 12, 3 })
+      vim.cmd("PdfViewForward")
+      local s
+      wait_for(function()
+        s = session_of(pdf)
+        return s ~= nil and s.synced ~= nil and s.page == 2 and s.job == nil and s.target == nil
+      end, "the viewer on page 2")
+      eq(("view -i 12:4:%s -o %s"):format(tex, pdf), logged()[1])
+      eq(source, vim.api.nvim_get_current_win(), "the cursor stays in the source")
+      eq(2, #vim.api.nvim_tabpage_list_wins(0))
+      eq({ { 72, 360, 372, 400 } }, s.synced.rects)
+      -- the typeset line is highlighted like the current search match
+      eq("orange", classify(colour_at({ rects = s.synced.rects, width = 612, height = 792 })))
+
+      -- a second search reuses the viewer on screen
+      local first_id = s.synced.id
+      vim.cmd("PdfViewForward")
+      wait_for(function()
+        return s.synced.id > first_id and s.job == nil and s.target == nil
+      end, "the second search")
+      eq(2, #vim.api.nvim_tabpage_list_wins(0))
+
+      -- <Esc> in the viewer removes the highlight
+      vim.api.nvim_set_current_win(vim.fn.bufwinid(s.buf))
+      press(vim.keycode("<Esc>"))
+      settle(s)
+      eq(nil, s.synced)
+      eq("white", classify(colour_at({ rects = { { 72, 360, 372, 400 } }, width = 612, height = 792 })))
+      setup()
+    end
+  )
+
+  it("forward search says so when the line is not in the SyncTeX data", function()
+    setup({ synctex = fake })
+    reset()
+    local _, tex = project("sync-missing")
+    answer("view", { "SyncTeX Warning: No tag for " .. tex })
+    vim.cmd.edit(vim.fn.fnameescape(tex))
+    local messages = {}
+    with_stub(vim, "notify", function(message)
+      messages[#messages + 1] = message
+    end, function()
+      vim.cmd("PdfViewForward")
+      wait_for(function()
+        return #messages > 0
+      end, "the notification")
+    end)
+    truthy(messages[1]:find("sync-missing.tex:1 is not in the SyncTeX data of sync-missing.pdf", 1, true), messages[1])
+    eq(1, #vim.api.nvim_tabpage_list_wins(0), "no viewer was opened")
+    setup()
+  end)
+
+  it("inverse search opens the source at the line the point under the mouse was typeset from", function()
+    setup({ synctex = fake })
+    reset()
+    os.remove(log)
+    local pdf, tex = project("sync-inverse")
+    answer("edit", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Input:./sync-inverse.tex", -- relative to the PDF's directory
+      "Line:7",
+      "Column:-1",
+      "SyncTeX result end",
+    })
+    local s = open(pdf)
+    press("2G")
+    on_page(s, 2)
+    local win = vim.api.nvim_get_current_win()
+    local fit = s.fit
+    local row, col = fit.pad_top + math.floor(fit.rows / 2), fit.pad_left + math.floor(fit.cols / 2)
+    with_stub(vim.fn, "getmousepos", function()
+      -- the winbar is the window's first row
+      return { winid = win, winrow = row + 2, wincol = col + 1 }
+    end, function()
+      press(vim.keycode("<2-LeftMouse>"))
+      wait_for(function()
+        return vim.api.nvim_buf_get_name(0) == tex
+      end, "the source")
+    end)
+    eq(7, vim.api.nvim_win_get_cursor(0)[1])
+    eq(2, #vim.api.nvim_tabpage_list_wins(0), "the source opens in a split next to the viewer")
+    local page, x, y = logged()[1]:match("^edit %-o (%d+):([%d.]+):([%d.]+):" .. vim.pesc(pdf) .. "$")
+    eq("2", page)
+    harness.near(306, tonumber(x), 612 / fit.cols, "x")
+    harness.near(396, tonumber(y), 792 / fit.rows, "y")
+    setup()
+  end)
+end)
