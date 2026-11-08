@@ -286,12 +286,19 @@ function M.attach(buf)
   return s
 end
 
---- Bring the viewers that are open in line with `config.options` after `setup()`: their keys and live reload.
+--- Bring the viewers that are open in line with `config.options` after `setup()`: their keys, live reload, winbar
+--- and colours.
 function M.apply_config()
   for _, s in pairs(sessions) do
     if not s.closed then
       set_keymaps(s)
       start_watcher(s)
+      if not config.options.winbar then -- the winbar set while it was on would stay, and stop following the page
+        for _, win in ipairs(vim.fn.win_findbuf(s.buf)) do
+          vim.api.nvim_set_option_value("winbar", "", { scope = "local", win = win })
+        end
+      end
+      show(s) -- a new `recolor` (or `highlight` colours) is part of the render cache key, so the page is drawn again
     end
   end
 end
