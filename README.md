@@ -379,7 +379,10 @@ asked whether it has Kitty graphics, and pages are shown if it answers.
 
 iTerm2 and VS Code's terminal have no Kitty graphics, but they draw iTerm2 inline images (OSC 1337). They are told
 apart by `$TERM_PROGRAM` (iTerm2 also by `$LC_TERMINAL`, which ssh passes on), and inside tmux by the name the terminal
-gave tmux. VS Code draws images only with `"terminal.integrated.enableImages": true` in its settings.
+gave tmux. VS Code draws images only with `"terminal.integrated.enableImages": true` in its settings and the WebGL
+renderer (`terminal.integrated.gpuAcceleration` not `"off"`). With Neovim 0.12 VS Code is asked whether it shows them
+(its device attributes list sixel graphics when it does), and when it does not, the viewer says how to turn them on
+and shows the text of the page instead of a blank window.
 
 The page is printed into the cells at its window's position, like positioned placements, but such an image has no id:
 it cannot be moved or taken away, and it goes when its cells are written over. So:

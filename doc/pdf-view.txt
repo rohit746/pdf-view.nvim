@@ -257,7 +257,10 @@ iTerm2 and VS Code's terminal have no Kitty graphics, but they draw iTerm2
 inline images (OSC 1337). They are recognised by `$TERM_PROGRAM` (iTerm2
 also by `$LC_TERMINAL`, which ssh passes on), and inside tmux by the name the
 terminal gave tmux. VS Code needs `"terminal.integrated.enableImages": true`
-in its settings.
+in its settings and the WebGL renderer (`terminal.integrated.gpuAcceleration`
+not "off"). With Neovim 0.12 VS Code is asked whether it shows images, and
+when it does not, the viewer says how to turn them on and shows the text of
+the page instead of a blank window.
 
 Such an image is printed into the cells at the window's position, and goes
 when they are written over: Neovim drawing the window, a message that

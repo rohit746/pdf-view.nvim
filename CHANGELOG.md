@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- In VS Code without `"terminal.integrated.enableImages": true`, or without the WebGL renderer that VS Code draws
+  images with, a PDF opened to a blank window. VS Code is now asked whether it shows images (its device attributes
+  list sixel graphics when it does, Neovim 0.12), and when it does not, the viewer says how to turn them on and shows
+  the text of the page. `:checkhealth pdf-view` reports it too.
 - A remembered position saved before `max_zoom` was lowered, or a hand-edited `positions.json`, opened the PDF zoomed
   past what `+` allows, or with its centre off the page. A restored zoom is now kept within `1..max_zoom` and its
   centre within the page.

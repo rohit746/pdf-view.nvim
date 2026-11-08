@@ -449,15 +449,78 @@ describe("terminal.check", function()
     end)
   end)
 
-  it("accepts iTerm2 and VS Code without asking anything", function()
+  it("accepts iTerm2 without asking anything", function()
     with_terminal(function(written)
-      for _, program in ipairs({ "iTerm.app", "vscode" }) do
-        with_env({ TERM = "xterm-256color", TERM_PROGRAM = program }, function()
-          eq(true, (terminal.check()))
+      with_env({ TERM = "xterm-256color", TERM_PROGRAM = "iTerm.app" }, function()
+        eq(true, (terminal.check()))
+        terminal.probe_file(fixture.tmpdir())
+        eq(nil, terminal.probe, "no question about files: the image travels in the sequence")
+      end)
+      eq({}, written)
+    end)
+  end)
+
+  it("asks VS Code whether it shows images, which its device attributes say", function()
+    for _, case in ipairs({
+      { ESC .. "[?62;4;9;22c", true }, -- the image addon is loaded
+      { ESC .. "[?1;2c", false }, -- enableImages is off, or the WebGL renderer is not in use
+    }) do
+      with_terminal(function(written)
+        with_env({ TERM = "xterm-256color", TERM_PROGRAM = "vscode" }, function()
+          if vim.fn.has("nvim-0.12") == 0 then
+            eq(true, (terminal.check()), "Neovim 0.11 cannot read the answer")
+            eq({}, written)
+            return
+          end
+          eq(nil, (terminal.check()), "it is asked first")
+          local done = false
+          terminal.ask(function()
+            done = true
+          end)
+          eq({ ESC .. "[c" }, written)
+          reply(case[1])
+          harness.wait_for(function()
+            return done
+          end, "the answer")
+          eq("iterm2", terminal.protocol(), "still iTerm2 images, whatever it says about sixel")
+          local ok, reason = terminal.check()
+          eq(case[2], ok, case[1])
+          if not ok then
+            truthy(reason:find('"terminal.integrated.enableImages": true', 1, true), reason)
+            truthy(reason:find("gpuAcceleration", 1, true), reason)
+          end
           terminal.probe_file(fixture.tmpdir())
           eq(nil, terminal.probe, "no question about files: the image travels in the sequence")
+          eq(1, #written, "asked once")
         end)
-      end
+      end)
+    end
+  end)
+
+  it("takes VS Code that does not answer, or inside tmux, at its name", function()
+    if vim.fn.has("nvim-0.12") == 0 then
+      return
+    end
+    with_terminal(function(written)
+      with_env({ TERM = "xterm-256color", TERM_PROGRAM = "vscode" }, function()
+        local done = false
+        terminal.ask(function()
+          done = true
+        end)
+        harness.wait_for(function()
+          return done
+        end, "the question to time out")
+        eq(true, (terminal.check()))
+      end)
+      eq(1, #written)
+    end)
+    with_terminal(function(written)
+      with_env({ TERM = "tmux-256color", TERM_PROGRAM = "tmux" }, function()
+        in_tmux("vscode xterm-256color", function()
+          eq("vscode", terminal.detect().name)
+          eq(true, (terminal.check()), "tmux answers DA1 itself")
+        end)
+      end)
       eq({}, written)
     end)
   end)

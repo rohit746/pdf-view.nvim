@@ -40,6 +40,19 @@ describe("health", function()
     config.setup()
   end)
 
+  it("says how to turn on VS Code's images when it cannot ask whether they are on", function()
+    config.setup()
+    local saved = { program = vim.env.TERM_PROGRAM, tmux = vim.env.TMUX, zellij = vim.env.ZELLIJ }
+    vim.env.TERM_PROGRAM, vim.env.TMUX, vim.env.ZELLIJ = "vscode", nil, nil
+    terminal.forget()
+    local ok, report = pcall(checkhealth)
+    vim.env.TERM_PROGRAM, vim.env.TMUX, vim.env.ZELLIJ = saved.program, saved.tmux, saved.zellij
+    terminal.forget()
+    assert(ok, report)
+    truthy(report:find("VS Code, with iTerm2 inline images (OSC 1337)", 1, true), report)
+    truthy(report:find('"terminal.integrated.enableImages": true', 1, true), report)
+  end)
+
   it("reports sixel, which is drawn pixel for pixel", function()
     config.setup({ protocol = "sixel" })
     local report = checkhealth()
