@@ -241,6 +241,36 @@ done
     eq(false, errors.third)
   end)
 
+  it("fails a request the worker cannot read, and goes on with the next one", function()
+    -- the real worker, sent the first request with its JSON broken, so that it answers with id 0
+    local mutool = vim.fn.exepath("mutool")
+    local fake = dir .. "/garbling-mutool"
+    local file = assert(io.open(fake, "w"))
+    file:write(([[#!/bin/sh
+awk 'NR == 1 { sub(/^:/, ":x") } { print; fflush() }' | exec '%s' "$@"
+]]):format(mutool))
+    file:close()
+    vim.uv.fs_chmod(fake, 493) -- 0755
+    config.setup({ mutool = fake })
+    local garbled = dir .. "/garbled.pdf"
+    fixture.write(garbled, { { w = 100, h = 100 } })
+    local results = {}
+    mupdf.info(garbled, 1, function(err, info)
+      results.first = { err, info }
+    end)
+    mupdf.info(garbled, 1, function(err, info)
+      results.second = { err, info and info.count }
+    end)
+    local ok = vim.wait(5000, function()
+      return results.first ~= nil and results.second ~= nil
+    end, 10)
+    mupdf.release(garbled)
+    config.setup()
+    truthy(ok, "both requests answered: " .. vim.inspect(results))
+    truthy(results.first[1] and results.first[2] == nil, "the unreadable request fails: " .. vim.inspect(results))
+    eq({ nil, 1 }, results.second, "the next request is answered by the same worker")
+  end)
+
   it("starts over after killing a request that has been in progress too long", function()
     local errors = {}
     local function record(name)

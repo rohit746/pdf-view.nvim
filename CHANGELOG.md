@@ -9,6 +9,9 @@ All notable changes to this project are documented here. The format follows
 
 - Every page turn and scroll step set about 15 window options again, firing `OptionSet` for other plugins
   (statuslines and the like) each time. Only options whose value differs are set now.
+- A request that the worker drawing a document could not read was never answered, and every later request for the
+  document waited behind it until the document was closed. It now fails with the worker's message, and the next
+  request goes ahead.
 
 ## [0.5.1] - 2026-11-08
 

@@ -170,7 +170,8 @@ local pump
 local function on_answer(w, process, line)
   local request = process.current
   local id, status, rest = line:match("^@(%d+) (%a+) ?(.*)$")
-  if process.gone or not request or tonumber(id) ~= request.id then
+  -- id 0 answers a request the worker could not read; it answers in order, so that is the current one
+  if process.gone or not request or (tonumber(id) ~= request.id and tonumber(id) ~= 0) then
     return
   end
   process.current = nil
