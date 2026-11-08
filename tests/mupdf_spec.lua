@@ -480,6 +480,31 @@ done
         fixture.pixels(out, { { 0, 0 }, { 6, 14 }, { 7, 0 }, { 19, 14 } })
       )
     end)
+
+    it("cuts a rectangle out stretched to a size, as a PNM", function()
+      local page = clip(red, 1, 1, 600, 0, 40, 30)
+      local out = dir .. "/crop.pnm"
+      local err = await(function(cb)
+        mupdf.crop(red, page, { x = 5, y = 10, w = 20, h = 15 }, out, cb, { 40, 45 })
+      end)
+      eq(nil, err)
+      local file = assert(io.open(out, "rb"))
+      local data = file:read("*a")
+      file:close()
+      local width, height, offset = require("pdf-view.sixel").parse_pnm(data)
+      eq({ 40, 45 }, { width, height })
+      local function pixel(x, y)
+        local i = offset + (y * width + x) * 3
+        return { data:byte(i, i + 2) }
+      end
+      -- the red part is 7 columns of 20, so 14 of 40 once stretched
+      eq({ { 255, 0, 0 }, { 255, 0, 0 }, { 255, 255, 255 }, { 255, 255, 255 } }, {
+        pixel(0, 0),
+        pixel(12, 44),
+        pixel(16, 0),
+        pixel(39, 44),
+      })
+    end)
   end)
 
   describe("search", function()

@@ -8,11 +8,13 @@ rendered with MuPDF's `mutool` and drawn with the Kitty graphics protocol
 (Unicode placeholders), so the page follows splits, tabs and resizes. In
 WezTerm, Konsole and zellij the page is placed at its window's position
 instead, see |pdf-view-positioned| and |pdf-view-zellij|. iTerm2 and VS Code
-get iTerm2 inline images, see |pdf-view-iterm2|.
+get iTerm2 inline images, see |pdf-view-iterm2|. foot, Windows Terminal,
+xterm, Contour and mlterm get sixel, see |pdf-view-sixel|. Elsewhere the
+viewer shows the text of the page, see |pdf-view-text-only|.
 
 Requirements: Neovim 0.11+, 'termguicolors', `mutool` (with JavaScript), and
 kitty or Ghostty (optionally inside tmux, or zellij 0.45+), WezTerm, Konsole,
-iTerm2 or VS Code. Run `:checkhealth pdf-view`.
+iTerm2, VS Code, or a terminal with sixel. Run `:checkhealth pdf-view`.
 
 ==============================================================================
 USAGE                                                      *pdf-view-usage*
@@ -209,7 +211,7 @@ CONFIGURATION                                              *pdf-view-config*
       transmission = "auto",   -- "auto" | "file" | "direct"
       tmux_passthrough = true, -- tmux set -p allow-passthrough on
       placement = "auto",      -- "auto" | "placeholders" | "positioned"
-      protocol = "auto",       -- "auto" | "kitty" | "iterm2"
+      protocol = "auto",       -- "auto" | "kitty" | "iterm2" | "sixel"
       force = false,           -- skip terminal detection
       max_pixels = 4096,       -- cap for either side of a fitted page
       zoom_step = 1.25,        -- factor of one zoom step
@@ -271,6 +273,33 @@ whose PNG is over about 750 KB stays blank unless the buffer is raised with
 
 `protocol = "iterm2"` uses these images in another terminal that draws them.
 WezTerm and Konsole draw them too, but keep Kitty graphics by default.
+
+==============================================================================
+SIXEL                                                       *pdf-view-sixel*
+
+foot, Windows Terminal (1.22+), xterm, Contour and mlterm draw sixel images.
+They are recognised by `$TERM`, `$TERMINAL_NAME`, `$MLTERM`, `$WT_SESSION` and
+`$XTERM_VERSION`, and inside tmux by the name the terminal gave tmux. On
+Neovim 0.12 a terminal that is not recognised is asked for its device
+attributes (DA1), and gets sixel when it lists it. 'termguicolors' is not
+needed.
+
+A sixel image is printed and kept in step with the screen like an iTerm2
+image (|pdf-view-iterm2|). It is drawn pixel for pixel, so every part of the
+page is cut out by mutool at its size on screen and encoded once, in Lua,
+with a fixed palette. The cell size must be right: where the terminal does
+not report it, set `cell_size`. xterm draws sixel only as a VT340
+(`xterm -ti vt340`, or `XTerm*decTerminalID: vt340`). Sixel is larger than a
+PNG; inside tmux, raise tmux's input buffer as for iTerm2 images.
+
+`protocol = "sixel"` uses sixel in another terminal. WezTerm and Konsole
+draw it too, but keep Kitty graphics by default.
+
+==============================================================================
+TERMINALS WITHOUT IMAGES                                *pdf-view-text-only*
+
+In a terminal that can show no images, the viewer says why at the top of the
+window and shows the text of the page under it. The page keys turn the pages.
 
 ==============================================================================
 ZELLIJ                                                     *pdf-view-zellij*

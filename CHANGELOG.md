@@ -19,6 +19,13 @@ All notable changes to this project are documented here. The format follows
   printed at its window's position, in parts cut out by mutool around floats and the popup menu, and printed again
   after Neovim draws over it or a message scrolls the screen; what it leaves behind is erased. The new `protocol`
   option (`"auto"`, `"kitty"` or `"iterm2"`) chooses the image protocol by hand.
+- foot, Windows Terminal, xterm (as a VT340), Contour and mlterm show pages as sixel images, which they are recognised
+  by (also inside tmux); a terminal that is not recognised gets sixel when it lists it in its device attributes (DA1,
+  read on Neovim 0.12). mutool cuts each part of the page out at its size on screen, and the plugin encodes it in Lua,
+  so no other program is needed. The page is printed and kept in step with the screen as iTerm2 images are.
+  `protocol = "sixel"` chooses it by hand. An xterm that is not a VT340 gets a message saying how to make it one.
+- A terminal that can show no images now shows the text of the page under the reason, and the page keys turn the
+  pages, instead of only the reason.
 
 ### Fixed
 

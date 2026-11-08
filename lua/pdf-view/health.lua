@@ -120,6 +120,9 @@ local function check_transmission()
   if terminal.protocol() == "iterm2" then
     vim.health.info("image transmission: bytes (an iTerm2 inline image carries its PNG every time it is printed)")
     return
+  elseif terminal.protocol() == "sixel" then
+    vim.health.info("image transmission: bytes (a sixel image carries its pixels every time it is printed)")
+    return
   end
   local mode, probe = terminal.transmission(), terminal.probe
   local blank = 'If pages stay blank, set `transmission = "direct"` in setup().'
@@ -192,23 +195,71 @@ local function check_kitty_terminal(detected, positioned)
       {
         "Use kitty or Ghostty (directly or inside tmux or zellij), or WezTerm or Konsole: they have Kitty graphics.",
         'Or iTerm2 or VS Code, with iTerm2 inline images. Another terminal with them: `protocol = "iterm2"`.',
+        "Or foot, Windows Terminal, xterm (as a VT340), Contour or mlterm, with sixel; another terminal that lists",
+        'sixel in its device attributes gets it too. Another terminal with sixel: `protocol = "sixel"`.',
         'Another terminal with Kitty graphics can be tried with `placement = "positioned"`, or `force = true`.',
       }
     )
   end
 end
 
--- how the terminals that get iTerm2 inline images are named in the report
-local IMAGE_TERMINALS = { iterm2 = "iTerm2", vscode = "VS Code", wezterm = "WezTerm", konsole = "Konsole" }
+-- how the terminals that get iTerm2 inline images or sixel are named in the report
+local IMAGE_TERMINALS = {
+  iterm2 = "iTerm2",
+  vscode = "VS Code",
+  wezterm = "WezTerm",
+  konsole = "Konsole",
+  foot = "foot",
+  xterm = "xterm",
+  ["windows-terminal"] = "Windows Terminal",
+  contour = "Contour",
+  mlterm = "mlterm",
+}
+
+--- What is known of a terminal for sixel: whether it lists sixel graphics in its device attributes.
+---@param name string
+local function check_sixel_terminal(name)
+  local asked = false
+  terminal.ask_sixel(function()
+    asked = true
+  end)
+  vim.wait(2000, function()
+    return asked
+  end, 10)
+  local answer = terminal.sixel()
+  if answer then
+    vim.health.ok(("terminal: %s, with sixel (it lists sixel graphics in its device attributes)"):format(name))
+  elseif answer == nil then
+    vim.health.info(("terminal: %s, with sixel (it cannot be asked whether it draws sixel here)"):format(name))
+  elseif terminal.detect().name == "xterm" and not terminal.in_tmux() then
+    vim.health.error("terminal: xterm, but not as a VT340, so it draws no sixel images", {
+      "Start it with `xterm -ti vt340`, or set `XTerm*decTerminalID: vt340` in ~/.Xresources.",
+    })
+  else
+    vim.health.error(("terminal: %s, but it does not list sixel graphics in its device attributes"):format(name))
+  end
+end
 
 local function check_terminal()
   local detected = terminal.detect()
   local positioned = terminal.placement() == "positioned"
-  local printed = terminal.protocol() == "iterm2"
+  local printed = terminal.printed()
   if config.options.force then
     vim.health.warn("`force = true`: terminal detection is skipped")
   end
-  if printed then
+  if terminal.protocol() == "sixel" then
+    local name = IMAGE_TERMINALS[detected.name] or detected.name or ("`" .. (detected.term or "") .. "`")
+    if config.options.force then
+      vim.health.ok(("terminal: %s, with sixel"):format(name))
+    else
+      check_sixel_terminal(name)
+    end
+    if detected.name == "konsole" then
+      vim.health.warn("Konsole draws sixel images over the row below them", {
+        'Remove `protocol = "sixel"`: Konsole shows pages better with Kitty graphics.',
+      })
+    end
+  elseif printed then
     local name = IMAGE_TERMINALS[detected.name] or detected.name or ("`" .. (detected.term or "") .. "`")
     vim.health.ok(("terminal: %s, with iTerm2 inline images (OSC 1337)"):format(name))
     if detected.name == "vscode" then
@@ -255,17 +306,19 @@ local function check_terminal()
   end
 
   if terminal.in_tmux() and printed then
-    -- an inline image passes through tmux in one piece, which tmux drops when it is over its input buffer
+    -- an inline or sixel image passes through tmux in one piece, which tmux drops when it is over its input buffer
     local size = tonumber(
       vim.trim(
         vim.system({ "tmux", "show-options", "-sv", "input-buffer-size" }, { text = true }):wait(1000).stdout or ""
       )
     ) or 1048576
     if size < 4194304 then
+      local limit = terminal.protocol() == "sixel" and ("whose sixel is over %d KiB"):format(math.floor(size / 1024))
+        or ("whose PNG is over %d KiB"):format(math.floor(size * 3 / 4 / 1024))
       vim.health.info(
-        ("tmux drops an image over its input buffer (%d KiB), so a page whose PNG is over %d KiB stays blank. "):format(
+        ("tmux drops an image over its input buffer (%d KiB), so a page %s stays blank. "):format(
           math.floor(size / 1024),
-          math.floor(size * 3 / 4 / 1024)
+          limit
         ) .. "If one does, add `set -s input-buffer-size 4194304` to tmux.conf (tmux 3.6 has it)."
       )
     end
@@ -310,7 +363,12 @@ local function check_terminal()
   end
 
   local cell = terminal.cell_size()
-  if cell.source == "fallback" then
+  if cell.source == "fallback" and terminal.protocol() == "sixel" then
+    vim.health.error(("the terminal did not report its pixel size; assuming %dx%d px cells"):format(cell.w, cell.h), {
+      "A sixel image is drawn pixel for pixel, so pages come out the wrong size.",
+      "Set `cell_size = { width, height }` in setup() to the size of a cell in pixels.",
+    })
+  elseif cell.source == "fallback" then
     vim.health.warn(("the terminal did not report its pixel size; assuming %dx%d px cells"):format(cell.w, cell.h), {
       "Pages are rendered at this guessed resolution. Set `cell_size = { width, height }` in setup() for sharper output.",
     })

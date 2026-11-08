@@ -2,6 +2,8 @@ local config = require("pdf-view.config")
 
 local M = {}
 
+local ESC = "\27"
+
 -- Only the aspect ratio matters when fitting; this is the fallback when the terminal does not report pixels.
 local FALLBACK_CELL = { w = 16, h = 32 }
 
@@ -17,27 +19,47 @@ function M.in_zellij()
   return (vim.env.ZELLIJ or "") ~= ""
 end
 
---- The image protocol pages are sent with: Kitty graphics, or iTerm2 inline images (OSC 1337) for the terminals
---- that have no Kitty graphics but draw those (iTerm2, VS Code).
----@return "kitty"|"iterm2"
+-- the terminals that draw sixel images and no Kitty graphics
+local SIXEL = { foot = true, xterm = true, ["windows-terminal"] = true, contour = true, mlterm = true }
+
+---@type boolean? whether the terminal's DA1 reply lists sixel graphics, once it has been asked (see `ask_sixel()`)
+local da1_sixel
+-- whether it has been asked, answered or not
+local da1_asked = false
+
+--- The image protocol pages are sent with: Kitty graphics, iTerm2 inline images (OSC 1337) for the terminals that
+--- have no Kitty graphics but draw those (iTerm2, VS Code), or sixel for the ones that draw that (foot, Windows
+--- Terminal, xterm, Contour, mlterm, and a terminal that is not recognised but says it has sixel graphics).
+---@return "kitty"|"iterm2"|"sixel"
 function M.protocol()
   local protocol = config.options.protocol
   if protocol ~= "auto" then
-    return protocol --[[@as "kitty"|"iterm2"]]
+    return protocol --[[@as "kitty"|"iterm2"|"sixel"]]
   end
   if M.in_zellij() then
     return "kitty" -- zellij draws Kitty graphics itself, whatever the terminal around it draws
   end
   local name = M.detect().name
-  return (name == "iterm2" or name == "vscode") and "iterm2" or "kitty"
+  if name == "iterm2" or name == "vscode" then
+    return "iterm2"
+  elseif SIXEL[name] or (name == nil and da1_sixel) then
+    return "sixel"
+  end
+  return "kitty"
+end
+
+--- Whether pages are printed into the cells (iTerm2 inline images, sixel) rather than placed by id (Kitty graphics).
+---@return boolean
+function M.printed()
+  return M.protocol() ~= "kitty"
 end
 
 --- How pages are put on screen: as Unicode placeholder cells, or as placements at the screen position of the window.
 --- zellij and the terminals that have Kitty graphics but no Unicode placeholders (WezTerm, Konsole) get placements,
---- and so do iTerm2 inline images, which are printed at the window's position.
+--- and so do iTerm2 inline images and sixel images, which are printed at the window's position.
 ---@return "placeholders"|"positioned"
 function M.placement()
-  if M.protocol() == "iterm2" then
+  if M.printed() then
     return "positioned"
   end
   local mode = config.options.placement
@@ -127,7 +149,8 @@ local detected
 local pane_offset
 
 -- the terminals pdf-view recognises, as { what their names contain, name }: the first four with the Kitty graphics
--- protocol, iTerm2 and VS Code with iTerm2 inline images (iTerm2 sets $TERM_PROGRAM to "iTerm.app")
+-- protocol, iTerm2 and VS Code with iTerm2 inline images (iTerm2 sets $TERM_PROGRAM to "iTerm.app"), the rest with
+-- sixel ("XTerm(390)" is the name xterm gives tmux; xterm's $TERM is everyone's)
 local KNOWN = {
   { "kitty", "kitty" },
   { "ghostty", "ghostty" },
@@ -135,6 +158,10 @@ local KNOWN = {
   { "konsole", "konsole" },
   { "iterm", "iterm2" },
   { "vscode", "vscode" },
+  { "foot", "foot" },
+  { "contour", "contour" },
+  { "mlterm", "mlterm" },
+  { "xterm(", "xterm" },
 }
 -- whether they draw Unicode placeholders
 local PLACEHOLDERS = {
@@ -144,10 +171,17 @@ local PLACEHOLDERS = {
   konsole = false,
   iterm2 = false,
   vscode = false,
+  foot = false,
+  xterm = false,
+  ["windows-terminal"] = false,
+  contour = false,
+  mlterm = false,
 }
 
+---@alias PdfView.TerminalName "kitty"|"ghostty"|"wezterm"|"konsole"|"iterm2"|"vscode"|"foot"|"xterm"|"windows-terminal"|"contour"|"mlterm"
+
 ---@class PdfView.Terminal
----@field name? "kitty"|"ghostty"|"wezterm"|"konsole"|"iterm2"|"vscode" nil when the terminal is not recognised
+---@field name? PdfView.TerminalName nil when the terminal is not recognised
 ---@field term? string $TERM_PROGRAM or $TERM, to name it in messages
 ---@field placeholders? boolean whether it draws Unicode placeholders; nil when it is not recognised
 
@@ -176,8 +210,8 @@ function M.detect()
   end
 
   -- zellij passes the outer terminal's $TERM, $TERM_PROGRAM and the variables below on to its panes, so the checks
-  -- see through it. WezTerm, Konsole, iTerm2 and VS Code leave $TERM at xterm-256color; they are told by the
-  -- variables they set. iTerm2 also sets $LC_TERMINAL, which ssh passes on to the remote host.
+  -- see through it. WezTerm, Konsole, iTerm2, VS Code, Windows Terminal and xterm leave $TERM at xterm-256color;
+  -- they are told by the variables they set. iTerm2 also sets $LC_TERMINAL, which ssh passes on to the remote host.
   local name
   if M.in_tmux() then
     -- inside tmux $TERM says nothing about the outer terminal, but the attached client knows: its $TERM, and the
@@ -192,6 +226,10 @@ function M.detect()
     or (set("WEZTERM_EXECUTABLE") and "wezterm")
     or (set("KONSOLE_VERSION") and "konsole")
     or classify(env.LC_TERMINAL)
+    or classify(env.TERMINAL_NAME) -- Contour
+    or (set("MLTERM") and "mlterm")
+    or (set("WT_SESSION") and "windows-terminal")
+    or (set("XTERM_VERSION") and "xterm")
     or nil
 
   detected = { name = name, term = program ~= "" and program or term, placeholders = PLACEHOLDERS[name] }
@@ -282,27 +320,180 @@ function M.ask_graphics(callback)
   kitty.send(kitty.sequence({ a = "q", f = 100, t = "d", i = QUERY_ID }, PROBE_PNG))
 end
 
+---@type fun()[]? callbacks waiting for the DA1 reply while the question is out
+local waiting_da1
+-- a terminal that has not answered DA1 by then is not going to: every terminal answers it at once
+local DA1_TIMEOUT = 1000
+
+--- Whether the terminal said it draws sixel images: nil until it has been asked (see `ask_sixel()`), and when it
+--- cannot be asked or did not answer.
+---@return boolean?
+function M.sixel()
+  return da1_sixel
+end
+
+--- Whether `ask_sixel()` can find out whether the terminal draws sixel images: by asking it, or from tmux.
+---@return boolean
+function M.sixel_askable()
+  return M.in_tmux() or can_ask()
+end
+
+--- The attributes of a DA1 reply (`CSI ? 65 ; 4 ; 6 c`), or nil when `sequence` is not one.
+---@param sequence string
+---@return integer[]?
+function M.da1_attributes(sequence)
+  local list = sequence:match("^\27%[%?([%d;]*)c$")
+  if not list then
+    return nil
+  end
+  local attributes = {}
+  for number in list:gmatch("%d+") do
+    attributes[#attributes + 1] = tonumber(number)
+  end
+  return attributes
+end
+
+--- Ask the terminal, once, whether it draws sixel images: the primary device attributes (DA1) that every terminal
+--- answers list 4 when it does. Inside tmux, which answers DA1 for itself, the features tmux found in the attached
+--- terminal are read instead. `callback` runs once the answer is in, at once when it is known already or the terminal
+--- cannot be asked.
+---@param callback fun()
+function M.ask_sixel(callback)
+  if da1_asked or not M.sixel_askable() then
+    return callback()
+  end
+  if M.in_tmux() then
+    da1_asked = true
+    local features = capture({ "tmux", "display-message", "-p", "#{client_termfeatures}" })
+    if features then
+      da1_sixel = vim.tbl_contains(vim.split(features, ",", { trimempty = true }), "sixel")
+    end
+    return callback()
+  end
+  if waiting_da1 then
+    waiting_da1[#waiting_da1 + 1] = callback
+    return
+  end
+  waiting_da1 = { callback }
+  local autocmd, timer
+  local function finish(answer)
+    if not waiting_da1 then
+      return
+    end
+    pcall(vim.api.nvim_del_autocmd, autocmd)
+    timer:stop()
+    timer:close()
+    da1_sixel, da1_asked = answer, true
+    local callbacks = waiting_da1
+    waiting_da1 = nil
+    for _, waiter in ipairs(callbacks) do
+      waiter()
+    end
+  end
+  autocmd = vim.api.nvim_create_autocmd("TermResponse", {
+    desc = "pdf-view: whether the terminal draws sixel images",
+    callback = function(args)
+      -- the reply to anyone's DA1 says the same
+      local attributes = M.da1_attributes((args.data and args.data.sequence) or vim.v.termresponse or "")
+      if attributes then
+        vim.schedule(function()
+          finish(vim.list_contains(attributes, 4))
+        end)
+      end
+    end,
+  })
+  timer = assert(vim.uv.new_timer())
+  timer:start(DA1_TIMEOUT, 0, function()
+    vim.schedule(function()
+      finish(nil) -- not answered: the protocol is chosen by name alone
+    end)
+  end)
+  require("pdf-view.kitty").write(ESC .. "[c") -- tmux is not asked (see above), so this needs no passthrough
+end
+
+--- Ask the terminal what `check()` needs to know, at the same time: whether it has Kitty graphics, and whether it
+--- draws sixel images. `callback` runs once both answers are in.
+---@param callback fun()
+function M.ask(callback)
+  local found = M.detect()
+  local questions = {}
+  if M.needs_da1() then
+    questions[#questions + 1] = M.ask_sixel
+  end
+  -- Kitty graphics on a terminal without Unicode placeholders, as `check()` asks about them
+  local positioned = not found.placeholders and (found.name ~= nil or config.options.placement == "positioned")
+  if graphics == nil and positioned and M.protocol() == "kitty" then
+    questions[#questions + 1] = M.ask_graphics
+  end
+  local left = #questions
+  if left == 0 then
+    return callback()
+  end
+  for _, question in ipairs(questions) do
+    question(function()
+      left = left - 1
+      if left == 0 then
+        callback()
+      end
+    end)
+  end
+end
+
+--- Whether `check()` waits for the answer of `ask_sixel()`: for an unrecognised terminal, where it decides the
+--- protocol, and for sixel, to tell whether the terminal draws it.
+---@return boolean
+function M.needs_da1()
+  if da1_asked or config.options.force or not M.sixel_askable() then
+    return false
+  end
+  local unknown = config.options.protocol == "auto" and M.detect().name == nil and not M.in_zellij()
+  return unknown or M.protocol() == "sixel"
+end
+
 --- Forget what was found out about the terminal, for another one attached through tmux.
 function M.forget()
-  detected, graphics, askable, pane_offset = nil, nil, nil, nil
+  detected, graphics, askable, pane_offset, da1_sixel, da1_asked = nil, nil, nil, nil, nil, false
 end
 
 --- Whether pages can be displayed here. The second return value explains a failure. Nil when the terminal has to be
---- asked first: call `ask_graphics()` and check again once it is answered.
+--- asked first: call `ask()` and check again once it is answered.
 ---
 --- A terminal without Unicode placeholders gets positioned placements, which need nothing but Kitty graphics: it is
---- asked whether it has them, as is an unrecognised terminal when `placement = "positioned"` is set.
+--- asked whether it has them, as is an unrecognised terminal when `placement = "positioned"` is set. A terminal that
+--- draws sixel images is asked whether it does (xterm does only as a VT340), and so is an unrecognised one, which then
+--- gets sixel.
 ---@return boolean?, string?
 function M.check()
   if config.options.force then
     return true
   end
   local found = M.detect()
-  if M.protocol() == "iterm2" then
+  if M.needs_da1() then
+    return nil -- whether it draws sixel images decides the protocol, or whether sixel works
+  end
+  local protocol = M.protocol()
+  if protocol == "iterm2" then
     if config.options.placement == "placeholders" then
       return false, 'pdf-view: iTerm2 inline images have no Unicode placeholders. Remove `placement = "placeholders"`.'
     end
     return true -- there is no question that tells whether a terminal draws them
+  end
+  if protocol == "sixel" then
+    if config.options.placement == "placeholders" then
+      return false, 'pdf-view: sixel images have no Unicode placeholders. Remove `placement = "placeholders"`.'
+    end
+    if da1_sixel ~= false then
+      return true
+    end
+    if found.name == "xterm" and not M.in_tmux() then
+      return false,
+        "pdf-view: xterm draws sixel images only as a VT340. Start it with `xterm -ti vt340`, or set "
+          .. "`XTerm*decTerminalID: vt340` in ~/.Xresources."
+    end
+    return false,
+      ("pdf-view: %s does not list sixel graphics in its device attributes, so it cannot show pages. "):format(
+        found.name or (found.term ~= "" and ("`" .. found.term .. "`")) or "this terminal"
+      ) .. "Set `force = true` in setup() to try anyway."
   end
   if found.placeholders then
     return true
@@ -334,7 +525,7 @@ function M.check()
   return false,
     (
       "pdf-view: %s does not look like a terminal with %s support (kitty, Ghostty, WezTerm, Konsole), "
-      .. "or with iTerm2 inline images (iTerm2, VS Code). "
+      .. "with iTerm2 inline images (iTerm2, VS Code), or with sixel graphics (foot, Windows Terminal, xterm). "
       .. "Set `force = true` in setup() to try anyway."
     ):format(term ~= "" and ("`" .. term .. "`") or "this terminal", needs)
 end
@@ -469,7 +660,7 @@ end
 --- neither is a terminal behind tmux with extended keys on, whose reply would be typed keys as well.
 ---@param dir string the directory pages are rendered to
 function M.probe_file(dir)
-  if M.probe or config.options.transmission ~= "auto" or over_ssh() or M.bytes_only() or M.protocol() == "iterm2" then
+  if M.probe or config.options.transmission ~= "auto" or over_ssh() or M.bytes_only() or M.printed() then
     return
   end
   if vim.fn.has("nvim-0.12") == 0 or not M.ui_attached() then
