@@ -231,6 +231,46 @@ describe("viewer", function()
     eq(1, #vim.api.nvim_list_wins())
   end)
 
+  it("frees the images of a viewer in no window, and sends its page again when a window shows it", function()
+    reset()
+    local s = open(make("hidden-images", pages(2)))
+    press("j")
+    on_page(s, 2)
+    local held = {}
+    for id in pairs(s.images) do
+      held[#held + 1] = id
+    end
+    eq(2, #held, "pages 1 and 2 held by the terminal")
+    local page = s.images[s.ids[s.slot]]
+
+    writes = {}
+    vim.cmd.enew()
+    wait_for(function()
+      return next(s.images) == nil
+    end, "the images forgotten")
+    for _, id in ipairs(held) do
+      truthy(sent(("a=d,d=I,i=%d,q=2"):format(id)), "deleted image " .. id)
+    end
+
+    writes = {}
+    vim.cmd.buffer(s.buf)
+    wait_for(function()
+      return #transmitted() == 1
+    end, "the page sent again")
+    eq({ page }, transmitted())
+    eq(2, s.page)
+
+    -- still in another window: the images stay
+    vim.cmd("split")
+    vim.wait(200) -- the page drawn again for the smaller window
+    on_page(s, 2)
+    writes = {}
+    vim.cmd.enew()
+    vim.wait(200)
+    eq(false, sent("a=d,d=I"), "no image deleted")
+    truthy(next(s.images), "the images kept")
+  end)
+
   it("follows the file when it changes on disk and keeps the current page", function()
     reset()
     local path = make("live", pages(2))
