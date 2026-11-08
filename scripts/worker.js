@@ -53,7 +53,7 @@
 //     page in the colours of the editor's text and background).
 //
 //   ["sheet", <width>, <height>, <out.png>, <recolor>, <parts>]
-//     Renders several pages into one PNG of <width> x <height> pixels, on white: two facing pages side by side, say.
+//     Renders several pages into one PNG of <width> x <height> pixels, on grey: two facing pages side by side, say.
 //     <parts> is a list of [<page>, <scale_x>, <scale_y>, <dx>, <dy>, <x0>, <y0>, <x1>, <y1>, <highlights>]: page
 //     <page> is drawn at that scale with its top-left corner at (<dx>, <dy>) of the image, and only inside the
 //     rectangle (<x0>, <y0>)-(<x1>, <y1>) of it, so that a page does not paint over its neighbours. <highlights> and
@@ -83,6 +83,8 @@ var PADDING = new Array(65537).join(" ");
 var SCAN = 600;
 // Lighter pixels count as paper: anti-aliasing leaves a faint grey next to content, scanning noise is darker.
 var WHITE = 250;
+// The grey between pages that are drawn together, so that white pages do not run into each other.
+var GAP = 192;
 // Display lists kept, most recent last: drawing a page again (scrolling, zooming) skips interpreting it.
 var KEEP = 3;
 // How much text, in characters other than spaces, stands for the point of a book that a page starts at: enough to be
@@ -298,12 +300,14 @@ function render(number, scaleX, scaleY, x, y, width, height, out, highlights, ho
 
 function sheet(width, height, out, how, parts) {
   var pixmap = new Pixmap(ColorSpace.DeviceRGB, [0, 0, width, height], false);
-  pixmap.clear(255);
+  pixmap.clear(GAP);
   var device = new DrawDevice(Matrix.identity, pixmap);
   var notes = "";
   for (var i = 0; i < parts.length; i++) {
     var p = parts[i];
-    device.clipPath(rectangle(p[5], p[6], p[7], p[8]), false, Matrix.identity);
+    var area = rectangle(p[5], p[6], p[7], p[8]);
+    device.clipPath(area, false, Matrix.identity);
+    device.fillPath(area, false, Matrix.identity, ColorSpace.DeviceRGB, [1, 1, 1], 1); // the paper
     var drawn = drawPage(device, p[0], p[1], p[2], [p[3], p[4]], p[9]);
     device.popClip();
     notes = notes || drawn;

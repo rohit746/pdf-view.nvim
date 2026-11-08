@@ -4080,6 +4080,13 @@ describe("viewer spreads", function()
     eq(1, s.page)
     eq(2, s.last)
     eq({ RGB[1], RGB[2] }, halves())
+    local png = transmitted()[#transmitted()]
+    local png_w, png_h = fixture.png_size(png)
+    eq(
+      { { 192, 192, 192 } },
+      fixture.pixels(png, { { math.floor(png_w / 2), math.floor(png_h / 2) } }),
+      "grey between them"
+    )
     truthy(vim.wo.winbar:find("1-2 / 5", 1, true), vim.wo.winbar)
     eq("1-2 / 5", pdf_view.status())
     local width, height = fixture.png_size(transmitted()[#transmitted()])

@@ -242,7 +242,7 @@ of an EPUB, FB2 or MOBI page follows its layout. A scanned page has no text to c
 `spread` says how the pages pair up, and whether a document starts out that way: `"on"` pairs pages 1 and 2, 3 and 4,
 and `"cover"` shows page 1 alone and then 2 and 3, 4 and 5, as a book with a cover opens. `d` pairs them as `"on"` when
 `spread` is `"off"`. The two pages are fitted, zoomed and scrolled as one: `w` makes the pair as wide as the window, and
-`j`/`k` turn two pages at a time. The winbar shows `3-4 / 20`. Search, links (`f`), the page text (`y`, `t`) and
+`j`/`k` turn two pages at a time, with a grey line between the pages. The winbar shows `3-4 / 20`. Search, links (`f`), the page text (`y`, `t`) and
 SyncTeX cover both pages. E-books are laid out to the window, so they show one page at a time.
 
 ### Dark mode
