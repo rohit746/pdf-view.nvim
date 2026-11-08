@@ -166,9 +166,11 @@ scanned page has no text and says so.
 `gg`, `G`, `{count}G`, outline picks, search matches and marks are jumps. Each
 viewer keeps a jump list of where they started: `<C-o>` goes back through
 it, `<C-i>` forward, and `''` swaps with the position before the latest jump.
-Page turns and scrolling are not jumps. `m{a-z}` marks the page with its
-fit, zoom and view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and
-the jump list belong to the viewer and stay through |:edit|.
+Past either end of that list, `<C-o>` and `<C-i>` go on through Vim's own
+|jumplist|, back to the file the document was opened from. Page turns and
+scrolling are not jumps. `m{a-z}` marks the page with its fit, zoom and
+view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and the jump list
+belong to the viewer and stay through |:edit|.
 
                                                             *pdf-view-recolor*
 `i` recolours the pages, and `i` again shows them as they are. `recolor`
