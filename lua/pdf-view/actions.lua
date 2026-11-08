@@ -219,7 +219,8 @@ local function anchor_at(s, page, x, y)
   if not win then
     return TOP
   end
-  x, y = session.sheet_point(s, page, x, y) -- two facing pages are one sheet
+  local sheet_x, sheet_y = session.sheet_point(s, page, x or 0, y --[[@as number]]) -- facing pages are one sheet
+  x, y = x and sheet_x, sheet_y
   local cols, rows = text_area(win)
   local cell = terminal.cell_size()
   local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)

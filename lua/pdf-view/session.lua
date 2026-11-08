@@ -236,13 +236,13 @@ local function on_screen(s, page)
 end
 
 --- The point (`x`, `y`) of page `page`, as fractions of it, as fractions of the spread it is shown in: the same unless
---- two pages are side by side. Either may be nil. Measured with the pages on screen, which have the size of the other
---- pages of almost every document.
+--- two pages are side by side. Measured with the pages on screen, which have the size of the other pages of almost
+--- every document.
 ---@param s PdfView.Session
 ---@param page integer
----@param x? number
----@param y? number
----@return number? x, number? y
+---@param x number
+---@param y number
+---@return number x, number y
 local function sheet_point(s, page, x, y)
   local first, last = spread_range(s, page, s.count)
   if first == last or not s.geom then
@@ -257,7 +257,7 @@ local function sheet_point(s, page, x, y)
   local part = parts[page - first + 1]
   local width = parts[#parts].x + parts[#parts].width
   local height = math.max(parts[1].height, parts[#parts].height)
-  return x and (part.x + x * part.width) / width, y and (part.y + y * part.height) / height
+  return (part.x + x * part.width) / width, (part.y + y * part.height) / height
 end
 
 ---@param stat uv.fs_stat.result
