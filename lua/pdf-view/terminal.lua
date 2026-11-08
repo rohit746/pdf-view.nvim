@@ -447,8 +447,26 @@ function M.needs_da1()
     return false
   end
   local unknown = config.options.protocol == "auto" and M.detect().name == nil and not M.in_zellij()
-  return unknown or M.protocol() == "sixel"
+  return unknown or M.protocol() == "sixel" or M.vscode_images_askable()
 end
+
+--- Whether VS Code can be asked whether it shows images: its terminal draws them only with
+--- `terminal.integrated.enableImages` on and the WebGL renderer in use, which is when it loads xterm.js's image addon,
+--- and that addon answers DA1 with sixel graphics listed. Inside tmux, which answers DA1 itself, it is not asked.
+---@return boolean
+function M.vscode_images_askable()
+  return M.detect().name == "vscode" and M.protocol() == "iterm2" and not M.in_tmux() and can_ask()
+end
+
+--- Whether VS Code said it shows no images (see `vscode_images_askable()`).
+---@return boolean
+function M.vscode_images_off()
+  return da1_asked and da1_sixel == false and M.detect().name == "vscode" and not M.in_tmux()
+end
+
+M.VSCODE_IMAGES_OFF = "pdf-view: VS Code's terminal shows no images. Add "
+  .. '`"terminal.integrated.enableImages": true` to its settings, and keep `terminal.integrated.gpuAcceleration` '
+  .. "on (VS Code draws images only with the WebGL renderer), then restart Neovim."
 
 --- Forget what was found out about the terminal, for another one attached through tmux.
 function M.forget()
@@ -476,7 +494,10 @@ function M.check()
     if config.options.placement == "placeholders" then
       return false, 'pdf-view: iTerm2 inline images have no Unicode placeholders. Remove `placement = "placeholders"`.'
     end
-    return true -- there is no question that tells whether a terminal draws them
+    if M.vscode_images_off() then
+      return false, M.VSCODE_IMAGES_OFF
+    end
+    return true -- there is no question that tells whether a terminal draws them, but VS Code's DA1 says it
   end
   if protocol == "sixel" then
     if config.options.placement == "placeholders" then

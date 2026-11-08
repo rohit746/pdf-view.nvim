@@ -240,6 +240,34 @@ local function check_sixel_terminal(name)
   end
 end
 
+--- Whether VS Code's terminal shows images: its device attributes list sixel graphics when it does.
+---@param name string
+local function check_vscode_images(name)
+  local settings = {
+    'Add `"terminal.integrated.enableImages": true` to VS Code\'s settings, and keep',
+    "`terminal.integrated.gpuAcceleration` on: VS Code draws images only with the WebGL renderer.",
+  }
+  if not terminal.vscode_images_askable() then
+    vim.health.ok(("terminal: %s, with iTerm2 inline images (OSC 1337)"):format(name))
+    vim.health.info(
+      "VS Code cannot be asked whether it shows images here. If pages stay blank: " .. table.concat(settings, " ")
+    )
+    return
+  end
+  local asked = false
+  terminal.ask_sixel(function()
+    asked = true
+  end)
+  vim.wait(2000, function()
+    return asked
+  end, 10)
+  if terminal.vscode_images_off() then
+    vim.health.error(("terminal: %s, but it shows no images"):format(name), settings)
+  else
+    vim.health.ok(("terminal: %s, with iTerm2 inline images (OSC 1337)"):format(name))
+  end
+end
+
 local function check_terminal()
   local detected = terminal.detect()
   local positioned = terminal.placement() == "positioned"
@@ -261,9 +289,10 @@ local function check_terminal()
     end
   elseif printed then
     local name = IMAGE_TERMINALS[detected.name] or detected.name or ("`" .. (detected.term or "") .. "`")
-    vim.health.ok(("terminal: %s, with iTerm2 inline images (OSC 1337)"):format(name))
-    if detected.name == "vscode" then
-      vim.health.info('VS Code shows them only with `"terminal.integrated.enableImages": true` in its settings')
+    if detected.name == "vscode" and not config.options.force then
+      check_vscode_images(name)
+    else
+      vim.health.ok(("terminal: %s, with iTerm2 inline images (OSC 1337)"):format(name))
     end
   elseif not config.options.force then
     check_kitty_terminal(detected, positioned)
