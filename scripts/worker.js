@@ -22,13 +22,13 @@
 //   ["info", <page>, <content>, <of>]
 //     "<page count> <resolved page> <width> <height> <reflowable>", followed by " <x0> <y0> <x1> <y1>" when <content>
 //     is true. <reflowable> is 1 for a reflowable document, else 0. <page> is 1-based and clamped to the document, so
-//     a huge number means "the last page". When <of> is a number, <page> is a page of a document of <of> pages (as it
-//     was laid out before) and stands for the page that starts at the same point of the text now. The size is the page's
-//     bounds in points after /Rotate, inherited boxes, /CropBox and /UserUnit have been applied. (<x0>, <y0>, <x1>,
-//     <y1>) is the rectangle, in points from the page's top-left corner, that holds everything drawn on the page that
-//     is not white: text, images and vector graphics alike. It is found by rendering the page small and scanning for
-//     non-white pixels, so a white rectangle laid over the whole page does not count as content. A blank page gives
-//     the whole page.
+//     a huge number means "the last page". When <of> is a layout ([<width>, <height>, <em>]), <page> is a page of the
+//     document as laid out that way, and stands for the page that holds the point of the text it starts at now (see
+//     samePoint()). The size is the page's bounds in points after /Rotate, inherited boxes, /CropBox and /UserUnit
+//     have been applied. (<x0>, <y0>, <x1>, <y1>) is the rectangle, in points from the page's top-left corner, that
+//     holds everything drawn on the page that is not white: text, images and vector graphics alike. It is found by
+//     rendering the page small and scanning for non-white pixels, so a white rectangle laid over the whole page does
+//     not count as content. A blank page gives the whole page.
 //
 //   ["draw", <page>, <width>, <height>, <out.png>, <recolor>]
 //     Renders a whole page to a PNG of exactly <width> x <height> pixels, stretched to it.
@@ -78,10 +78,15 @@ var SCAN = 600;
 var WHITE = 250;
 // Display lists kept, most recent last: drawing a page again (scrolling, zooming) skips interpreting it.
 var KEEP = 3;
+// How much text, in characters other than spaces, stands for the point of a book that a page starts at: enough to be
+// found nowhere else nearby.
+var SNIPPET = 100;
 
 var doc = null;
 var kept = [];
 var laidOut = "";
+// The text of each page as laid out now, as bare() gives it, for the pages read so far.
+var bareTexts = [];
 
 // The password of the latest request.
 var password = null;
@@ -114,6 +119,7 @@ function layout(size) {
     d.layout(size[0], size[1], size[2]);
     laidOut = key;
     kept = []; // the display lists are of the old pages
+    bareTexts = [];
   }
 }
 
@@ -179,11 +185,7 @@ function contentBox(entry, width, height) {
   return [left / scale, top / scale, Math.min(width, (right + 1) / scale), Math.min(height, (bottom + 1) / scale)];
 }
 
-function info(number, content, of) {
-  if (of > 0) {
-    var count = openDocument().countPages();
-    number = Math.floor(((Math.min(number, of) - 1) * count) / of) + 1;
-  }
+function info(number, content) {
   var entry = load(number);
   var bounds = entry.bounds;
   var width = bounds[2] - bounds[0];
@@ -300,12 +302,13 @@ function crop(file, x, y, width, height, out, outWidth, outHeight) {
   return "";
 }
 
-function pageText(number) {
+// The text of a page (1-based, clamped to the document), as "text" gives it.
+function plainText(number) {
   var count = openDocument().countPages();
   number = Math.max(1, Math.min(count, number || 1));
   var structured = doc.loadPage(number - 1).toStructuredText();
   if (typeof structured.asText === "function") {
-    return JSON.stringify(structured.asText());
+    return structured.asText();
   }
   // MuPDF 1.23 (Ubuntu 24.04's package) has no asText(): walk the text the way it prints it
   var out = "";
@@ -320,7 +323,65 @@ function pageText(number) {
       out += "\n";
     },
   });
-  return JSON.stringify(out);
+  return out;
+}
+
+// The text of page <index> (0-based) without its spaces, line breaks and hyphens, which are all a new layout changes
+// about the text: where the lines break, and so where words are hyphenated.
+function bare(index) {
+  if (bareTexts[index] === undefined) {
+    bareTexts[index] = plainText(index + 1).replace(/[\s\-\u00ad\u2010]+/g, "");
+  }
+  return bareTexts[index];
+}
+
+// The page (1-based) of the document laid out as <now> that holds the point of the text that page <number> starts at
+// when laid out as <before>. MuPDF can say this itself (bookmarks), but not to scripts, so the start of the page is
+// found by its text: the first SNIPPET characters from the top of the page on, looked for on the pages around the one
+// that has the same share of the page count, closest first. A page without text (a picture) is found by the text after
+// it, and stays in front of it. Where the text is not found, as in a book without any, that page is the answer.
+function samePoint(number, before, now) {
+  layout(before);
+  var of = doc.countPages();
+  number = Math.max(1, Math.min(of, number || 1));
+  var empty = 0;
+  var snippet = "";
+  for (var i = number - 1; i < of && snippet.length < SNIPPET; i++) {
+    var own = bare(i);
+    if (!snippet && !own) {
+      empty++;
+    }
+    snippet += own;
+  }
+  snippet = snippet.slice(0, SNIPPET);
+
+  layout(now);
+  var count = doc.countPages();
+  var guess = Math.floor(((number - 1) * count) / of);
+  // whether the snippet starts on page p (0-based); it may go on over the pages after it
+  function startsOn(p) {
+    var own = bare(p);
+    var text = own;
+    for (var j = p + 1; j < count && text.length < own.length + snippet.length; j++) {
+      text += bare(j);
+    }
+    var at = own ? text.indexOf(snippet) : -1;
+    return at >= 0 && at < own.length;
+  }
+  for (var distance = 0; snippet && distance < count; distance++) {
+    var candidates = distance === 0 ? [guess] : [guess + distance, guess - distance];
+    for (var c = 0; c < candidates.length; c++) {
+      var p = candidates[c];
+      if (p >= 0 && p < count && startsOn(p)) {
+        while (empty > 0 && p > 0 && !bare(p - 1)) {
+          p--;
+          empty--;
+        }
+        return p + 1;
+      }
+    }
+  }
+  return guess + 1;
 }
 
 // Where in page `target` (0-based) the link `uri` leads, as fractions of the page's width and height from its top-left
@@ -403,11 +464,16 @@ function answer(request) {
     return crop(request[4], request[5], request[6], request[7], request[8], request[9], request[10], request[11]);
   }
   password = request[2];
-  layout(request[1]);
+  var size = request[1];
   request = [request[0]].concat(request.slice(3));
+  if (request[1] === "info" && size && Array.isArray(request[4])) {
+    // the page is found in the old layout first, which the document most likely still has
+    return info(samePoint(request[2], request[4], size), request[3]);
+  }
+  layout(size);
   switch (request[1]) {
     case "info":
-      return info(request[2], request[3], request[4]);
+      return info(request[2], request[3]);
     case "draw":
       var bounds = load(request[2]).bounds;
       var sx = request[3] / (bounds[2] - bounds[0]);
@@ -427,7 +493,7 @@ function answer(request) {
         request[11]
       );
     case "text":
-      return pageText(request[2]);
+      return JSON.stringify(plainText(request[2]));
     case "links":
       return pageLinks(request[2]);
   }

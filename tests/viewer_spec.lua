@@ -1530,14 +1530,26 @@ describe("viewer reflowable documents", function()
   it("lays the book out again when the window changes, at the same point of the text, and searches again", function()
     reset()
     local book = dir .. "/resize.fb2"
-    fixture.write_fb2(book, { "One", "Two", "Three" }, 30)
+    fixture.write_fb2(book, { "One", "Two", "Three" }, 30, true)
     local s = open(book)
     answering("Chapter 3 paragraph 1 ", function()
       press("/")
       searched(s)
     end)
+    --- The text of a page as the book is laid out now, without what a layout changes (spaces, line breaks).
+    local function bare_text(page)
+      local done, text
+      mupdf.text(book, page, function(_, result)
+        done, text = true, result
+      end)
+      wait_for(function()
+        return done
+      end, "the text of the page")
+      return (assert(text):gsub("[%s%-]+", ""))
+    end
     local before = { page = s.page, count = s.count, key = s.laid_out.key, match = s.search.matches[1].page }
     truthy(before.page > 1, "the match is past the first page")
+    local start = bare_text(s.page):sub(1, 40)
 
     vim.cmd("vsplit")
     wait_for(function()
@@ -1546,7 +1558,12 @@ describe("viewer reflowable documents", function()
     local size = window_layout()
     eq({ size[1], size[2] }, { s.geom.w, s.geom.h })
     truthy(s.count > before.count, ("narrower pages, more of them: %d, %d"):format(before.count, s.count))
-    eq(math.floor((before.page - 1) * s.count / before.count) + 1, s.page)
+    local own = bare_text(s.page)
+    local at = (own .. bare_text(s.page + 1)):find(start, 1, true)
+    truthy(
+      at and at <= #own,
+      ("page %d holds the text page %d started with (%s): %s"):format(s.page, before.page, start, own:sub(1, 80))
+    )
     truthy(s.search.matches[1].page > before.match, "the match moved to a later page")
     press("n")
     searched(s)

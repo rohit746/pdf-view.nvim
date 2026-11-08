@@ -225,17 +225,25 @@ function M.highlight_mode()
   return M._highlight_mode
 end
 
---- Write an FB2 e-book, a reflowable format: one section per chapter title, each `paragraphs` paragraphs long. The
---- text of paragraph i of chapter c is "Chapter c paragraph i" followed by filler.
+--- Write an FB2 e-book, a reflowable format: one section per chapter title, each `paragraphs` paragraphs long (or
+--- `paragraphs[c]` for chapter c). The text of paragraph i of chapter c is "Chapter c paragraph i" followed by filler:
+--- "lorem ipsum dolor sit amet" 12 times, or with `numbered` "lorem ipsum dolor sit amet c.i.k" for k = 1 to 12, so
+--- that no two lines of the book are the same.
 ---@param path string
 ---@param chapters string[]
----@param paragraphs integer
-function M.write_fb2(path, chapters, paragraphs)
+---@param paragraphs integer|integer[]
+---@param numbered? boolean
+function M.write_fb2(path, chapters, paragraphs, numbered)
   local sections = {}
   for c, title in ipairs(chapters) do
     local body = { ("<section><title><p>%s</p></title>"):format(title) }
-    for i = 1, paragraphs do
-      body[#body + 1] = ("<p>Chapter %d paragraph %d %s</p>"):format(c, i, ("lorem ipsum dolor sit amet "):rep(12))
+    for i = 1, type(paragraphs) == "table" and paragraphs[c] or paragraphs do
+      local filler = {}
+      for k = 1, 12 do
+        filler[k] = numbered and ("lorem ipsum dolor sit amet %d.%d.%d "):format(c, i, k)
+          or "lorem ipsum dolor sit amet "
+      end
+      body[#body + 1] = ("<p>Chapter %d paragraph %d %s</p>"):format(c, i, table.concat(filler))
     end
     body[#body + 1] = "</section>"
     sections[#sections + 1] = table.concat(body)

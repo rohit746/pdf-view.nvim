@@ -18,6 +18,10 @@ All notable changes to this project are documented here. The format follows
 - Following a link (`f`) or a bookmark (`gO`) to a figure, a citation or a section in the middle of a page went to the
   top of that page, so the target still had to be found by scrolling. A zoomed or width-fitted page now starts with the
   point the link or bookmark leads to at the top of the window.
+- An e-book (EPUB, FB2, MOBI) laid out again for a window of another size went to the page with the same share of the
+  page count, which is a page or more away from the text that was on screen when chapter starts, pictures or short
+  pages fill some pages with less text than others. It now goes to the page that holds the text the page on screen
+  started with.
 
 ## [0.5.1] - 2026-11-08
 
