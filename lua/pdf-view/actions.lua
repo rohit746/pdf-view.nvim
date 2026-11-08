@@ -114,6 +114,7 @@ local function restore(s, where)
     return
   end
   s.mode, s.zoom, s.cx, s.cy = where.mode, where.zoom, where.cx, where.cy
+  s.scrolled = nil
   s.target = math.max(1, math.min(where.page, s.count or where.page))
   show(s, s.target)
 end
@@ -202,6 +203,7 @@ local function go(s, page, anchor, jump)
   if anchor then
     s.cx, s.cy = anchor.cx or s.cx, anchor.cy or s.cy
   end
+  s.scrolled = nil
   show(s, page)
 end
 
@@ -250,7 +252,7 @@ local function set_mode(s, mode)
   if s.mode == mode and s.zoom == 1 then
     return
   end
-  s.mode, s.zoom = mode, 1
+  s.mode, s.zoom, s.scrolled = mode, 1, nil
   if mode == "width" then
     s.cx, s.cy = 0.5, 0
   elseif mode == "height" then
@@ -285,7 +287,7 @@ local function set_zoom(s, zoom)
       s.cx, s.cy = 0.5, 0.5
     end
   end
-  s.zoom = zoom
+  s.zoom, s.scrolled = zoom, nil
   show(s)
 end
 
@@ -302,7 +304,21 @@ local function pan(s, dx, dy, steps)
   end
   local cols, rows = text_area(win)
   local cell = terminal.cell_size()
-  local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)
+  local continuous = session.continuous(s)
+  local view = layout.viewport(
+    s.geom.w,
+    s.geom.h,
+    cols,
+    rows,
+    cell.w,
+    cell.h,
+    s.zoom,
+    s.cx,
+    s.cy,
+    s.mode,
+    s.geom.box,
+    continuous and s.scrolled
+  )
 
   local moved = false
   if dx ~= 0 and view.scroll_x then
@@ -312,9 +328,16 @@ local function pan(s, dx, dy, steps)
     end
   end
   if dy ~= 0 and view.scroll_y then
-    local y = math.min(math.max(view.vy + dy * steps * config.options.pan_step * view.view_h, view.min_y), view.max_y)
+    -- continuous scrolling goes on past the page's edges into the pages next to it, up to the ends of the document
+    local top, bottom = view.min_y, view.max_y
+    if continuous then
+      top = s.page > 1 and -math.huge or top
+      bottom = (s.last or s.page) < (s.count or 0) and math.huge or bottom
+    end
+    local y = math.min(math.max(view.vy + dy * steps * config.options.pan_step * view.view_h, top), bottom)
     if math.abs(y - view.vy) > 0.5 then
       s.cy, moved = (y + view.view_h / 2) / view.full_h, true
+      s.scrolled = continuous or nil
     end
   end
   return moved
@@ -378,7 +401,9 @@ local function match_visible(s, match)
   if not uses_viewport(s) then
     return true -- the whole page is on screen
   end
-  local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)
+  local free = session.continuous(s) and s.scrolled
+  local view =
+    layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box, free)
   local ox, oy = 0, 0 -- where the page lies on a sheet of facing pages
   for _, part in ipairs(s.parts or {}) do
     if part.page == match.page then
@@ -406,6 +431,7 @@ local function goto_match(s, index)
   s.search.current = index
   if not match_visible(s, match) then
     s.cx, s.cy = session.sheet_point(s, match.page, match.cx, match.cy)
+    s.scrolled = nil
   end
   s.target = match.page
   show(s, match.page)
@@ -547,6 +573,7 @@ local function show_synced(s, boxes)
       end
     end
     s.target = session.spread_range(s, info.page, info.count)
+    s.scrolled = nil
     show(s, s.target)
   end)
 end
@@ -676,6 +703,16 @@ local function point_at(s, row, col)
   local cx, cy = col - fit.pad_left + 0.5, row - fit.pad_top + 0.5
   if cx < 0 or cy < 0 or cx > fit.cols or cy > fit.rows then
     return nil
+  end
+  if fit.parts then -- a continuous view: the pages one below the other
+    local px, py = cx * fit.width / fit.cols, cy * fit.height / fit.rows
+    for _, part in ipairs(fit.parts) do
+      local clip = part.clip
+      if px >= clip[1] and px <= clip[3] and py >= clip[2] and py <= clip[4] then
+        return part.page, (px - part.dx) / part.scale_x, (py - part.dy) / part.scale_y
+      end
+    end
+    return nil -- between the pages
   end
   local x, y
   if fit.scale then -- a viewport: the cells show its pixels from (x, y) on

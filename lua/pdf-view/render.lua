@@ -183,17 +183,19 @@ end
 --- How the pages of a spread are drawn into an image of `width` x `height` pixels that shows the sheet scaled by
 --- (`scale_x`, `scale_y`) from its pixel (`x`, `y`) on: the parts of the render, and their cache key.
 ---@param s PdfView.Session
----@param info PdfView.PageInfo a sheet, with `parts`
+---@param info PdfView.PageInfo a sheet, with `parts`, or a page
+---@param band? number[] `{ top, bottom }`: the rows of the image the sheet may draw on, all of them when missing
 ---@return PdfView.SheetPart[] parts, string key
-local function sheet_parts(s, info, scale_x, scale_y, x, y, width, height)
+local function sheet_parts(s, info, scale_x, scale_y, x, y, width, height, band)
   local parts, keys = {}, {}
-  for _, part in ipairs(info.parts) do
+  local top, bottom = band and band[1] or 0, band and band[2] or height
+  for _, part in ipairs(info.parts or { { page = info.page, x = 0, y = 0, width = info.width, height = info.height } }) do
     local dx, dy = part.x * scale_x - x, part.y * scale_y - y
     local clip = {
       math.max(0, dx),
-      math.max(0, dy),
+      math.max(0, dy, top),
       math.min(width, dx + part.width * scale_x),
-      math.min(height, dy + part.height * scale_y),
+      math.min(height, dy + part.height * scale_y, bottom),
     }
     if clip[3] > clip[1] and clip[4] > clip[2] then -- not scrolled out of view
       local highlights, highlights_key = page_highlights(s, part.page)
@@ -377,6 +379,144 @@ local function start_render(s, key, render, done)
   }
 end
 
+--- Continuous scrolling: the sheet at the top of the window, and the sheets below it that the window reaches into,
+--- for a view centred on `s.cy` of `sheet`, which scrolling may have moved past the sheet's edges. `cb` gets the
+--- sheets, top first, and the centre of the view on the first one; no centre when that sheet is not taller than the
+--- window, which is then shown as usual. `track` is handed each request to mutool.
+---@param s PdfView.Session
+---@param stamp string
+---@param sheet PdfView.PageInfo
+---@param cols integer
+---@param rows integer
+---@param cell { w: number, h: number }
+---@param track fun(job: PdfView.Job)
+---@param cb fun(err?: string, sheets?: PdfView.PageInfo[], cy?: number)
+local function strip(s, stamp, sheet, cols, rows, cell, track, cb)
+  local content = s.mode == "content"
+  local function view_of(info, cy)
+    return layout.viewport(
+      info.width,
+      info.height,
+      cols,
+      rows,
+      cell.w,
+      cell.h,
+      s.zoom,
+      s.cx,
+      cy,
+      s.mode,
+      info.content,
+      true
+    )
+  end
+  --- the sheet that holds `page`
+  local function fetch(page, done)
+    local first, last = session.spread_range(s, page, sheet.count)
+    sheet_of(s, stamp, first, last, content, track, function(err, found)
+      if err or not found then
+        return cb(err or "mutool returned no page information")
+      end
+      done(found)
+    end)
+  end
+
+  local function settle(top, cy)
+    local view = view_of(top, cy)
+    if not view.scroll_y then
+      return cb(nil, { top }, nil)
+    end
+    local gap = session.SPREAD_GAP * view.scale
+    local bottom = view.min_y + view.reach_h
+    local last = top.last or top.page
+    if view.vy >= bottom + gap and last < top.count then
+      -- the window starts below this sheet: on the next one, as far down it as it is past this one
+      return fetch(last + 1, function(below)
+        local v = view_of(below, 0.5)
+        settle(below, (v.min_y + view.vy - bottom - gap + v.view_h / 2) / v.full_h)
+      end)
+    end
+    if view.vy < view.min_y and top.page > 1 then
+      -- the window starts above this sheet: on the previous one, as far up its end
+      return fetch(top.page - 1, function(above)
+        local v = view_of(above, 0.5)
+        local vy = v.min_y + v.reach_h + session.SPREAD_GAP * v.scale + view.vy - view.min_y
+        settle(above, (vy + v.view_h / 2) / v.full_h)
+      end)
+    end
+    -- not past the ends of the document
+    local vy = view.vy
+    if top.page == 1 then
+      vy = math.max(vy, view.min_y)
+    end
+    if last >= top.count then
+      vy = math.min(vy, view.max_y)
+    end
+    local sheets = { top }
+    local function fill(start, from)
+      if start >= view.view_h or from > top.count then
+        return cb(nil, sheets, (vy + view.view_h / 2) / view.full_h)
+      end
+      fetch(from, function(below)
+        sheets[#sheets + 1] = below
+        local v = view_of(below, 0.5)
+        fill(start + v.reach_h + session.SPREAD_GAP * v.scale, (below.last or below.page) + 1)
+      end)
+    end
+    fill(bottom - vy + gap, last + 1)
+  end
+  settle(sheet, s.cy)
+end
+
+--- How the sheets of a continuous view (`strip()`) are drawn, one below the other, into a window of `cols` x `rows`
+--- cells: as for `plan()`.
+---@param s PdfView.Session
+---@param sheets PdfView.PageInfo[]
+---@param stamp string
+---@param cols integer
+---@param rows integer
+---@param cell { w: number, h: number }
+---@param cy number the centre of the view on the first sheet
+---@return PdfView.Viewport fit
+---@return string cache_key
+---@return fun(out: string, cb: fun(err?: string)): PdfView.Job render
+local function plan_strip(s, sheets, stamp, cols, rows, cell, cy)
+  local recolor = recolor_spec(s)
+  local top = sheets[1]
+  local view =
+    layout.viewport(top.width, top.height, cols, rows, cell.w, cell.h, s.zoom, s.cx, cy, s.mode, top.content, true)
+  local parts, keys = {}, { stamp, "strip", view.width, view.height, recolor }
+  local start -- where the next sheet's content starts in the image, in pixels
+  for index, sheet in ipairs(sheets) do
+    local v = index == 1 and view
+      or layout.viewport(
+        sheet.width,
+        sheet.height,
+        cols,
+        rows,
+        cell.w,
+        cell.h,
+        s.zoom,
+        s.cx,
+        0.5,
+        s.mode,
+        sheet.content
+      )
+    local y = index == 1 and view.vy or v.min_y - start -- the sheet's pixel at the top of the image
+    local x = v.x - (view.width - v.width) / 2 -- a narrower sheet is centred
+    local band = { v.min_y - y, v.min_y + v.reach_h - y }
+    local own, own_key = sheet_parts(s, sheet, v.scale, v.scale, x, y, view.width, view.height, band)
+    vim.list_extend(parts, own)
+    keys[#keys + 1] = ("%d:%.5f:%.1f:%.1f:%s"):format(sheet.page, v.scale, x, y, own_key)
+    start = band[2] + session.SPREAD_GAP * v.scale
+  end
+  view.parts = parts -- which page each pixel shows, for a click (`actions.point_at`)
+  return view,
+    table.concat(keys, ":"),
+    function(out, cb)
+      return mupdf.render_sheet(s.path, view.width, view.height, parts, out, cb, recolor)
+    end
+end
+
 -- the pages drawn ahead of time after a page is shown: the next one first, starting at its top as a page turn
 -- does, then the previous one, at its bottom
 local NEIGHBOURS = { { 1, 0 }, { -1, 1 } }
@@ -412,7 +552,8 @@ local function prefetch(s, stamp, cols, rows, cell)
     -- the geometry is kept even when stopped meanwhile: it is read once
     local first, last = session.spread_range(s, next_page.page, s.count)
     sheet_of(s, stamp, first, last, content, function() end, function(err, info)
-      if run.stopped or s.closed or err or not info then
+      -- a continuous view is drawn wherever scrolling leaves it, so only the geometry is read ahead
+      if run.stopped or s.closed or err or not info or session.continuous(s) then
         return step()
       end
       local _, key, render = plan(s, info, stamp, cols, rows, cell, s.cx, next_page.cy)
@@ -663,8 +804,31 @@ local function show(s, page, opts)
   end
 
   ---@param info PdfView.PageInfo
-  draw = function(info)
-    local fit, cache_key, render = plan(s, info, stamp, cols, rows, cell, s.cx, s.cy)
+  draw = function(info, sheets, cy)
+    if session.continuous(s) and s.scrolled and not sheets then
+      -- scrolled past the page's edges: from the page at the top of the window into the ones below it
+      return strip(s, stamp, info, cols, rows, cell, function(job)
+        s.job = job
+      end, function(strip_err, found, top_cy)
+        if gen ~= s.gen then
+          return
+        end
+        s.job = nil
+        if strip_err or not found then
+          return fail(strip_err or "mutool returned no page information")
+        end
+        if not top_cy then
+          s.scrolled = nil
+        end
+        draw(found[1], found, top_cy)
+      end)
+    end
+    local fit, cache_key, render
+    if sheets and #sheets > 1 then
+      fit, cache_key, render = plan_strip(s, sheets, stamp, cols, rows, cell, cy)
+    else
+      fit, cache_key, render = plan(s, info, stamp, cols, rows, cell, s.cx, cy or s.cy)
+    end
 
     local function shown(png)
       present(s, win, png, info, fit, rows)
