@@ -4,6 +4,7 @@
 local actions = require("pdf-view.actions")
 local config = require("pdf-view.config")
 local cursor = require("pdf-view.cursor")
+local kitty = require("pdf-view.kitty")
 local positions = require("pdf-view.positions")
 local render = require("pdf-view.render")
 local session = require("pdf-view.session")
@@ -213,6 +214,27 @@ function M.attach(buf)
       if s.search_stale then
         rescan(s)
       end
+    end,
+  })
+  -- The terminal drops the oldest images once it holds too many (kitty and Ghostty keep about 320 MB), and says
+  -- nothing about it: a viewer in no window frees its images, and sends its page again when a window shows it.
+  vim.api.nvim_create_autocmd("BufHidden", {
+    group = augroup,
+    buffer = buf,
+    desc = "Free the images of a PDF viewer in no window",
+    callback = function()
+      vim.schedule(function() -- the buffer is still in its last window while this runs
+        if s.closed or #vim.fn.win_findbuf(buf) > 0 or terminal.placement() == "positioned" then
+          return -- `positioned` takes a page away from a window that no longer shows it
+        end
+        for _, id in ipairs(s.ids) do
+          if s.images[id] then
+            kitty.send(kitty.delete(id))
+          end
+        end
+        s.images, s.image_used = {}, {}
+        s.requested_key = nil -- shown again on BufWinEnter
+      end)
     end,
   })
   vim.api.nvim_create_autocmd("BufEnter", {

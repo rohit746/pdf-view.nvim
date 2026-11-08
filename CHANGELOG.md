@@ -22,6 +22,9 @@ All notable changes to this project are documented here. The format follows
   page count, which is a page or more away from the text that was on screen when chapter starts, pictures or short
   pages fill some pages with less text than others. It now goes to the page that holds the text the page on screen
   started with.
+- A viewer switched away from (`:bnext`, `:enew`) kept its pages in the terminal, which drops the oldest images
+  without a word once it holds too many (kitty and Ghostty keep about 320 MB), and switching back could show a blank
+  page. A viewer in no window now frees its images, and sends its page again when a window shows it.
 
 ## [0.5.1] - 2026-11-08
 
