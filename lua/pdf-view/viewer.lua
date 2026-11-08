@@ -66,6 +66,7 @@ local function on_file_changed(s)
   if not stat or stamp_of(stat) == s.requested_stamp then
     return
   end
+  s.synced = nil -- a forward search into the old build may highlight other text in this one
   show(s, nil, { retries = RELOAD_RETRIES, keep = true })
   rescan(s)
 end

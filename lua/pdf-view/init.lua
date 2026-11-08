@@ -94,7 +94,16 @@ function M.status(buf)
   return viewer and viewer.status(buf) or ""
 end
 
---- Called by plugin/pdf-view.lua: register the command and the default handler.
+--- Forward search (SyncTeX): show where the cursor's line of the TeX file in the current buffer is typeset, in its
+--- PDF's viewer, which opens in a split if it is not on screen. `opts.pdf` names the PDF; by default vimtex's, then
+--- those in open viewers, then the PDF named after the file are tried. `opts.file`, `opts.line` and `opts.col` stand
+--- in for the buffer and the cursor.
+---@param opts? { pdf?: string, file?: string, line?: integer, col?: integer }
+function M.forward_search(opts)
+  require("pdf-view.actions").forward_search(opts)
+end
+
+--- Called by plugin/pdf-view.lua: register the commands and the default handler.
 function M._init()
   vim.api.nvim_create_user_command("PdfView", function(args)
     local path = args.fargs[1]
@@ -109,6 +118,9 @@ function M._init()
       vim.notify(tostring(err), vim.log.levels.ERROR)
     end
   end, { nargs = "?", complete = "file", desc = "Open a PDF in the current window" })
+  vim.api.nvim_create_user_command("PdfViewForward", function(args)
+    M.forward_search({ pdf = args.fargs[1] })
+  end, { nargs = "?", complete = "file", desc = "Show the cursor's line of the TeX source in its PDF (SyncTeX)" })
   sync_handler()
 end
 

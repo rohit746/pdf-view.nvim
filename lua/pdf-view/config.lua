@@ -32,6 +32,8 @@ local M = {}
 ---@field jump_forward string[] forward through the jump list
 ---@field mark string[] followed by a to z: mark the page, fit, zoom and view
 ---@field goto_mark string[] followed by a to z: go to that mark; doubled (`''`): to where the latest jump started
+---@field inverse_search string[] go to the line of the TeX source that the point under the mouse was typeset from
+--- (SyncTeX)
 ---@field recolor string[] switch the recolouring of the pages on and off (`recolor`, or "invert" when that is "off")
 ---@field reload string[] re-render the current page
 ---@field close string[] close the viewer buffer
@@ -48,6 +50,7 @@ local M = {}
 ---@field hide_cursor boolean hide the cursor while a viewer is focused (it would sit on top of the page)
 ---@field remember_position boolean reopen a PDF at the page, fit and zoom it was left at, also after a restart
 ---@field mutool string mutool executable
+---@field synctex string `synctex` executable, for going between a TeX source and its PDF (SyncTeX)
 ---@field transmission "auto"|"file"|"direct" how images reach the terminal ("auto" is "direct" over SSH)
 ---@field tmux_passthrough boolean let the plugin run `tmux set -p allow-passthrough on` for its pane
 ---@field placement "auto"|"placeholders"|"positioned" how the page is put on screen: as Unicode placeholder text,
@@ -79,6 +82,7 @@ local defaults = {
   hide_cursor = true,
   remember_position = true,
   mutool = "mutool",
+  synctex = "synctex",
   transmission = "auto",
   tmux_passthrough = true,
   placement = "auto",
@@ -126,6 +130,7 @@ local defaults = {
     jump_forward = { "<C-i>", "<Tab>" },
     mark = { "m" },
     goto_mark = { "'", "`" },
+    inverse_search = { "<2-LeftMouse>" },
     recolor = { "i" },
     reload = { "r" },
     close = { "q" },
@@ -202,8 +207,10 @@ local function validate(opts)
       fail(key, "a boolean", opts[key])
     end
   end
-  if opts.mutool ~= nil and (type(opts.mutool) ~= "string" or opts.mutool == "") then
-    fail("mutool", "a non-empty string", opts.mutool)
+  for _, key in ipairs({ "mutool", "synctex" }) do
+    if opts[key] ~= nil and (type(opts[key]) ~= "string" or opts[key] == "") then
+      fail(key, "a non-empty string", opts[key])
+    end
   end
   if opts.extensions ~= nil then
     check_string_list("extensions", opts.extensions)

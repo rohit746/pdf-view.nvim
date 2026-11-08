@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- SyncTeX, for LaTeX documents built with it: `:PdfViewForward` in a `.tex` buffer shows where the cursor's line is
+  typeset, highlighted, in a split if the PDF is not on screen, and a double-click on a page opens the source at the
+  line that point was typeset from. Works with vimtex.
+
 ### Fixed
 
 - Every page turn and scroll step set about 15 window options again, firing `OptionSet` for other plugins
