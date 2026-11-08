@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-08
+
 ### Added
 
 - SyncTeX, for LaTeX documents built with it: `:PdfViewForward` in a `.tex` buffer shows where the cursor's line is
@@ -32,6 +34,9 @@ All notable changes to this project are documented here. The format follows
   page count, which is a page or more away from the text that was on screen when chapter starts, pictures or short
   pages fill some pages with less text than others. It now goes to the page that holds the text the page on screen
   started with.
+- `setup({ winbar = false })` called again while a viewer was open left the last winbar text in its window, where it
+  stopped following the page, and a new `recolor` or `highlight` only reached a page already on screen at the next
+  page turn. Open viewers now clear their winbar and draw their page again.
 - A viewer switched away from (`:bnext`, `:enew`) kept its pages in the terminal, which drops the oldest images
   without a word once it holds too many (kitty and Ghostty keep about 320 MB), and switching back could show a blank
   page. A viewer in no window now frees its images, and sends its page again when a window shows it.
@@ -279,7 +284,8 @@ First release.
   colour setup.
 - Configuration with validation: unknown or mistyped options raise immediately.
 
-[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rohit746/pdf-view.nvim/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/rohit746/pdf-view.nvim/compare/v0.4.0...v0.4.1
