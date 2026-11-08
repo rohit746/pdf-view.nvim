@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-08
+
 ### Added
 
 - WezTerm and Konsole, which have the Kitty graphics protocol but not its Unicode placeholders, are recognised (also
@@ -231,7 +233,8 @@ First release.
   colour setup.
 - Configuration with validation: unknown or mistyped options raise immediately.
 
-[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/rohit746/pdf-view.nvim/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.2.0...v0.3.0
