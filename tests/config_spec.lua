@@ -25,6 +25,16 @@ describe("config", function()
     eq({ "<PageUp>", "<BS>", "<C-b>" }, options.keymaps.prev)
   end)
 
+  it("takes a key the user maps away from the default action that has it", function()
+    local options = config.setup({ keymaps = { next = { "n" }, prev = { "<c-o>" } } })
+    eq({ "n" }, options.keymaps.next)
+    eq({}, options.keymaps.search_next)
+    eq({}, options.keymaps.jump_back)
+    eq({ "N" }, options.keymaps.search_prev)
+    -- a later setup() starts from the defaults again
+    eq({ "n" }, config.setup().keymaps.search_next)
+  end)
+
   it("does not recolour pages unless asked to", function()
     eq("off", config.setup().recolor)
     eq({ "i" }, config.setup().keymaps.recolor)
@@ -120,6 +130,10 @@ describe("config", function()
   it("rejects unknown keymap actions and bad key lists", function()
     rejects({ keymaps = { teleport = { "t" } } }, "unknown keymap action `teleport`")
     rejects({ keymaps = { next = "j" } }, "`keymaps.next`")
+    rejects(
+      { keymaps = { next = { "x" }, close = { "x" } } },
+      "`x` is mapped to both `keymaps.close` and `keymaps.next`"
+    )
   end)
 end)
 

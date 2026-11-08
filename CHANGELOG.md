@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format follows
 - A request that the worker drawing a document could not read was never answered, and every later request for the
   document waited behind it until the document was closed. It now fails with the worker's message, and the next
   request goes ahead.
+- A key mapped to an action that a default action also used, like `keymaps = { next = { "n" } }` with `search_next`'s
+  `n`, did either action at random. The user's action gets the key now, and the default action loses it. One key
+  given to two actions in `keymaps` is an error naming both.
 
 ## [0.5.1] - 2026-11-08
 
