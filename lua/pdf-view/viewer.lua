@@ -386,7 +386,7 @@ function M.status(buf)
   end
   local mode = s.mode ~= "page" and (" " .. s.mode) or ""
   local zoom = s.zoom > 1 and (" x%.2f"):format(s.zoom) or ""
-  return ("%d / %s%s%s"):format(s.page, s.count or "?", mode, zoom)
+  return ("%s / %s%s%s"):format(session.pages_label(s), s.count or "?", mode, zoom)
 end
 
 return M

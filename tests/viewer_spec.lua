@@ -4049,3 +4049,125 @@ describe("viewer SyncTeX", function()
     setup()
   end)
 end)
+
+describe("viewer spreads", function()
+  -- a colour per page, to tell in the image which page is where
+  local COLOURS = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 1, 1, 0 }, { 0, 1, 1 } }
+  local RGB = { { 255, 0, 0 }, { 0, 255, 0 }, { 0, 0, 255 }, { 255, 255, 0 }, { 0, 255, 255 } }
+
+  local function coloured(name, count)
+    local list = {}
+    for index = 1, count do
+      list[index] = vim.tbl_extend("force", LETTER, { label = "Page " .. index, color = COLOURS[index] })
+    end
+    return make(name, list)
+  end
+
+  --- The colours of the latest image at a quarter and three quarters of its width, half way down.
+  local function halves()
+    local paths = transmitted()
+    local png = paths[#paths]
+    local width, height = fixture.png_size(png)
+    local y = math.floor(height * 0.75)
+    return fixture.pixels(png, { { math.floor(width / 4), y }, { math.floor(width * 3 / 4), y } })
+  end
+
+  it("shows facing pages side by side and turns them two at a time", function()
+    setup({ spread = "on" })
+    reset()
+    local s = open(coloured("spread", 5))
+    settle(s)
+    eq(1, s.page)
+    eq(2, s.last)
+    eq({ RGB[1], RGB[2] }, halves())
+    truthy(vim.wo.winbar:find("1-2 / 5", 1, true), vim.wo.winbar)
+    eq("1-2 / 5", pdf_view.status())
+    local width, height = fixture.png_size(transmitted()[#transmitted()])
+    truthy(width > height, ("two pages are wider than tall: %dx%d"):format(width, height))
+
+    press("j")
+    on_page(s, 3)
+    eq(4, s.last)
+    eq({ RGB[3], RGB[4] }, halves())
+    press("j")
+    on_page(s, 5)
+    eq(5, s.last, "the last page of an odd count is alone")
+    press("k")
+    on_page(s, 3)
+    press("2gg") -- the spread that holds page 2
+    on_page(s, 1)
+    eq(2, s.last)
+
+    -- `d` shows one page at a time again, and side by side again
+    press("d")
+    on_page(s, 1)
+    eq(1, s.last)
+    press("j")
+    on_page(s, 2)
+    press("d")
+    on_page(s, 1)
+    eq(2, s.last)
+    setup()
+  end)
+
+  it("shows the first page alone with cover, then pages 2 and 3", function()
+    setup({ spread = "cover" })
+    reset()
+    local s = open(coloured("spread-cover", 4))
+    settle(s)
+    eq(1, s.last)
+    press("j")
+    on_page(s, 2)
+    eq(3, s.last)
+    eq({ RGB[2], RGB[3] }, halves())
+    setup()
+  end)
+
+  it("turns spreads on with d, and finds matches on either page", function()
+    reset()
+    local s = open(coloured("spread-search", 4))
+    press("d")
+    on_page(s, 1)
+    eq(2, s.last)
+    answering("Page 4", function()
+      press("/")
+      searched(s)
+    end)
+    eq(3, s.page, "the spread that holds the match")
+    eq(4, s.last)
+    eq({ RGB[3], RGB[4] }, halves(), "both pages, the match on the right one")
+
+    -- the text and the links of both pages
+    vim.fn.setreg('"', "")
+    with_stub(vim, "notify", function() end, function()
+      press("y")
+      wait_for(function()
+        return vim.fn.getreg('"') ~= ""
+      end, "the yank")
+    end)
+    eq({ "Page 3", "", "Page 4" }, vim.fn.getreg('"', 1, true))
+  end)
+
+  it("zooms into a spread and scrolls across both pages", function()
+    setup({ spread = "on" })
+    reset()
+    local s = open(coloured("spread-zoom", 2))
+    settle(s)
+    press("w") -- the spread as wide as the window
+    settle(s)
+    eq(1, s.page)
+    eq(2, s.last)
+    press("4+")
+    settle(s)
+    local steps = 0
+    while s.cx < 0.9 and steps < 40 do
+      press("l")
+      settle(s)
+      steps = steps + 1
+    end
+    eq(1, s.page, "scrolling right stays on the spread")
+    local colours = halves()
+    eq(RGB[2], colours[2], "the right page")
+    setup()
+  end)
+end)

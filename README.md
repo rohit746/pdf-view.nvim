@@ -153,6 +153,7 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `m{a-z}`                     | mark the page, with its fit, zoom and view                                      |
 | `'{a-z}` `` `{a-z} ``        | go to a mark; `''` goes back to where the latest jump started                   |
 | double-click                 | open the TeX source at the line the point was typeset from; see [SyncTeX](#synctex) |
+| `d`                          | show facing pages side by side, or one page at a time; see [Facing pages](#facing-pages) |
 | `i`                          | recolour the pages (dark mode), or stop; see [Dark mode](#dark-mode)            |
 | `r`                          | re-render the current page                                                      |
 | `q`                          | close the viewer (never quits Neovim)                                           |
@@ -234,6 +235,15 @@ given (`"+y` copies it to the clipboard, `"ay` into register `a`), linewise. `t`
 in a vertical split next to the viewer, to quote from or to search with Neovim's own tools. Each document has one such
 buffer, named after the page it holds: `t` on another page fills it with that page and goes back to its split. The text
 of an EPUB, FB2 or MOBI page follows its layout. A scanned page has no text to copy, and says so.
+
+### Facing pages
+
+`d` shows two pages side by side, as an open book or a printed spread does, and `d` again one page at a time.
+`spread` says how the pages pair up, and whether a document starts out that way: `"on"` pairs pages 1 and 2, 3 and 4,
+and `"cover"` shows page 1 alone and then 2 and 3, 4 and 5, as a book with a cover opens. `d` pairs them as `"on"` when
+`spread` is `"off"`. The two pages are fitted, zoomed and scrolled as one: `w` makes the pair as wide as the window, and
+`j`/`k` turn two pages at a time. The winbar shows `3-4 / 20`. Search, links (`f`), the page text (`y`, `t`) and
+SyncTeX cover both pages. E-books are laid out to the window, so they show one page at a time.
 
 ### Dark mode
 
@@ -320,6 +330,7 @@ require("pdf-view").setup({
   text_scale = 1,          -- text size of EPUB, FB2 and MOBI books, relative to the terminal's
   highlight = { match = "#ffe14d", current = "#ff8c1a" }, -- multiplied onto search matches
   recolor = "off",         -- "invert": dark pages, hues kept; "colorscheme": in the Normal colours. `i` toggles it
+  spread = "off",          -- "on": facing pages side by side, 1-2, 3-4; "cover": 1 alone, then 2-3. `d` toggles it
   cell_size = nil,         -- { width, height } in px, only if your terminal does not report its pixel size
   keymaps = {              -- a list per action; `false` for no mappings at all
     down = { "j", "<Down>" },
@@ -354,6 +365,7 @@ require("pdf-view").setup({
     mark = { "m" },       -- then a to z
     goto_mark = { "'", "`" }, -- then a to z, or ' for the latest jump
     inverse_search = { "<2-LeftMouse>" }, -- SyncTeX: to the source of the point under the mouse
+    spread = { "d" },
     recolor = { "i" },
     reload = { "r" },
     close = { "q" },
