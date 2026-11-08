@@ -40,7 +40,6 @@ local function sanitize(entry)
     or page < 1
     or not MODES[mode]
     or type(zoom) ~= "number"
-    or zoom < 1
     or type(cx) ~= "number"
     or type(cy) ~= "number"
   then
