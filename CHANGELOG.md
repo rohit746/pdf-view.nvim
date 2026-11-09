@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format follows
 - The cursor no longer stays hidden after leaving a viewer when `guicursor` is empty.
 - `G` pressed before the page count is known (a large document still opening, a cancelled password prompt) no
   longer asks for page NaN with facing pages on. It does nothing until the first page is on screen.
+- The render cache dropped the pages rendered first, even ones just shown again from it, so the page on screen could
+  be deleted by the next page drawn ahead of time and rendered again. It drops the least recently shown ones now.
 
 ## [0.6.0] - 2026-11-08
 

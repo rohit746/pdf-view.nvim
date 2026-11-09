@@ -558,7 +558,11 @@ local function prefetch(s, stamp, cols, rows, cell)
       end
       local _, key, render = plan(s, info, stamp, cols, rows, cell, s.cx, next_page.cy)
       local cached = s.cache[key]
-      if s.rendering[key] or (cached and uv.fs_stat(cached)) then
+      if s.rendering[key] then
+        return step()
+      end
+      if cached and uv.fs_stat(cached) then
+        session.touch(s, key)
         return step()
       end
       start_render(s, key, render, function()
@@ -852,6 +856,7 @@ local function show(s, page, opts)
 
     local cached = s.cache[cache_key]
     if cached and uv.fs_stat(cached) then
+      session.touch(s, cache_key)
       return shown(cached)
     end
 
