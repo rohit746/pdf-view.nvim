@@ -285,6 +285,20 @@ local function write_buffer(s, lines)
   vim.bo[s.buf].modified = false
 end
 
+--- Mark `key` as just used, so that the render cache evicts it last.
+---@param s PdfView.Session
+---@param key string
+local function touch(s, key)
+  local order = s.cache_order
+  for index = #order, 1, -1 do
+    if order[index] == key then
+      table.remove(order, index)
+      break
+    end
+  end
+  order[#order + 1] = key
+end
+
 ---@param s PdfView.Session
 ---@param key string
 ---@param path string
@@ -292,9 +306,7 @@ local function remember(s, key, path)
   if s.cache[key] and s.cache[key] ~= path then
     os.remove(s.cache[key])
   end
-  if not s.cache[key] then
-    s.cache_order[#s.cache_order + 1] = key
-  end
+  touch(s, key)
   s.cache[key] = path
   while #s.cache_order > CACHE_LIMIT do
     local oldest = table.remove(s.cache_order, 1)
@@ -561,6 +573,7 @@ M.stamp_of = stamp_of
 M.layout_key = layout_key
 M.write_buffer = write_buffer
 M.remember = remember
+M.touch = touch
 M.purge_cache = purge_cache
 M.known_info = known_info
 M.remember_info = remember_info

@@ -3633,6 +3633,25 @@ describe("viewer page turns", function()
     eq(renders, vim.tbl_count(s.cache), "nothing was rendered again")
   end)
 
+  it("keeps a page shown from the cache over the ones shown less recently", function()
+    reset()
+    local s = open(make("cache-recent", pages(30)))
+    idle(s)
+    local first = transmitted()[1]
+    for _, keys in ipairs({ "10G", "15G", "20G", "25G", "30G" }) do -- fills the cache, the first page the oldest
+      press(keys)
+      idle(s)
+    end
+    eq(16, #s.cache_order, "the cache is full")
+    press("gg")
+    on_page(s, 1)
+    idle(s)
+    press("5G") -- renders more pages, which evict the least recently shown ones
+    idle(s)
+    eq(true, vim.tbl_contains(vim.tbl_values(s.cache), first), "the first page is still cached")
+    truthy(vim.uv.fs_stat(first), "its PNG is still there")
+  end)
+
   it("renders the next and the previous page ahead of time", function()
     reset()
     local s = open(make("prefetch", pages(7)))
