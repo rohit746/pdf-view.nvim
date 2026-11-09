@@ -183,7 +183,7 @@ local TOP = { cy = 0 }
 ---@param jump? boolean a jump to a page (`gg`, `G`, a bookmark) moves to `anchor` even on the page that is on screen;
 --- a page turn that cannot go further (the last page, the top of the first one) leaves the view where it is
 local function go(s, page, anchor, jump)
-  if s.closed then
+  if s.closed or (page == math.huge and not s.count) then -- `G` before the last page is known
     return
   end
   if jump then

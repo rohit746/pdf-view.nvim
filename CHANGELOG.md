@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - The cursor no longer stays hidden after leaving a viewer when `guicursor` is empty.
+- `G` pressed before the page count is known (a large document still opening, a cancelled password prompt) no
+  longer asks for page NaN with facing pages on. It does nothing until the first page is on screen.
 
 ## [0.6.0] - 2026-11-08
 
