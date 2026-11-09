@@ -2337,6 +2337,28 @@ describe("viewer cursor", function()
     truthy(hidden())
   end)
 
+  it("clears the hidden cursor before restoring an empty 'guicursor'", function()
+    reset()
+    local original = vim.o.guicursor
+    vim.o.guicursor = ""
+    local s = open(make("cursor-empty", pages(1)))
+    truthy(hidden())
+    local flushed = {}
+    with_stub(vim.cmd, "redraw", function()
+      flushed[#flushed + 1] = vim.o.guicursor
+    end, function()
+      vim.cmd.enew()
+    end)
+    -- the TUI keeps a blended cursor invisible once styles are off, so a group-free value has to reach it first
+    eq({ "a:block" }, flushed)
+    eq("", vim.o.guicursor)
+    vim.api.nvim_set_current_buf(s.buf)
+    truthy(hidden(), "hidden again on return")
+    vim.cmd.enew()
+    eq("", vim.o.guicursor)
+    vim.o.guicursor = original
+  end)
+
   it("brings the cursor back when the viewer is closed", function()
     reset()
     local original = vim.o.guicursor

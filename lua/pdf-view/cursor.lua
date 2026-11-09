@@ -37,6 +37,12 @@ function M.show(buf)
   if not owner or (buf and buf ~= owner) then
     return
   end
+  if saved == "" then
+    -- An empty 'guicursor' makes the TUI stop setting cursor styles without undoing the blend's "invisible", so the
+    -- cursor would stay hidden. A value with no highlight group clears it, once it reaches the UI at a redraw.
+    vim.o.guicursor = "a:block"
+    vim.cmd.redraw()
+  end
   vim.o.guicursor = saved
   owner, saved = nil, nil
 end
