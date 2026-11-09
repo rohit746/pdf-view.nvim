@@ -624,6 +624,10 @@ local function show_text_instead(s, win, page, reason)
   if s.page_text ~= reason then
     display_message(s, win, reason) -- until the text is read, and for good when it cannot be
   end
+  -- `relayout()` shows the text again only when the window or the file changes
+  local cols, rows = text_area(win)
+  local stat = uv.fs_stat(s.path)
+  s.requested_key, s.requested_stamp = layout_key(cols, rows, terminal.cell_size()), stat and stamp_of(stat)
   local function shown_here()
     return gen == s.gen and vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == s.buf
   end

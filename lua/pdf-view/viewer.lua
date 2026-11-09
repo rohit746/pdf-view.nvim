@@ -118,7 +118,8 @@ local function set_global_autocmds()
     desc = "Keep PDF pages from being scrolled out of their window",
     callback = function()
       for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-        if sessions[vim.api.nvim_win_get_buf(win)] then
+        local s = sessions[vim.api.nvim_win_get_buf(win)]
+        if s and not s.page_text then -- the text shown instead of a page is scrolled like any text
           reset_view(win)
         end
       end

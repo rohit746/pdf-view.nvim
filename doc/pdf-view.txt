@@ -371,7 +371,9 @@ draw it too, but keep Kitty graphics by default.
 TERMINALS WITHOUT IMAGES                                *pdf-view-text-only*
 
 In a terminal that can show no images, the viewer says why at the top of the
-window and shows the text of the page under it. The page keys turn the pages.
+window and shows the text of the page under it. The page keys turn the pages,
+and `<C-e>`, `<C-y>`, `<C-d>` and `<C-u>` scroll a page's text that is taller
+than the window.
 
 ==============================================================================
 ZELLIJ                                                     *pdf-view-zellij*
