@@ -677,9 +677,8 @@ function M.forward_search(opts)
         local from = vim.api.nvim_win_is_valid(source_win) and source_win or 0
         vim.api.nvim_win_call(from, function()
           vim.cmd("vertical rightbelow split")
-          require("pdf-view.viewer").open(pdf)
+          s = session.sessions[require("pdf-view.viewer").open(pdf)]
         end)
-        s = session.sessions[vim.fn.bufnr(pdf)]
       end
       if s then
         show_synced(s, boxes)
@@ -735,10 +734,16 @@ end
 --- not a viewer, else in a vertical split.
 ---@param source PdfView.SyncSource
 local function open_source(source)
-  local target
-  local buf = vim.fn.bufnr(source.file)
+  local target, buf
+  -- not bufnr(): it takes a pattern, and matches another buffer with this path inside its name
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_get_name(b) == source.file then
+      buf = b
+      break
+    end
+  end
   for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    if buf ~= -1 and vim.api.nvim_win_get_buf(win) == buf then
+    if buf and vim.api.nvim_win_get_buf(win) == buf then
       target = win
       break
     end
