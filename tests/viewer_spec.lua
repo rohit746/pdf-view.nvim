@@ -3841,6 +3841,24 @@ describe("viewer password-protected documents", function()
     eq(2, s.count)
     vim.fn.inputsecret = nil
   end)
+
+  it("stays put on G while the page count is unknown, with facing pages", function()
+    for _, spread in ipairs({ "on", "cover", "off" }) do
+      setup({ spread = spread })
+      reset()
+      answer({ "" })
+      local s = open(locked("unknown-count-" .. spread, 3))
+      eq(nil, s.count)
+      local jumps = #s.jumps
+      press("G")
+      eq(nil, s.target, spread)
+      eq(jumps, #s.jumps, "a jump recorded with " .. spread)
+      settle(s)
+      eq(0, s.slot, spread)
+    end
+    setup()
+    vim.fn.inputsecret = nil
+  end)
 end)
 
 describe("viewer recolouring", function()
