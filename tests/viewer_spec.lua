@@ -4107,6 +4107,42 @@ describe("viewer SyncTeX", function()
     harness.near(396, tonumber(y), 792 / fit.rows, "y")
     setup()
   end)
+
+  it("inverse search opens the source, not another file whose path ends with the source's", function()
+    setup({ synctex = fake })
+    reset()
+    local pdf, tex = project("sync-elsewhere")
+    answer("edit", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Input:./sync-elsewhere.tex",
+      "Line:7",
+      "Column:-1",
+      "SyncTeX result end",
+    })
+    -- bufnr(tex) takes this buffer for the source's
+    local backup = dir .. "/backup" .. tex
+    vim.fn.mkdir(vim.fs.dirname(backup), "p")
+    vim.fn.writefile({ "backup" }, backup)
+    vim.cmd.edit(vim.fn.fnameescape(backup))
+    local backup_win = vim.api.nvim_get_current_win()
+    vim.cmd("vertical rightbelow split")
+    local s = open(pdf)
+    local win = vim.api.nvim_get_current_win()
+    local fit = s.fit
+    local row, col = fit.pad_top + math.floor(fit.rows / 2), fit.pad_left + math.floor(fit.cols / 2)
+    with_stub(vim.fn, "getmousepos", function()
+      return { winid = win, winrow = row + 2, wincol = col + 1 }
+    end, function()
+      press(vim.keycode("<2-LeftMouse>"))
+      wait_for(function()
+        return vim.api.nvim_buf_get_name(0) == tex
+      end, "the source")
+    end)
+    eq(7, vim.api.nvim_win_get_cursor(0)[1])
+    eq(backup_win, vim.api.nvim_get_current_win(), "the source replaces the backup in the window before the viewer")
+    setup()
+  end)
 end)
 
 describe("viewer spreads", function()
