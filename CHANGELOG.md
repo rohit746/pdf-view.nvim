@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format follows
   longer asks for page NaN with facing pages on. It does nothing until the first page is on screen.
 - The render cache dropped the pages rendered first, even ones just shown again from it, so the page on screen could
   be deleted by the next page drawn ahead of time and rendered again. It drops the least recently shown ones now.
+- In a terminal that can show no images, the text of a page taller than the window could not be scrolled past its
+  first screen: `<C-e>`, `<C-y>`, `<C-d>` and `<C-u>` scroll it now. Switching windows no longer reads the text
+  of every such viewer again.
 
 ## [0.6.0] - 2026-11-08
 

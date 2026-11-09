@@ -3528,6 +3528,66 @@ describe("viewer in a terminal that cannot show pages", function()
     setup()
     assert(ok, err)
   end)
+
+  it("scrolls to the end of a long page, and does not read it again on a window switch", function()
+    reset()
+    setup({ force = false, protocol = "kitty", placement = "placeholders" })
+    local detect = terminal.detect
+    terminal.detect = function()
+      return { name = "wezterm", term = "wezterm", placeholders = false }
+    end
+    local ok, err = pcall(function()
+      local texts = {}
+      for line = 1, 60 do
+        texts[line] = { x = 30, y = 3000 - 45 * line, text = "Line " .. line }
+      end
+      local s = open(make("text-long", { { w = 612, h = 3100, label = "Top", texts = texts } }))
+      wait_for(function()
+        return vim.fn.search("Line 60", "nw") > 0
+      end, "the text of the page")
+      local win = vim.api.nvim_get_current_win()
+      local last = vim.api.nvim_buf_line_count(0)
+      truthy(last > vim.api.nvim_win_get_height(win), "taller than the window")
+      local function settle()
+        vim.api.nvim_exec_autocmds("WinScrolled", {}) -- Neovim fires it from its main loop, which a test never reaches
+        vim.wait(100, function()
+          return false
+        end)
+      end
+      press(vim.keycode("<C-e><C-e><C-e>"))
+      settle()
+      eq(4, vim.fn.line("w0", win), "scrolled, not put back at the top")
+      press(vim.keycode("<C-d><C-d><C-d><C-d><C-d><C-d><C-d><C-d>"))
+      settle()
+      eq(last, vim.fn.line("w$", win), "the last line can be reached")
+
+      local reads = 0
+      local info = mupdf.info
+      with_stub(mupdf, "info", function(...)
+        reads = reads + 1
+        return info(...)
+      end, function()
+        -- a float leaves the viewer's window as it is: its layout did not change
+        local float = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), true, {
+          relative = "editor",
+          row = 1,
+          col = 1,
+          width = 10,
+          height = 2,
+        })
+        vim.api.nvim_set_current_win(win)
+        vim.api.nvim_win_close(float, true)
+        vim.wait(300, function()
+          return false
+        end)
+      end)
+      eq(0, reads, "the text was not read again")
+      truthy(s.page_text, "still the text")
+    end)
+    terminal.detect = detect
+    setup()
+    assert(ok, err)
+  end)
 end)
 
 describe("viewer with sixel (foot, Windows Terminal, xterm)", function()
