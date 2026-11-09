@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-09
+
 ### Fixed
 
 - The cursor no longer stays hidden after leaving a viewer when `guicursor` is empty.
@@ -15,6 +17,10 @@ All notable changes to this project are documented here. The format follows
 - In a terminal that can show no images, the text of a page taller than the window could not be scrolled past its
   first screen: `<C-e>`, `<C-y>`, `<C-d>` and `<C-u>` scroll it now. Switching windows no longer reads the text
   of every such viewer again.
+- Inverse search (a double-click on a page) could open another file whose name contains the source's path, like a
+  backup copy under `/mnt/backup`, instead of the source itself. It opens the buffer of that exact file now.
+- Saving a reading position could misorder the stored positions or fail with "invalid order function for sorting",
+  because their sort called the position just written less than itself.
 
 ## [0.6.0] - 2026-11-08
 
@@ -295,7 +301,8 @@ First release.
   colour setup.
 - Configuration with validation: unknown or mistyped options raise immediately.
 
-[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rohit746/pdf-view.nvim/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.4.1...v0.5.0
