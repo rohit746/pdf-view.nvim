@@ -310,8 +310,8 @@ function M.attach(buf)
   return s
 end
 
---- Bring the viewers that are open in line with `config.options` after `setup()`: their keys, live reload, winbar
---- and colours.
+--- Bring the viewers that are open in line with `config.options` after `setup()`: their keys, live reload, winbar,
+--- colours and cursor.
 function M.apply_config()
   for _, s in pairs(sessions) do
     if not s.closed then
@@ -324,6 +324,12 @@ function M.apply_config()
       end
       show(s) -- a new `recolor` (or `highlight` colours) is part of the render cache key, so the page is drawn again
     end
+  end
+  local buf = vim.api.nvim_get_current_buf()
+  local focused = sessions[buf]
+  if focused and not focused.closed then -- a changed `hide_cursor`: no BufEnter follows to apply it
+    cursor.show()
+    cursor.hide(buf)
   end
 end
 

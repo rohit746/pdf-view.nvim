@@ -9,6 +9,8 @@ All notable changes to this project are documented here. The format follows
 
 - With an input plugin that prompts asynchronously (snacks.nvim, dressing.nvim, noice.nvim), confirming `/` or `?`
   after the viewer was closed searched the closed document again. The answer is ignored now.
+- `setup()` changing `hide_cursor` while a viewer is focused now shows or hides the cursor right away. Before, the
+  change only took effect after leaving the viewer and entering it again.
 
 ## [0.7.0] - 2026-11-09
 
