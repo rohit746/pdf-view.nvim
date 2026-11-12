@@ -1,6 +1,7 @@
 --- What the keys do: turning pages, scrolling, zooming, fitting, searching and jumping to bookmarks. Each action
 --- changes the session and asks `render` to show it.
 local config = require("pdf-view.config")
+local cursor = require("pdf-view.cursor")
 local layout = require("pdf-view.layout")
 local mupdf = require("pdf-view.mupdf")
 local render = require("pdf-view.render")
@@ -633,8 +634,8 @@ function M.forward_search(opts)
     return notify("forward search: the buffer has no file", vim.log.levels.WARN)
   end
   file = vim.fn.fnamemodify(file, ":p")
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local line, col = opts.line or cursor[1], opts.col or (cursor[2] + 1)
+  local pos = vim.api.nvim_win_get_cursor(0)
+  local line, col = opts.line or pos[1], opts.col or (pos[2] + 1)
   local candidates = opts.pdf and { vim.fn.fnamemodify(opts.pdf, ":p") } or sync_candidates(file)
   if #candidates == 0 then
     return notify(("forward search: no PDF found for %s"):format(vim.fn.fnamemodify(file, ":~:.")), vim.log.levels.WARN)
@@ -682,6 +683,13 @@ function M.forward_search(opts)
           vim.cmd("vertical rightbelow split")
           s = session.sessions[require("pdf-view.viewer").open(pdf)]
         end)
+        -- the viewer's BufEnter hid the cursor, and nvim_win_call comes back without the BufLeave that shows it
+        local current = vim.api.nvim_get_current_buf()
+        if session.sessions[current] then
+          cursor.hide(current)
+        else
+          cursor.show()
+        end
       end
       if s then
         show_synced(s, boxes)

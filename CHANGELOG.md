@@ -18,6 +18,8 @@ All notable changes to this project are documented here. The format follows
   directory is missing.
 - `:PdfView` and forward search opened the PDF in an unlisted buffer, missing from `:ls`, `:bnext` and bufferline
   plugins. The buffer is listed now, as with `:edit`.
+- A forward search that opened the PDF in a split left the cursor hidden in every window, until the viewer was
+  entered and left. The cursor stays visible in the source now.
 - With positioned placements (zellij, or tmux after a window switch), a page the terminal had lost and that could
   not be sent again (its cached PNG unreadable) stayed blank with no message. The page is rendered again now, or a
   message says why it cannot be shown.
