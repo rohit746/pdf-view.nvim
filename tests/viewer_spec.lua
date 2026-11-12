@@ -43,6 +43,9 @@ local function setup(opts)
 end
 
 local function reset()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    vim.wo[win].winfixbuf = false
+  end
   vim.cmd("silent! only")
   vim.cmd("silent! %bwipeout!")
   writes = {}
@@ -4376,6 +4379,86 @@ describe("viewer SyncTeX", function()
     eq(backup_win, vim.api.nvim_get_current_win(), "the source replaces the backup in the window before the viewer")
     setup()
   end)
+
+  for _, case in ipairs({
+    {
+      what = "a sidebar",
+      make = function()
+        vim.cmd.enew()
+        vim.bo.buftype = "nofile"
+      end,
+    },
+    {
+      what = "a 'winfixbuf' window",
+      make = function(other)
+        vim.cmd.edit(vim.fn.fnameescape(other))
+        vim.wo.winfixbuf = true
+      end,
+    },
+    {
+      what = "a floating window",
+      float = true,
+      make = function(other)
+        vim.cmd.badd(vim.fn.fnameescape(other))
+        local buf = vim.fn.bufnr(other)
+        vim.api.nvim_open_win(buf, true, { relative = "editor", row = 1, col = 1, width = 20, height = 3 })
+      end,
+    },
+  }) do
+    it("inverse search leaves " .. case.what .. " before the viewer as it is, and opens a split", function()
+      setup({ synctex = fake })
+      reset()
+      local pdf, tex = project("sync-special")
+      answer("edit", {
+        "SyncTeX result begin",
+        "Output:" .. pdf,
+        "Input:./sync-special.tex",
+        "Line:7",
+        "Column:-1",
+        "SyncTeX result end",
+      })
+      local other = dir .. "/sync-special-other.txt"
+      vim.fn.writefile({ "other" }, other)
+      local s, win, before_win, before_buf
+      if case.float then -- the viewer in the only window, and a floating window entered and left
+        s = open(pdf)
+        win = vim.api.nvim_get_current_win()
+        case.make(other)
+        before_win, before_buf = vim.api.nvim_get_current_win(), vim.api.nvim_get_current_buf()
+        vim.api.nvim_set_current_win(win)
+      else
+        case.make(other)
+        before_win, before_buf = vim.api.nvim_get_current_win(), vim.api.nvim_get_current_buf()
+        vim.cmd("vertical rightbelow split")
+        s = open(pdf)
+        win = vim.api.nvim_get_current_win()
+      end
+      eq(before_win, vim.fn.win_getid(vim.fn.winnr("#")), "the previous window")
+      local fit = s.fit
+      local row, col = fit.pad_top + math.floor(fit.rows / 2), fit.pad_left + math.floor(fit.cols / 2)
+      local errors = {}
+      with_stub(vim, "notify", function(message, level)
+        if level == vim.log.levels.ERROR then
+          errors[#errors + 1] = message
+        end
+      end, function()
+        with_stub(vim.fn, "getmousepos", function()
+          return { winid = win, winrow = row + 2, wincol = col + 1 }
+        end, function()
+          press(vim.keycode("<2-LeftMouse>"))
+          wait_for(function()
+            return vim.api.nvim_buf_get_name(0) == tex
+          end, "the source")
+        end)
+      end)
+      eq(0, #errors, table.concat(errors, "\n"))
+      eq(7, vim.api.nvim_win_get_cursor(0)[1])
+      eq(before_buf, vim.api.nvim_win_get_buf(before_win), case.what .. " keeps its buffer")
+      eq(3, #vim.api.nvim_tabpage_list_wins(0), "the source opens in a split")
+      eq("", vim.api.nvim_win_get_config(0).relative, "the source is not in a floating window")
+      setup()
+    end)
+  end
 end)
 
 describe("viewer spreads", function()
