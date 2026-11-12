@@ -353,14 +353,15 @@ function M.refresh(s)
     s.lost = true
   end
   if s.lost then
-    if not vim.uv.fs_stat(pic.path) then
+    local ok, commands = vim.uv.fs_stat(pic.path) ~= nil, {} ---@type boolean, string[]
+    if ok then
+      ok, commands = pcall(kitty.transmit, pic.id, pic.path, terminal.transmission())
+    end
+    if not ok then
+      -- the PNG is gone or cannot be read: the page is rendered and sent anew, or a message says why it cannot be
       s.picture, s.placed = nil, nil
       shown[s.buf] = nil
       return M.rerender(s)
-    end
-    local ok, commands = pcall(kitty.transmit, pic.id, pic.path, terminal.transmission())
-    if not ok then
-      return
     end
     kitty.send(commands)
     s.lost, s.cut_key = false, nil

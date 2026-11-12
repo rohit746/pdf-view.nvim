@@ -3174,6 +3174,46 @@ describe("viewer in zellij", function()
     eq({ path }, transmitted(), "sent again first")
   end)
 
+  --- Hide the page of `name` (zellij drops the image), then show it again while `kitty.transmit` fails `failures` times.
+  local function shown_again_failing(name, failures)
+    reset()
+    local s = open(make(name, pages(1)))
+    vim.cmd.enew()
+    vim.cmd.redraw()
+    wait_for(function()
+      return s.lost
+    end, "the page taken away")
+    writes = {}
+    local transmit = kitty.transmit
+    with_stub(kitty, "transmit", function(...)
+      if failures > 0 then
+        failures = failures - 1
+        error("cannot read the PNG")
+      end
+      return transmit(...)
+    end, function()
+      vim.cmd.buffer(s.buf)
+      vim.cmd.redraw()
+      wait_for(function()
+        return #last_batch() == 1 or vim.api.nvim_buf_get_lines(s.buf, 0, 1, false)[1]:find("pdf%-view:") ~= nil
+      end, "the page or a message")
+    end)
+    return s
+  end
+
+  it("renders the page again when it cannot send the lost page again", function()
+    local s = shown_again_failing("zellij-resend-once", 1)
+    eq(1, #last_batch(), "the page placed")
+    eq(1, #transmitted(), "sent once rendered again")
+    eq(false, s.lost)
+  end)
+
+  it("says why when it cannot send the lost page at all", function()
+    local s = shown_again_failing("zellij-resend-never", math.huge)
+    truthy(vim.api.nvim_buf_get_lines(s.buf, 0, 1, false)[1]:find("cannot read the PNG", 1, true))
+    eq(0, #last_batch(), "nothing placed")
+  end)
+
   it("takes the page away in another tab page", function()
     reset()
     local s = open(make("zellij-tab", pages(1)))
