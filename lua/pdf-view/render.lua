@@ -631,21 +631,34 @@ local function show_text_instead(s, win, page, reason)
   local function shown_here()
     return gen == s.gen and vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == s.buf
   end
+  --- The reason alone; a password-protected document asks for its password first, and is read again with it.
+  local function fail(err)
+    local locked = mupdf.password_error(err)
+    if locked then
+      return unlock(s, win, locked, function()
+        show_text_instead(s, win, page, reason)
+      end)
+    end
+    display_message(s, win, reason)
+  end
   s.job = mupdf.info(s.path, page or s.target or s.page, function(err, info)
     if gen ~= s.gen then
       return
     end
     s.job = nil
     if err or not info then
-      return display_message(s, win, reason)
+      return fail(err)
     end
     s.job = mupdf.text(s.path, info.page, function(text_err, text)
       if gen ~= s.gen then
         return
       end
       s.job = nil
-      if text_err or not shown_here() then
+      if not shown_here() then
         return display_message(s, win, reason)
+      end
+      if text_err then
+        return fail(text_err)
       end
       text = vim.trim(text or "")
       display_message(s, win, reason .. "\n\n" .. (text ~= "" and text or "(no text on this page)"))

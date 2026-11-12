@@ -3953,6 +3953,30 @@ describe("viewer password-protected documents", function()
     vim.fn.inputsecret = nil
   end)
 
+  it("asks for the password in a terminal that cannot show pages, and shows the text", function()
+    reset()
+    setup({ force = false, protocol = "kitty", placement = "placeholders" })
+    local detect = terminal.detect
+    terminal.detect = function()
+      return { name = "wezterm", term = "wezterm", placeholders = false }
+    end
+    local ok, err = pcall(function()
+      local prompts = answer({ "nope", "secret" })
+      local s = open(locked("text-locked", 2))
+      wait_for(function()
+        return text():find("Page 1", 1, true) ~= nil
+      end, "the text of page 1")
+      eq({ "Password for text-locked.pdf: ", "Wrong password for text-locked.pdf, try again: " }, prompts)
+      truthy(text():find("^pdf%-view: wezterm has no Unicode placeholders"), text())
+      eq({ 1, 2 }, { s.page, s.count })
+      eq(0, s.slot, "no image")
+    end)
+    terminal.detect = detect
+    vim.fn.inputsecret = nil
+    setup()
+    assert(ok, err)
+  end)
+
   it("stays put on G while the page count is unknown, with facing pages", function()
     for _, spread in ipairs({ "on", "cover", "off" }) do
       setup({ spread = spread })
