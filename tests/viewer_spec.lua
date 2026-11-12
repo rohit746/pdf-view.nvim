@@ -2608,6 +2608,43 @@ describe("viewer robustness", function()
     end, "a reload after the new file behind the link changed", 8000)
   end)
 
+  it("keeps reloading after a clean build deletes and recreates the PDF's directory", function()
+    reset()
+    local build = dir .. "/build"
+    vim.fn.mkdir(build, "p")
+    local path = build .. "/out.pdf"
+    fixture.write(path, pages(2))
+    local s = open(path)
+    eq(2, s.count)
+
+    for round, count in ipairs({ 3, 4 }) do
+      vim.fn.delete(build, "rf")
+      vim.fn.mkdir(build, "p")
+      fixture.write(path, pages(count))
+      wait_for(function()
+        return s.count == count and s.job == nil
+      end, "a reload after clean build " .. round, 8000)
+    end
+
+    fixture.write(path, pages(5))
+    wait_for(function()
+      return s.count == 5 and s.job == nil
+    end, "a reload of a plain write into the new directory", 8000)
+
+    -- gone for longer than the reload delay: the file is polled until the directory is back
+    vim.fn.delete(build, "rf")
+    vim.wait(300)
+    vim.fn.mkdir(build, "p")
+    fixture.write(path, pages(6))
+    wait_for(function()
+      return s.count == 6 and s.job == nil
+    end, "a reload once the directory came back", 8000)
+    fixture.write(path, pages(7))
+    wait_for(function()
+      return s.count == 7 and s.job == nil
+    end, "a reload of a write after the directory came back", 8000)
+  end)
+
   it("polls the file when its directory cannot be watched", function()
     reset()
     local path = make("no-events", pages(2))

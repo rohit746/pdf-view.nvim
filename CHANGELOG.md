@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
   change only took effect after leaving the viewer and entering it again.
 - In a terminal that cannot show pages, a password-protected PDF now asks for its password and shows the page's text.
   Before, it showed only why the pages could not be drawn.
+- Live reload stopped after the PDF's directory was deleted and created again, as a clean build does
+  (`rm -rf build && latexmk -outdir=build`). The viewer watches the new directory now, and polls the file while the
+  directory is missing.
 
 ## [0.7.0] - 2026-11-09
 
