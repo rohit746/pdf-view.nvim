@@ -25,6 +25,9 @@ All notable changes to this project are documented here. The format follows
   message says why it cannot be shown.
 - Forward search opened another split on every search when it named the PDF through a symlink and the viewer was
   opened by the real path, or the reverse. It finds the viewer by the file now.
+- Inverse search opened the TeX source in the window before the viewer even when that was a file-tree sidebar,
+  quickfix, help, terminal or floating window, replacing what it showed. In a `'winfixbuf'` window it failed with
+  E1513. It opens the source in a split next to the viewer now.
 
 ## [0.7.0] - 2026-11-09
 

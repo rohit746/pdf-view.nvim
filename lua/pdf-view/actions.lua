@@ -744,7 +744,7 @@ local function point_at(s, row, col)
 end
 
 --- Open `source` at its line: in a window of the current tab that shows it, else in the previous window when that is
---- not a viewer, else in a vertical split.
+--- a normal window with a file in it, else in a vertical split.
 ---@param source PdfView.SyncSource
 local function open_source(source)
   local target, buf
@@ -764,7 +764,15 @@ local function open_source(source)
   if not target then
     local previous = vim.fn.win_getid(vim.fn.winnr("#"))
     local current = vim.api.nvim_get_current_win()
-    if previous ~= 0 and previous ~= current and not session.sessions[vim.api.nvim_win_get_buf(previous)] then
+    -- not a sidebar, quickfix, help or terminal window, nor one that :edit cannot change or a floating one
+    if
+      previous ~= 0
+      and previous ~= current
+      and vim.api.nvim_win_get_config(previous).relative == ""
+      and not vim.wo[previous].winfixbuf
+      and vim.bo[vim.api.nvim_win_get_buf(previous)].buftype == ""
+      and not session.sessions[vim.api.nvim_win_get_buf(previous)]
+    then
       target = previous
     end
   end
