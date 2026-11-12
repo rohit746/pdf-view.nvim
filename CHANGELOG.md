@@ -23,6 +23,8 @@ All notable changes to this project are documented here. The format follows
 - With positioned placements (zellij, or tmux after a window switch), a page the terminal had lost and that could
   not be sent again (its cached PNG unreadable) stayed blank with no message. The page is rendered again now, or a
   message says why it cannot be shown.
+- Forward search opened another split on every search when it named the PDF through a symlink and the viewer was
+  opened by the real path, or the reverse. It finds the viewer by the file now.
 
 ## [0.7.0] - 2026-11-09
 
