@@ -4203,6 +4203,7 @@ describe("viewer SyncTeX", function()
       setup({ synctex = fake })
       reset()
       os.remove(log)
+      local original = vim.o.guicursor
       local pdf, tex = project("sync-forward")
       answer("view", {
         "SyncTeX result begin",
@@ -4227,6 +4228,7 @@ describe("viewer SyncTeX", function()
       end, "the viewer on page 2")
       eq(("view -i 12:4:%s -o %s"):format(tex, pdf), logged()[1])
       eq(source, vim.api.nvim_get_current_win(), "the cursor stays in the source")
+      eq(original, vim.o.guicursor, "the source's cursor is not hidden by the viewer opened beside it")
       eq(2, #vim.api.nvim_tabpage_list_wins(0))
       eq({ { 72, 360, 372, 400 } }, s.synced.rects)
       -- the typeset line is highlighted like the current search match
