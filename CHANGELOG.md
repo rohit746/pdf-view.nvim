@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows
   after the viewer was closed searched the closed document again. The answer is ignored now.
 - `setup()` changing `hide_cursor` while a viewer is focused now shows or hides the cursor right away. Before, the
   change only took effect after leaving the viewer and entering it again.
+- In a terminal that cannot show pages, a password-protected PDF now asks for its password and shows the page's text.
+  Before, it showed only why the pages could not be drawn.
 
 ## [0.7.0] - 2026-11-09
 
