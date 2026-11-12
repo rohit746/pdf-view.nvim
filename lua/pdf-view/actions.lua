@@ -473,6 +473,9 @@ end
 ---@param dir 1|-1
 local function prompt_search(s, dir)
   vim.ui.input({ prompt = dir > 0 and "/" or "?" }, function(input)
+    if s.closed then
+      return -- an input plugin that asks asynchronously leaves time to close the viewer before the answer
+    end
     if input == "" then
       input = s.last_needle
     end
