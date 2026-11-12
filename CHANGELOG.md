@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- With an input plugin that prompts asynchronously (snacks.nvim, dressing.nvim, noice.nvim), confirming `/` or `?`
+  after the viewer was closed searched the closed document again. The answer is ignored now.
+
 ## [0.7.0] - 2026-11-09
 
 ### Fixed
