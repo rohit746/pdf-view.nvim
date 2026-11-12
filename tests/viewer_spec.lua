@@ -1557,6 +1557,41 @@ describe("viewer search", function()
     eq(2, s.count)
   end)
 
+  it("reloads the file the same way when a window switch notices the change first", function()
+    reset()
+    setup({ live_reload = false }) -- the window switch is then the only thing that notices the change
+    local path = search_doc("search-relayout")
+    local s = open(path)
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    eq(3, #s.search.matches)
+    s.synced = { id = 1, page = 1, rects = { { 72, 360, 372, 400 } } } -- a forward search into the old build
+    fixture.write(path, {
+      { w = 612, h = 792, color = { 1, 1, 1 }, label = "alpha alpha alpha" },
+      { w = 612, h = 792, color = { 1, 1, 1 }, label = "alpha alpha" },
+    })
+    vim.api.nvim_exec_autocmds("WinEnter", {})
+    wait_for(function()
+      return s.count == 2 and s.search and #s.search.matches == 5 and s.job == nil and s.search_job == nil
+    end, "the search to be repeated on the new file", 8000)
+    eq(nil, s.synced, "the forward search highlight of the old build is dropped")
+
+    -- a file still being written keeps the old page on screen and is tried again
+    local file = assert(io.open(path, "wb"))
+    file:write("%PDF-1.4\ntruncated")
+    file:close()
+    vim.api.nvim_exec_autocmds("WinEnter", {})
+    vim.wait(300)
+    eq(nil, vim.api.nvim_buf_get_lines(s.buf, 0, -1, false)[1]:find("pdf%-view:"), "no error in place of the page")
+    fixture.write(path, pages(3))
+    wait_for(function()
+      return s.count == 3 and s.job == nil
+    end, "the retry to read the finished file", 8000)
+    setup()
+  end)
+
   it("searches a hidden viewer again only when a window shows it", function()
     reset()
     local path = search_doc("search-hidden")

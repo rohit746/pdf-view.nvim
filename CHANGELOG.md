@@ -28,6 +28,9 @@ All notable changes to this project are documented here. The format follows
 - Inverse search opened the TeX source in the window before the viewer even when that was a file-tree sidebar,
   quickfix, help, terminal or floating window, replacing what it showed. In a `'winfixbuf'` window it failed with
   E1513. It opens the source in a split next to the viewer now.
+- A changed PDF noticed first by a window switch or resize (always when `live_reload` is off) is now reloaded like
+  live reload does it: the search is repeated, an old forward search highlight is dropped, and a file still being
+  written keeps the old page on screen and is tried again instead of showing an error.
 
 ## [0.7.0] - 2026-11-09
 

@@ -57,6 +57,8 @@ end
 M.sessions = sessions
 M.reload = actions.reload
 
+--- Show the new version of the file of `s`, which live reload or a re-fit of the page (whichever comes first) found
+--- changed on disk.
 ---@param s PdfView.Session
 local function on_file_changed(s)
   if s.closed then
@@ -70,6 +72,7 @@ local function on_file_changed(s)
   show(s, nil, { retries = RELOAD_RETRIES, keep = true })
   rescan(s)
 end
+render.on_file_changed = on_file_changed
 
 local global_autocmds = false
 local warned_unwatched = false -- the notice that live reload could not be set up is shown once

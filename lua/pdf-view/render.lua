@@ -929,7 +929,9 @@ local function relayout(s)
   local cols, rows = text_area(win)
   local key = layout_key(cols, rows, terminal.cell_size())
   local stat = uv.fs_stat(s.path)
-  if key ~= s.requested_key or (stat and stamp_of(stat) ~= s.requested_stamp) then
+  if stat and s.requested_stamp and stamp_of(stat) ~= s.requested_stamp then
+    M.on_file_changed(s) -- before the watcher does, which then finds nothing new
+  elseif key ~= s.requested_key then
     show(s)
   end
 end
@@ -977,6 +979,13 @@ end
 --- again here.
 ---@type fun(s: PdfView.Session)
 M.on_reflow = function() end
+
+--- Called when the file of `s` changed on disk since its page was asked for. `viewer` reloads it here, as live
+--- reload does.
+---@type fun(s: PdfView.Session)
+M.on_file_changed = function(s)
+  show(s)
+end
 
 M.show = show
 M.relayout = relayout
