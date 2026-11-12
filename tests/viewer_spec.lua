@@ -4252,6 +4252,38 @@ describe("viewer SyncTeX", function()
     end
   )
 
+  it("forward search reuses the viewer on screen when the PDF is named through a symlink", function()
+    setup({ synctex = fake })
+    reset()
+    local pdf, tex = project("sync-symlink")
+    local link = dir .. "/sync-symlink-link.pdf"
+    os.remove(link)
+    assert(vim.uv.fs_symlink(pdf, link))
+    answer("view", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Page:2",
+      "x:72",
+      "y:400",
+      "h:72",
+      "v:400",
+      "W:300",
+      "H:40",
+      "SyncTeX result end",
+    })
+    vim.cmd.edit(vim.fn.fnameescape(tex))
+    local source = vim.api.nvim_get_current_win()
+    vim.cmd("vertical rightbelow split")
+    local s = open(pdf)
+    vim.api.nvim_set_current_win(source)
+    vim.cmd("PdfViewForward " .. vim.fn.fnameescape(link))
+    wait_for(function()
+      return s.synced ~= nil and s.page == 2 and s.job == nil and s.target == nil
+    end, "the viewer on page 2")
+    eq(2, #vim.api.nvim_tabpage_list_wins(0), "no other split opens")
+    setup()
+  end)
+
   it("forward search says so when the line is not in the SyncTeX data", function()
     setup({ synctex = fake })
     reset()

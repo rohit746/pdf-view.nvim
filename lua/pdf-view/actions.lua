@@ -665,9 +665,11 @@ function M.forward_search(opts)
         last_err = err and err:match("^cannot run") and err or last_err
         return try(index + 1)
       end
+      -- by the file, not the name: a symlink and the PDF it points to share the viewer
+      local real = vim.uv.fs_realpath(pdf) or pdf
       local s
       for _, candidate in pairs(session.sessions) do
-        if candidate.path == pdf and not candidate.closed then
+        if (vim.uv.fs_realpath(candidate.path) or candidate.path) == real and not candidate.closed then
           s = candidate
         end
       end
