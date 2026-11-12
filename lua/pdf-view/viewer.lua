@@ -378,6 +378,7 @@ function M.open(path)
     error(("pdf-view: cannot read `%s`"):format(path), 0)
   end
   local buf = vim.fn.bufadd(path)
+  vim.bo[buf].buflisted = true -- as :edit lists it, for :ls, :bnext and bufferlines
   M.attach(buf)
   vim.api.nvim_win_set_buf(0, buf)
   return buf

@@ -451,6 +451,12 @@ describe("viewer", function()
     setup()
   end)
 
+  it("lists the buffer it opens, as :edit does", function()
+    reset()
+    local buf = pdf_view.open(make("listed", pages(1)))
+    eq(true, vim.bo[buf].buflisted)
+  end)
+
   it("rejects an unreadable path in open()", function()
     local ok, err = pcall(pdf_view.open, dir .. "/nope.pdf")
     eq(false, ok)
