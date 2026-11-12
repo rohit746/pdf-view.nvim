@@ -58,6 +58,7 @@ function M.start(path, delay, on_change)
   --- Watch `file` through its directory.
   ---@param file string
   ---@return uv.uv_fs_event_t? events nil when the directory cannot be watched, or is on a network filesystem
+  ---@return uv.fs_stat.result? dir the directory being watched
   local function watch_dir(file)
     local dir = vim.fs.dirname(file)
     local statfs = uv.fs_statfs(dir)
@@ -68,18 +69,18 @@ function M.start(path, delay, on_change)
     if not events then
       return nil
     end
-    local name = vim.fs.basename(file)
+    local name, dir_name = vim.fs.basename(file), vim.fs.basename(dir)
     local ok = events:start(dir, {}, function(err, filename)
-      if err or (filename and filename ~= name) then
-        return
+      -- an error, or an event named after the directory itself, may mean the directory went away
+      if err or not filename or filename == name or filename == dir_name then
+        bump()
       end
-      bump()
     end)
     if not ok then
       events:close()
       return nil
     end
-    return events
+    return events, uv.fs_stat(dir)
   end
 
   --- Compare `file` with its last stat every `M.poll_interval` ms.
@@ -99,14 +100,40 @@ function M.start(path, delay, on_change)
 
   ---@param file string
   ---@return (uv.uv_fs_event_t|uv.uv_fs_poll_t)? handle nil when `file` cannot be watched at all
+  ---@return uv.fs_stat.result? dir the directory whose events `handle` hears, nil when it polls
   local function watch(file)
-    return watch_dir(file) or poll(file)
+    local events, dir = watch_dir(file)
+    if events then
+      return events, dir
+    end
+    return poll(file)
   end
 
-  local own = watch(path)
+  local own, own_dir = watch(path)
   if not own then
     timer:close()
     return nil
+  end
+  -- polling only because the directory did not exist: its events are wanted once it is back
+  local orphaned = not own_dir and not uv.fs_stat(vim.fs.dirname(path))
+
+  --- Watch the directory of `path` again when it was deleted, or deleted and created again (a clean build): events
+  --- stay bound to the directory that was removed. While it is missing, `path` is polled until it is back.
+  local function rearm()
+    local dir = uv.fs_stat(vim.fs.dirname(path))
+    if own_dir then
+      if dir and dir.dev == own_dir.dev and dir.ino == own_dir.ino then
+        return
+      end
+    elseif not (orphaned and dir) then
+      return
+    end
+    local handle, watched = watch(path)
+    if not handle then
+      return -- keep what there is
+    end
+    close(own)
+    own, own_dir, orphaned = handle, watched, not watched and not dir
   end
 
   local target, target_events ---@type string?, (uv.uv_fs_event_t|uv.uv_fs_poll_t)?
@@ -129,6 +156,7 @@ function M.start(path, delay, on_change)
     if stopped then
       return
     end
+    rearm()
     follow() -- the change may have been the link itself, now pointing somewhere else
     on_change()
   end)
