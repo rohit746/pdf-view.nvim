@@ -144,8 +144,8 @@ that key to Neovim, and the mappings are removed when the last viewer closes.
 
                                                               *pdf-view-zoom*
 Zoom 1 is the whole page fitted to the window; each `+` (see |pdf-view-keys|)
-makes it `zoom_step` times larger, up to `max_zoom`. Zooming keeps the middle of the
-window in the middle. Once the page is larger than the window a movement key
+makes it `zoom_step` times larger, up to `max_zoom`. Zooming keeps the
+middle of the window in the middle. Once the page is larger than the window a movement key
 scrolls it if it can and turns the page if it cannot: scrolling down past the
 bottom lands at the top of the next page, scrolling up past the top lands at
 the bottom of the previous one. The zoom stays when pages turn or the file
@@ -303,8 +303,20 @@ LUA API                                                      *pdf-view-api*
 
 require("pdf-view").setup({opts})                    *pdf-view.setup()*
     Configure the plugin; optional. See |pdf-view-config|. Calling it again
-    also gives open viewers the new `keymaps`, `live_reload` and
-    `reload_delay`.
+    also applies to the viewers already open:
+      `keymaps`                 their keys are mapped again
+      `live_reload`             their file watching stops or starts
+      `reload_delay`            and waits the new delay
+      `winbar`                  their winbar is shown or cleared
+      `recolor`, `highlight`    their page is drawn again with the new
+                                colours (a viewer where `i` was
+                                pressed keeps its own recolouring)
+      `hide_cursor`             the cursor is shown or hidden at once
+    `auto_open` and `extensions` apply to the files opened after it, and
+    `tmux_passthrough` only before the first page is shown (the tmux pane
+    is set up once). The other options are read when they are used, so
+    open viewers pick them up the next time they need them (a zoom step, a
+    search, a link, the next page drawn).
 
 require("pdf-view").open({path})                     *pdf-view.open()*
     Open {path} in the current window. Errors if it is not a readable file.
@@ -404,12 +416,87 @@ CONFIGURATION                                              *pdf-view-config*
                                -- |pdf-view-continuous|
       spread = "off",          -- "off" | "on" | "cover", see |pdf-view-spread|
       cell_size = nil,         -- { width, height } px if undetectable
-      keymaps = { ... },       -- see README; `false` for none, then map
-                               -- |pdf-view.action()| yourself
+      keymaps = {              -- a list per action; `false` for none, then
+                               -- map |pdf-view.action()| yourself
+        down = { "j", "<Down>" },
+        up = { "k", "<Up>" },
+        half_down = { "<C-d>" },
+        half_up = { "<C-u>" },
+        right = { "l", "<Right>" },
+        left = { "h", "<Left>" },
+        scroll_down = { "<ScrollWheelDown>" }, -- `{}` leaves it to Neovim
+        scroll_up = { "<ScrollWheelUp>" },
+        scroll_right = { "<ScrollWheelRight>" },
+        scroll_left = { "<ScrollWheelLeft>" },
+        next = { "<PageDown>", "<C-f>" },
+        prev = { "<PageUp>", "<BS>", "<C-b>" },
+        first = { "gg", "<Home>" },
+        last = { "G", "<End>" },
+        zoom_in = { "+", "=" },
+        zoom_out = { "-" },
+        zoom_reset = { "0" },
+        fit_width = { "w" },
+        fit_height = { "W" },
+        fit_content = { "c" },
+        rotate = { ">" },
+        rotate_back = { "<" },
+        search = { "/" },
+        search_back = { "?" },
+        search_next = { "n" },
+        search_prev = { "N" },
+        search_clear = { "<Esc>" },
+        search_list = { "g/" },
+        outline = { "gO" },
+        follow_link = { "f" },
+        yank_text = { "y" },
+        show_text = { "t" },
+        jump_back = { "<C-o>" },
+        jump_forward = { "<C-i>", "<Tab>" },
+        mark = { "m" },          -- then a to z
+        goto_mark = { "'", "`" }, -- then a to z, or ' for the latest jump
+        inverse_search = { "<2-LeftMouse>" }, -- see |pdf-view-synctex|
+        spread = { "d" },
+        recolor = { "i" },
+        reload = { "r" },
+        close = { "q" },
+        help = { "g?" },
+      },
     })
 <
 
-Unknown or mistyped options raise an error.
+Unknown or mistyped options raise an error. A keymap list replaces the
+default list for that action, and a key given to one action is taken from
+the default action that had it (`next = { "n" }` leaves `search_next` with no
+key). Giving one key to two actions is an error. |pdf-view-keys| says what
+each action does.
+
+==============================================================================
+LIVE RELOAD                                          *pdf-view-live-reload*
+
+With `live_reload` on, the directory of every open PDF is watched. Once the
+file has been quiet for `reload_delay` ms it is read again and the page is
+drawn again, on the same page number. A file that is still being written
+(a compiler emitting it) is tried again for a few seconds while the previous
+page stays on screen. A PDF opened through a symbolic link is followed to
+the file the link points to. |:edit| reads the file again by hand, and stays
+on the same page too.
+
+On NFS, SMB, sshfs and WSL's `/mnt/c` (detected on Linux), and wherever the
+directory cannot be watched, the file is checked for changes every 500 ms
+instead. If even that cannot be set up, a notice says live reload is off.
+
+==============================================================================
+TMUX                                                         *pdf-view-tmux*
+
+Inside tmux (3.3a or newer) the plugin runs
+`tmux set -p allow-passthrough on` for its own pane. To manage that
+yourself, set `tmux_passthrough = false` and add `set -g allow-passthrough on`
+to tmux.conf. tmux must also pass 24-bit colour on: if
+`:checkhealth pdf-view` says it does not, add
+`set -as terminal-features ',xterm-kitty:RGB'` (with the outer `$TERM`) to
+tmux.conf. With WezTerm, Konsole, iTerm2, VS Code or a sixel terminal, also
+`set -g focus-events on`, so that a page leaves the screen when another tmux
+window is shown, and comes back with it.
 
 ==============================================================================
 POSITIONED PLACEMENTS                                  *pdf-view-positioned*

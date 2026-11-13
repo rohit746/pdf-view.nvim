@@ -40,6 +40,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The help file's `pdf-view.setup()` entry said a second `setup()` gives open viewers only the new `keymaps`,
+  `live_reload` and `reload_delay`; it lists all it applies now (also `winbar`, `recolor`, the `highlight` colours and
+  `hide_cursor`). The help file also lists every keymap action with its default keys, and has the README's live reload
+  and tmux notes (`:help pdf-view-live-reload`, `:help pdf-view-tmux`). The README's module list covers every module,
+  `positions.lua`, `synctex.lua` and `rotation.lua` among them.
 - The mouse wheel did nothing over a viewer while the cursor was in another window, such as the TeX or Typst source
   next to its PDF. While a viewer is open, the wheel keys are now also mapped globally in normal and insert mode: over
   a viewer they move it, over other windows they scroll as before. A wheel key mapped by the user is left alone, and
