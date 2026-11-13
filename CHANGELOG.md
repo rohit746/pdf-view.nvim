@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The mouse wheel did nothing over a viewer while the cursor was in another window, such as the TeX or Typst source
+  next to its PDF. While a viewer is open, the wheel keys are now also mapped globally in normal and insert mode: over
+  a viewer they move it, over other windows they scroll as before. A wheel key mapped by the user is left alone, and
+  the mappings are removed when the last viewer closes.
 - With an input plugin that prompts asynchronously (snacks.nvim, dressing.nvim, noice.nvim), confirming `/` or `?`
   after the viewer was closed searched the closed document again. The answer is ignored now.
 - `setup()` changing `hide_cursor` while a viewer is focused now shows or hides the cursor right away. Before, the
