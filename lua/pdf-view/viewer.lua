@@ -46,6 +46,16 @@ end
 
 local own_views = 0 -- views made by `separate`, numbering their names
 local entered = 0 -- buffer entries, for `PdfView.Session.entered`
+---@type table<string, integer> per file, `entered` of the viewer of it that was used last, open or not
+local last_entered = {}
+
+--- Note that the viewer `s` is the one used last, of its file and of all.
+---@param s PdfView.Session
+local function mark_entered(s)
+  entered = entered + 1
+  s.entered = entered
+  last_entered[s.path] = entered
+end
 
 --- The windows (not floating) that show the viewer `s`, and the one of them that keeps it when `separate` gives the
 --- others views of their own: the window it was drawn in, else the current one, else the first.
@@ -64,6 +74,18 @@ local function shared_windows(s)
     keep = vim.tbl_contains(wins, current) and current or wins[1]
   end
   return wins, keep
+end
+
+--- Wipe the windows' own views (`give_own_view`) that are in no window and whose window is closed: hidden while their
+--- window shows another buffer, they come back with `<C-o>` there.
+local function wipe_own_views()
+  for _, s in ipairs(vim.tbl_values(sessions)) do
+    if s.own_view and not s.closed and not (s.home and vim.api.nvim_win_is_valid(s.home)) then
+      if #vim.fn.win_findbuf(s.buf) == 0 then
+        pcall(vim.api.nvim_buf_delete, s.buf, { force = true })
+      end
+    end
+  end
 end
 
 --- Where the viewer `s` is, for `resume`: with the layout of an e-book, whose page numbers follow it.
@@ -93,8 +115,8 @@ end
 local function leave(s)
   local where = position(s)
   resume[s.buf] = kept(s)
-  -- a window's own view comes and goes with the window: the PDF's reading position is its viewer's
-  if config.options.remember_position and not s.own_view then
+  -- of several windows on the file (`separate`), the reading position is the one of the window used last
+  if config.options.remember_position and (last_entered[s.path] or 0) <= s.entered then
     pcall(positions.set, s.path, where)
   end
 end
@@ -203,6 +225,13 @@ local function set_global_autocmds()
       M.schedule_separate()
     end,
   })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    group = augroup,
+    desc = "Wipe the PDF views of their own that closed windows had",
+    callback = function()
+      vim.schedule(wipe_own_views) -- the window is still there while this runs
+    end,
+  })
   vim.api.nvim_create_autocmd({ "FocusGained", "UIEnter" }, {
     group = augroup,
     desc = "Send PDF pages again when tmux is attached from another terminal",
@@ -252,6 +281,8 @@ local function set_global_autocmds()
         if not s.closed then
           leave(s)
         end
+      end
+      for _, s in pairs(sessions) do
         destroy(s)
       end
     end,
@@ -307,9 +338,8 @@ function M.attach(buf)
   local bo = vim.bo[buf]
   bo.buftype = "nofile"
   bo.swapfile = false
-  -- a window's own view is not a buffer to switch to: it goes when its window closes or shows another buffer
-  bo.bufhidden = own_view and "wipe" or "hide"
-  if own_view then
+  bo.bufhidden = "hide"
+  if own_view then -- not a buffer to switch to: it goes when its window closes (`wipe_own_views`)
     bo.buflisted = false
   end
   bo.undolevels = -1
@@ -323,6 +353,9 @@ function M.attach(buf)
     callback = function()
       keep_worker(s)
       local win = vim.api.nvim_get_current_win()
+      if s.own_view then
+        s.home = win
+      end
       local wins, keep = shared_windows(s)
       if #wins > 1 then
         M.schedule_separate()
@@ -368,8 +401,7 @@ function M.attach(buf)
     buffer = buf,
     desc = "Hide the cursor over the PDF page",
     callback = function()
-      entered = entered + 1
-      s.entered = entered
+      mark_entered(s)
       cursor.hide(buf)
     end,
   })
@@ -430,8 +462,7 @@ function M.attach(buf)
 
   if vim.api.nvim_get_current_buf() == buf then
     cursor.hide(buf) -- BufEnter may already have fired for this buffer
-    entered = entered + 1
-    s.entered = entered
+    mark_entered(s)
   end
   vim.schedule(function()
     relayout(s)
@@ -515,13 +546,29 @@ end
 ---@param s PdfView.Session
 ---@param win integer
 local function give_own_view(s, win)
-  own_views = own_views + 1
+  -- the view this window had of the file, before it showed another buffer
+  for _, other in pairs(sessions) do
+    if other.own_view and other.home == win and other.path == s.path and not other.closed then
+      if #vim.fn.win_findbuf(other.buf) == 0 and pcall(vim.api.nvim_win_set_buf, win, other.buf) then
+        return
+      end
+    end
+  end
   local buf = vim.api.nvim_create_buf(false, true)
-  if not pcall(vim.api.nvim_buf_set_name, buf, ("pdf-view://%d/%s"):format(own_views, s.path)) then
-    return vim.api.nvim_buf_delete(buf, { force = true }) -- a buffer of that name exists: leave the window as it is
+  local named = false
+  for _ = 1, 100 do -- a session may have brought back views with these numbers
+    own_views = own_views + 1
+    named = pcall(vim.api.nvim_buf_set_name, buf, ("pdf-view://%d/%s"):format(own_views, s.path))
+    if named then
+      break
+    end
+  end
+  if not named then
+    return vim.api.nvim_buf_delete(buf, { force = true })
   end
   resume[buf] = vim.deepcopy(kept(s))
   local view = M.attach(buf)
+  view.home = win
   view.recolor, view.spread, view.scrolled, view.synced = s.recolor, s.spread, s.scrolled, s.synced
   view.count, view.reflowable, view.laid_out = s.count, s.reflowable, s.laid_out
   view.last_needle, view.locked = s.last_needle, s.locked
@@ -587,6 +634,10 @@ function M.open(path)
   local stat = uv.fs_stat(path)
   if not stat or stat.type ~= "file" then
     error(("pdf-view: cannot read `%s`"):format(path), 0)
+  end
+  local current = sessions[vim.api.nvim_get_current_buf()]
+  if current and current.own_view and current.path == path then -- the window's own view of it: it stays
+    return current.buf
   end
   local buf = vim.fn.bufadd(path)
   vim.bo[buf].buflisted = true -- as :edit lists it, for :ls, :bnext and bufferlines

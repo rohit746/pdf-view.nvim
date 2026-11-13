@@ -25,7 +25,8 @@ All notable changes to this project are documented here. The format follows
   own, an unlisted buffer that starts on the same page, fit, zoom and search and then turns its pages, fits and zooms
   on its own; a window that switches to a PDF already on screen in another gets one too. Before, turning the page in
   one window turned it in both, and with positioned placements (zellij, WezTerm, Konsole) only one of them showed the
-  page. Forward search moves the window on the PDF that was used last.
+  page. Forward search moves the window on the PDF that was used last, and the position remembered for the next time
+  the PDF is opened is that window's.
 
 ### Fixed
 

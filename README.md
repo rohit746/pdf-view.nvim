@@ -119,9 +119,10 @@ sessions this way. Add it with `vim.opt.sessionoptions:append("blank")`.
 Split a viewer (`:split`, `:vsplit`, `<C-w>v`) to read two pages of one PDF at once, such as a figure and the text
 about it: each window turns its pages, fits and zooms on its own. The new window starts where the viewer was, with its
 search, jump list and marks, in a view of its own: an unlisted buffer named `pdf-view://2//path/to/paper.pdf`, which
-goes away with its window. A window that switches to a PDF already on screen in another (`:b`, `:PdfView`) gets one
-too. The window that showed the PDF first keeps the viewer's own buffer. Floating windows, such as a picker's preview,
-show the same page as the viewer.
+goes away with its window (while the window shows another buffer it is kept, so `<C-o>` comes back to it). A window
+that switches to a PDF already on screen in another (`:b`, `:PdfView`) gets one too. The window that showed the PDF
+first keeps the viewer's own buffer, and the position remembered for next time is the one of the window used last.
+Floating windows, such as a picker's preview, show the same page as the viewer.
 
 A PDF opens where you left it: the page, fit, zoom and rotation of the last 100 PDFs are kept in
 `stdpath("state")/pdf-view/positions.json`, so this survives restarting Neovim. `remember_position = false` turns it

@@ -117,6 +117,7 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field worker_timer? uv.uv_timer_t stops the mutool worker once the viewer has been in no window for a while
 ---@field reflow? PdfView.Layout the layout a reflowable document was last asked for in this viewer's window
 ---@field own_view? boolean the buffer is a window's own view of a PDF that another window shows (`viewer.separate`)
+---@field home? integer the window that an own view belongs to: it is wiped once that window closes
 ---@field entered integer when the buffer was last entered, to tell which of the viewers of a PDF was used last
 ---@field closed boolean
 

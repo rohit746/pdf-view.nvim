@@ -50,11 +50,13 @@ Split a viewer (|:split|, |:vsplit|, |CTRL-W_v|) to read two pages of one PDF
 at once: each window turns its pages, fits and zooms on its own. The new
 window starts where the viewer was, with its search, jump list and marks,
 in a view of its own: an unlisted buffer named
-`pdf-view://2//path/to/file.pdf`, wiped when its window closes or shows
-another buffer. A window that switches to a PDF already on screen in
-another (|:b|, |:PdfView|) gets one too. The window that showed the PDF
-first keeps the viewer's own buffer, and only its position is remembered.
-Floating windows show the same page as the viewer.
+`pdf-view://2//path/to/file.pdf`, wiped when its window closes. While the
+window shows another buffer the view is kept, so |CTRL-O| there comes back
+to it. A window that switches to a PDF already on screen in another (|:b|,
+|:PdfView|) gets one too. The window that showed the PDF first keeps the
+viewer's own buffer. The position remembered for the next time the PDF is
+opened is the one of the window used last. Floating windows show the same
+page as the viewer.
 
 A PDF opens at the page, fit, zoom and rotation it was left at, also after
 Neovim is restarted: the last 100 are kept in
