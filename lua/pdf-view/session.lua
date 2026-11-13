@@ -494,9 +494,14 @@ local function wrap_text(text, cols)
         line = ""
       end
       line = line == "" and word or (line .. " " .. word)
-      while width(line) > cols do -- one word wider than the window, such as a long path
-        lines[#lines + 1] = vim.fn.strcharpart(line, 0, cols)
-        line = vim.fn.strcharpart(line, cols)
+      while width(line) > cols and vim.fn.strchars(line) > 1 do -- one word wider than the window, such as a path
+        -- cut by cells, not characters: a double-width character takes two (at least one character per piece)
+        local n = 1
+        while width(vim.fn.strcharpart(line, 0, n + 1)) <= cols do
+          n = n + 1
+        end
+        lines[#lines + 1] = vim.fn.strcharpart(line, 0, n)
+        line = vim.fn.strcharpart(line, n)
       end
     end
     lines[#lines + 1] = line
