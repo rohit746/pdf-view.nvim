@@ -268,10 +268,37 @@ local function check_vscode_images(name)
   end
 end
 
+--- Ask the terminal its name when the environment does not give it (see `terminal.name_askable()`), and say what
+--- it answered.
+local function check_terminal_name()
+  if terminal.name_askable() then
+    local asked = false
+    terminal.ask_sixel(function()
+      asked = true
+    end)
+    vim.wait(2000, function()
+      return asked
+    end, 10)
+  end
+  local answer = terminal.xtversion()
+  if answer then
+    vim.health.info(
+      ("the environment does not name the terminal; it named itself `%s` when asked (XTVERSION)"):format(answer)
+    )
+  elseif answer == false then
+    vim.health.info("the environment does not name the terminal, and it did not give its name when asked (XTVERSION)")
+  elseif
+    terminal.detect().name == nil
+    and terminal.ui_attached()
+    and not (terminal.in_tmux() or terminal.in_zellij() or terminal.replies_readable())
+  then
+    vim.health.info(
+      "the environment does not name the terminal, and it cannot be asked its name here (that needs Neovim 0.12)"
+    )
+  end
+end
+
 local function check_terminal()
-  local detected = terminal.detect()
-  local positioned = terminal.placement() == "positioned"
-  local printed = terminal.printed()
   if config.options.force then
     vim.health.warn("`force = true`: terminal detection is skipped")
   elseif terminal.gui_only() then
@@ -280,7 +307,12 @@ local function check_terminal()
       "Open the PDF in Neovim running in a terminal that shows images (kitty, Ghostty, WezTerm, ...).",
     })
     return
+  else
+    check_terminal_name()
   end
+  local detected = terminal.detect()
+  local positioned = terminal.placement() == "positioned"
+  local printed = terminal.printed()
   if terminal.protocol() == "sixel" then
     local name = IMAGE_TERMINALS[detected.name] or detected.name or ("`" .. (detected.term or "") .. "`")
     if config.options.force then
