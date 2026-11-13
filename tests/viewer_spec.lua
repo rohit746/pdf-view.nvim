@@ -1910,20 +1910,118 @@ describe("viewer links", function()
     on_page(s, 1)
   end)
 
-  it("opens an address with vim.ui.open()", function()
-    reset()
-    local s = open(linked("links-open"))
-    local opened
-    with_stub(vim.ui, "open", function(uri)
-      opened = uri
-      return nil, nil
+  --- Follow the link the picker offers first that `choose` accepts, answering the question whether to open it with
+  --- `answer` (1 opens, 2 cancels). Returns the questions asked and the addresses handed to `vim.ui.open()`.
+  ---@return string[] asked, string[] opened
+  local function follow_answering(answer, choose)
+    local asked, opened = {}, {}
+    with_stub(vim.fn, "confirm", function(message)
+      asked[#asked + 1] = message
+      return answer
     end, function()
-      follow(function(items)
-        return items[1]
+      with_stub(vim.ui, "open", function(uri)
+        opened[#opened + 1] = uri
+        return nil, nil
+      end, function()
+        follow(choose)
       end)
     end)
-    eq("https://example.com/", opened)
+    return asked, opened
+  end
+
+  it("opens a web address with vim.ui.open() without asking", function()
+    reset()
+    local s = open(linked("links-open"))
+    local asked, opened = follow_answering(2, function(items)
+      return items[1]
+    end)
+    eq({}, asked)
+    eq({ "https://example.com/" }, opened)
     eq(1, s.page)
+  end)
+
+  --- A page with links that can start a program: a `file:` address, a Launch action, a custom scheme, and a web
+  --- address in capitals.
+  local function risky(name)
+    return make(name, {
+      vim.tbl_extend("force", LETTER, {
+        links = {
+          { rect = { 70, 690, 250, 730 }, uri = "file:///Applications/Calculator.app" },
+          { rect = { 70, 590, 250, 630 }, action = "<< /S /Launch /F (/usr/bin/xcalc) >>" },
+          { rect = { 70, 490, 250, 530 }, uri = "vscode://file/etc/passwd" },
+          { rect = { 70, 390, 250, 430 }, uri = "HTTPS://example.com/" },
+        },
+      }),
+    })
+  end
+
+  local function by_uri(pattern)
+    return function(items)
+      for _, item in ipairs(items) do
+        if item.uri and item.uri:find(pattern) then
+          return item
+        end
+      end
+      error("no link matching " .. pattern .. " in " .. vim.inspect(items))
+    end
+  end
+
+  it("asks before opening a file: address, and opens nothing when declined", function()
+    reset()
+    local s = open(risky("links-file-declined"))
+    local asked, opened = follow_answering(2, by_uri("^file:///Applications"))
+    eq(1, #asked)
+    truthy(asked[1]:find("file:///Applications/Calculator.app", 1, true), vim.inspect(asked))
+    eq({}, opened)
+    eq(1, s.page)
+  end)
+
+  it("opens a file: address once the user agrees", function()
+    reset()
+    open(risky("links-file-agreed"))
+    local asked, opened = follow_answering(1, by_uri("^file:///Applications"))
+    eq(1, #asked)
+    eq({ "file:///Applications/Calculator.app" }, opened)
+  end)
+
+  it("asks before following a Launch action, with the whole address", function()
+    reset()
+    open(risky("links-launch"))
+    local asked, opened = follow_answering(2, by_uri("xcalc"))
+    eq(1, #asked)
+    local uri = asked[1]:match("\n(.*)$")
+    truthy(uri and uri:find("^file:") and uri:find("/usr/bin/xcalc", 1, true), vim.inspect(asked))
+    eq({}, opened)
+  end)
+
+  it("asks before opening a custom scheme, and matches the trusted schemes ignoring case", function()
+    reset()
+    open(risky("links-scheme"))
+    local asked, opened = follow_answering(2, by_uri("^vscode:"))
+    eq(1, #asked)
+    truthy(asked[1]:find("vscode://file/etc/passwd", 1, true), vim.inspect(asked))
+    eq({}, opened)
+    asked, opened = follow_answering(2, by_uri("^HTTPS:"))
+    eq({}, asked)
+    eq({ "HTTPS://example.com/" }, opened)
+  end)
+
+  it("opens the schemes of link_schemes without asking", function()
+    reset()
+    setup({ link_schemes = { "FILE" } })
+    local ok, err = pcall(function()
+      open(risky("links-trusted"))
+      local asked, opened = follow_answering(2, by_uri("^file:///Applications"))
+      eq({}, asked)
+      eq({ "file:///Applications/Calculator.app" }, opened)
+      asked, opened = follow_answering(2, by_uri("^HTTPS:"))
+      eq(1, #asked, "https is no longer in the list")
+      eq({}, opened)
+    end)
+    setup()
+    if not ok then
+      error(err, 0)
+    end
   end)
 
   it("does nothing when the picker is cancelled", function()

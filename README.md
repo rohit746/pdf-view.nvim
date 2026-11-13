@@ -232,7 +232,9 @@ bookmarks say so.
 `f` lists the links on the page on screen, top to bottom, with the text under each and where it leads, through
 `vim.ui.select`. A link to a page of the document goes there (a jump, so `<C-o>` comes back), with the point it leads to,
 like a figure or a citation, at the top of the window when the page is zoomed or fitted to its width; a web address or
-an e-mail opens with `vim.ui.open()`. A page without links says so.
+an e-mail opens with `vim.ui.open()`. Any other address, such as a `file:` address or a PDF's Launch action, could start
+a program, so `f` shows it in full and asks before opening it; `link_schemes` lists the schemes that open without
+asking. A page without links says so.
 
 ### Page text
 
@@ -333,6 +335,7 @@ require("pdf-view").setup({
   max_zoom = 8,            -- largest zoom, relative to the fitted page
   pan_step = 0.2,          -- one scroll key moves this fraction of the window
   search_limit = 5000,     -- stop collecting matches after this many
+  link_schemes = { "http", "https", "mailto" }, -- addresses `f` opens without asking; it asks before any other
   text_scale = 1,          -- text size of EPUB, FB2 and MOBI books, relative to the terminal's
   highlight = { match = "#ffe14d", current = "#ff8c1a" }, -- multiplied onto search matches
   recolor = "off",         -- "invert": dark pages, hues kept; "colorscheme": in the Normal colours. `i` toggles it

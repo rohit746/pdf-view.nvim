@@ -35,6 +35,12 @@ All notable changes to this project are documented here. The format follows
   double-width characters (Chinese, Japanese, Korean) was wider than the window. Such a word is now cut by its width
   on screen.
 
+### Security
+
+- `f` opened every link that does not lead into the document with `vim.ui.open()`, including `file:` addresses and
+  PDF Launch actions, which can start a program on the reader's machine. It now asks first, showing the whole address,
+  for any address whose scheme is not in the new `link_schemes` option (`http`, `https` and `mailto` by default).
+
 ## [0.7.0] - 2026-11-09
 
 ### Fixed
