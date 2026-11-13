@@ -31,6 +31,10 @@ All notable changes to this project are documented here. The format follows
 - A changed PDF noticed first by a window switch or resize (always when `live_reload` is off) is now reloaded like
   live reload does it: the search is repeated, an old forward search highlight is dropped, and a file still being
   written keeps the old page on screen and is tried again instead of showing an error.
+- With positioned placements (WezTerm, Konsole, `placement = "positioned"`) inside tmux with `extended-keys` on (or
+  `always`), the terminal was asked to report a page it had lost, and tmux would type that report into the viewer as
+  keys (`G`, `i`, `=`, ...), as 0.4.1 fixed for the file check. The terminal is asked for no replies there now, as on
+  Neovim 0.11. Whether replies can be read is checked again after tmux is attached from another terminal.
 - Text shown in place of a page (and other messages in the viewer) ran past the window's right edge when a word of
   double-width characters (Chinese, Japanese, Korean) was wider than the window. Such a word is now cut by its width
   on screen.
