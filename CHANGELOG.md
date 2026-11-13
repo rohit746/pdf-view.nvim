@@ -48,6 +48,9 @@ All notable changes to this project are documented here. The format follows
 - A viewer in no window, as after `:edit` of another file, kept its `mutool` process running, with the parsed
   document in memory, until Neovim exited or the buffer was wiped. The process is stopped once the viewer has been
   in no window for 30 seconds, and started again when a page that was not drawn yet is needed.
+- A GUI (Neovide, nvim-qt) started from a shell in kitty or Ghostty was taken for that terminal: the buffer was
+  filled with placeholder characters it cannot draw. A GUI now gets the page's text, and `:checkhealth pdf-view` says
+  that it cannot show pages.
 
 ### Added
 
