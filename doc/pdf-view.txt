@@ -380,6 +380,11 @@ window and shows the text of the page under it. The page keys turn the pages,
 and `<C-e>`, `<C-y>`, `<C-d>` and `<C-u>` scroll a page's text that is taller
 than the window.
 
+A GUI (Neovide, nvim-qt, any front end that attaches over RPC) draws no
+images either, and it gets the text too, even when it was started from a shell
+in kitty or Ghostty and inherited that terminal's `$TERM`. Neovim with the
+TUI, or `nvim --remote-ui`, in such a terminal shows the pages.
+
 ==============================================================================
 ZELLIJ                                                     *pdf-view-zellij*
 

@@ -486,6 +486,10 @@ it, and both keep Kitty graphics by default.
 In a terminal that can show none of these, over a plain SSH session for instance, the viewer says why at the top of
 the window and shows the text of the page under it. The page keys turn the pages as usual.
 
+A GUI (Neovide, nvim-qt, any front end that attaches over RPC) draws no images either, and it gets the text too, even
+when it was started from a shell in kitty or Ghostty and inherited that terminal's `$TERM`. Neovim with the TUI, or
+`nvim --remote-ui`, in such a terminal shows the pages.
+
 ## zellij
 
 zellij 0.45 implements the Kitty graphics protocol itself, but not its Unicode placeholders. Inside zellij (detected

@@ -34,6 +34,9 @@ All notable changes to this project are documented here. The format follows
 - Text shown in place of a page (and other messages in the viewer) ran past the window's right edge when a word of
   double-width characters (Chinese, Japanese, Korean) was wider than the window. Such a word is now cut by its width
   on screen.
+- A GUI (Neovide, nvim-qt) started from a shell in kitty or Ghostty was taken for that terminal: the buffer was
+  filled with placeholder characters it cannot draw. A GUI now gets the page's text, and `:checkhealth pdf-view` says
+  that it cannot show pages.
 
 ### Security
 

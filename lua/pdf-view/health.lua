@@ -274,6 +274,12 @@ local function check_terminal()
   local printed = terminal.printed()
   if config.options.force then
     vim.health.warn("`force = true`: terminal detection is skipped")
+  elseif terminal.gui_only() then
+    -- what the environment says is about the terminal the GUI was started from, so there is nothing more to check
+    vim.health.error("this Neovim UI is not a terminal, so it cannot show pages: the page's text is shown instead", {
+      "Open the PDF in Neovim running in a terminal that shows images (kitty, Ghostty, WezTerm, ...).",
+    })
+    return
   end
   if terminal.protocol() == "sixel" then
     local name = IMAGE_TERMINALS[detected.name] or detected.name or ("`" .. (detected.term or "") .. "`")
