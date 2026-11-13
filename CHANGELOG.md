@@ -31,6 +31,9 @@ All notable changes to this project are documented here. The format follows
 - A changed PDF noticed first by a window switch or resize (always when `live_reload` is off) is now reloaded like
   live reload does it: the search is repeated, an old forward search highlight is dropped, and a file still being
   written keeps the old page on screen and is tried again instead of showing an error.
+- A session (`:mksession`) brought a viewer's window back as an empty buffer named after the PDF, and `:w!` there
+  emptied the PDF. The window is a viewer again now. Sessions saved without `blank` in `'sessionoptions'` leave the
+  window out, as the README now says.
 
 ### Security
 

@@ -58,6 +58,10 @@ line. Cancel the prompt (or give an empty password) to leave the PDF locked;
 of it; after |:saveas| the viewer shows the copy. A range or |:w_a| is
 refused.
 
+A session (|:mksession|) brings the viewer back only when 'sessionoptions'
+has "blank", as it does by default. Without it the session leaves the
+viewer's window out.
+
                                                               *pdf-view-keys*
 All keys are buffer-local and normal mode. The keys that move, zoom or step
 between matches accept a count.
