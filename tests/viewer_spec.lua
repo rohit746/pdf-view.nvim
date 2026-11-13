@@ -640,6 +640,48 @@ describe("viewer zoom", function()
     truthy(s.cy < 0.3, "the next page starts at its top, cy = " .. s.cy)
   end)
 
+  it("scrolls half a window with <C-d> and <C-u>, and turns the page at the edge", function()
+    reset()
+    local s = open(make("half-window", pages(3)))
+    press(vim.keycode("<C-d>")) -- not zoomed: a page turn
+    on_page(s, 2)
+    press(vim.keycode("<C-u>"))
+    on_page(s, 1)
+
+    press("w")
+    settle(s)
+    local top = s.cy
+    press("j")
+    settle(s)
+    local step = s.cy - top
+    truthy(step > 0, "j scrolled, cy = " .. s.cy)
+    press("k")
+    settle(s)
+    harness.near(top, s.cy, 1e-9)
+    press(vim.keycode("<C-d>"))
+    settle(s)
+    eq(1, s.page)
+    harness.near(2.5 * step, s.cy - top, 1e-6, "half a window is 2.5 pan steps")
+    press(vim.keycode("<C-u>"))
+    settle(s)
+    harness.near(top, s.cy, 1e-9)
+    press(vim.keycode("2<C-d>"))
+    settle(s)
+    harness.near(5 * step, s.cy - top, 1e-6, "a count of halves")
+
+    local presses = 1
+    while s.page == 1 and presses < 20 do
+      press(vim.keycode("<C-d>"))
+      settle(s)
+      presses = presses + 1
+    end
+    eq(2, s.page)
+    truthy(s.cy < 0.3, "the next page starts at its top, cy = " .. s.cy)
+    press(vim.keycode("<C-u>"))
+    on_page(s, 1)
+    truthy(s.cy > 0.7, "the previous page is shown from its bottom, cy = " .. s.cy)
+  end)
+
   it("keeps the worker when a zoomed page is scrolled faster than it renders", function()
     reset()
     local s = open(make("zoom-fast", pages(2)))
@@ -4913,6 +4955,22 @@ describe("viewer continuous scrolling", function()
     settle(s)
     eq(1, s.page)
     eq({ RGB[1], RGB[1] }, ends(s))
+    setup()
+  end)
+
+  it("scrolls half windows on into the next page", function()
+    setup({ continuous = true })
+    reset()
+    local s = open(coloured("continuous-half"))
+    press("w")
+    settle(s)
+    until_done(s, vim.keycode("<C-d>"), function()
+      return s.page == 2
+    end, 20)
+    truthy(s.scrolled, "scrolled into the page, not turned to it")
+    until_done(s, vim.keycode("<C-u>"), function()
+      return s.page == 1
+    end, 20)
     setup()
   end)
 

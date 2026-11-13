@@ -5,6 +5,8 @@ local M = {}
 ---@field prev string[] previous page (accepts a count)
 ---@field down string[] scroll down when zoomed in, else (or at the bottom edge) next page
 ---@field up string[] scroll up when zoomed in, else (or at the top edge) previous page
+---@field half_down string[] scroll down half a window when zoomed in, else (or at the bottom edge) next page
+---@field half_up string[] scroll up half a window when zoomed in, else (or at the top edge) previous page
 ---@field right string[] scroll right when zoomed in, else (or at the right edge) next page
 ---@field left string[] scroll left when zoomed in, else (or at the left edge) previous page
 ---@field scroll_down string[] mouse wheel: `down` for the viewer under the mouse
@@ -115,6 +117,8 @@ local defaults = {
     prev = { "<PageUp>", "<BS>", "<C-b>" },
     down = { "j", "<Down>" },
     up = { "k", "<Up>" },
+    half_down = { "<C-d>" },
+    half_up = { "<C-u>" },
     right = { "l", "<Right>" },
     left = { "h", "<Left>" },
     scroll_down = { "<ScrollWheelDown>" },

@@ -70,6 +70,9 @@ between matches accept a count.
                           next page ({count} times)
   k <Up>                  scroll up; at the top edge, or when not zoomed,
                           previous page
+  <C-d> <C-u>             scroll down / up half a window; at the edge, or
+                          when not zoomed, next / previous page ({count}
+                          half windows)
   l <Right>               scroll right; at the right edge, or when not
                           zoomed, next page
   h <Left>                scroll left; at the left edge, or when not zoomed,

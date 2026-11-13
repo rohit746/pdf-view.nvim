@@ -132,6 +132,7 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | ---------------------------- | ------------------------------------------------------------------------------- |
 | `j` `<Down>`                 | scroll down; at the bottom edge (or when not zoomed) next page. `5j`: five times |
 | `k` `<Up>`                   | scroll up; at the top edge (or when not zoomed) previous page                   |
+| `<C-d>` `<C-u>`              | scroll down / up half a window, turning the page at the edge as `j` `k` do      |
 | `l` `<Right>`                | scroll right; at the right edge (or when not zoomed) next page                  |
 | `h` `<Left>`                 | scroll left; at the left edge (or when not zoomed) previous page                |
 | mouse wheel                  | like `j` `k` `l` `h`, while a viewer has focus: moves the viewer under the mouse |
@@ -349,6 +350,8 @@ require("pdf-view").setup({
   keymaps = {              -- a list per action; `false` for no mappings at all
     down = { "j", "<Down>" },
     up = { "k", "<Up>" },
+    half_down = { "<C-d>" },                  -- half a window; `3<C-d>`: three halves
+    half_up = { "<C-u>" },
     right = { "l", "<Right>" },
     left = { "h", "<Left>" },
     scroll_down = { "<ScrollWheelDown>" },   -- the wheel; `{}` leaves it to Neovim
@@ -488,7 +491,8 @@ it, and both keep Kitty graphics by default.
 ## Terminals without images
 
 In a terminal that can show none of these, over a plain SSH session for instance, the viewer says why at the top of
-the window and shows the text of the page under it. The page keys turn the pages as usual.
+the window and shows the text of the page under it. The page keys turn the pages as usual, and `<C-d>`/`<C-u>` scroll a
+page's text that is taller than the window.
 
 ## zellij
 

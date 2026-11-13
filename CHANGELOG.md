@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `<C-d>` and `<C-u>` scroll a zoomed or fitted page by half a window, turning the page at its edge as `j` and `k` do
+  (and going on into the next page with `continuous`). A count is the number of half windows. The actions are
+  `half_down` and `half_up` in `keymaps`. In a terminal that cannot show pages they still scroll the page's text.
+
 ### Fixed
 
 - With an input plugin that prompts asynchronously (snacks.nvim, dressing.nvim, noice.nvim), confirming `/` or `?`
