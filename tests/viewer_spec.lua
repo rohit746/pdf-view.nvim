@@ -3,6 +3,7 @@ local eq, truthy, wait_for = harness.eq, harness.truthy, harness.wait_for
 local fixture = require("tests.fixture")
 local kitty = require("pdf-view.kitty")
 local mupdf = require("pdf-view.mupdf")
+local rotation = require("pdf-view.rotation")
 local placeholder = require("pdf-view.placeholder")
 local terminal = require("pdf-view.terminal")
 local viewer = require("pdf-view.viewer")
@@ -263,15 +264,53 @@ describe("viewer", function()
     eq({ page }, transmitted())
     eq(2, s.page)
 
-    -- still in another window: the images stay
+    -- still in another window: the images stay (the split had a view of its own, which goes with it)
     vim.cmd("split")
     vim.wait(200) -- the page drawn again for the smaller window
     on_page(s, 2)
     writes = {}
     vim.cmd.enew()
     vim.wait(200)
-    eq(false, sent("a=d,d=I"), "no image deleted")
+    for _, id in ipairs(s.ids) do
+      eq(false, sent(("a=d,d=I,i=%d,q=2"):format(id)), "image " .. id .. " deleted")
+    end
     truthy(next(s.images), "the images kept")
+  end)
+
+  it("stops the mutool worker of a viewer that has been in no window for a while", function()
+    reset()
+    local stop_worker_after = viewer.stop_worker_after
+    viewer.stop_worker_after = 1000
+    local first = open(make("idle-1", pages(3)))
+    local second = open(make("idle-2", pages(2)))
+    truthy(mupdf.has_worker(first.path) and mupdf.has_worker(second.path), "both workers running")
+
+    -- `first` is shown again before the delay, and `second` is hidden after it was
+    vim.cmd.buffer(first.buf)
+    wait_for(function()
+      return not mupdf.has_worker(second.path)
+    end, "the worker of the hidden viewer stopped")
+    truthy(mupdf.has_worker(first.path), "the worker of a viewer hidden only briefly is kept")
+
+    vim.cmd.enew()
+    vim.wait(100)
+    truthy(mupdf.has_worker(first.path), "not stopped right away")
+    wait_for(function()
+      return not mupdf.has_worker(first.path)
+    end, "the worker stopped")
+
+    -- shown again: the page comes from the render cache, and the next page starts another worker
+    writes = {}
+    vim.cmd.buffer(first.buf)
+    wait_for(function()
+      return #transmitted() == 1
+    end, "the page sent again")
+    vim.wait(100)
+    eq(false, mupdf.has_worker(first.path), "the page on screen needed no worker")
+    viewer.stop_worker_after = stop_worker_after
+    press("G") -- page 2 was drawn ahead of time, page 3 was not
+    on_page(first, 3)
+    truthy(mupdf.has_worker(first.path), "a page not drawn yet started another worker")
   end)
 
   it("follows the file when it changes on disk and keeps the current page", function()
@@ -337,15 +376,17 @@ describe("viewer", function()
     terminal.forget()
     local asked = vim.fn.has("nvim-0.12") == 1
     if asked then
-      -- it is asked whether it draws sixel, and says it does not
+      -- it is asked its name, which it does not give, and whether it draws sixel, which it says it does not (to DA1,
+      -- asked twice when the name is)
       vim.defer_fn(function()
+        vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = "\27[?62;22c" } })
         vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = "\27[?62;22c" } })
       end, 20)
     end
     open(make("unsupported", pages(1)))
     local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
     truthy(text:find("Unicode placeholder", 1, true), text)
-    eq(asked and { "\27[c" } or {}, writes, "no image is sent to an unsupported terminal")
+    eq(asked and { "\27[>q\27[c\27[c" } or {}, writes, "no image is sent to an unsupported terminal")
     terminal.forget()
     terminal.detect = detect
     setup()
@@ -553,6 +594,224 @@ local function text_rows()
   return vim.fn.getwininfo(vim.api.nvim_get_current_win())[1].height
 end
 
+--- The viewer in window `win`, once it is not `other` and has drawn its page.
+---@return PdfView.Session
+local function view_in(win, other)
+  local view
+  wait_for(function()
+    view = viewer.sessions[vim.api.nvim_win_get_buf(win)]
+    return view ~= nil and view ~= other and view.slot ~= 0 and view.job == nil and view.target == nil
+  end, "the window's own view")
+  return view
+end
+
+--- The image id that the placeholders of `buf` are highlighted with.
+local function image_of(buf)
+  local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+  return marks[1] and tonumber((marks[1][4].hl_group or ""):match("^PdfViewImage(%d+)$"))
+end
+
+describe("viewer in several windows", function()
+  setup()
+
+  it("gives a split a view of its own, which turns its pages on its own", function()
+    reset()
+    local s = open(make("windows-split", pages(4)))
+    press("2G")
+    on_page(s, 2)
+    local first = vim.api.nvim_get_current_win()
+    vim.cmd("vsplit")
+    local second = vim.api.nvim_get_current_win()
+    local view = view_in(second, s)
+    eq(s.buf, vim.api.nvim_win_get_buf(first), "the first window keeps the viewer")
+    eq(s.path, view.path)
+    eq(2, view.page, "starts on the page the viewer is on")
+    eq(false, vim.bo[view.buf].buflisted, "not a buffer for :ls and :bnext")
+    eq("pdf-view", vim.bo[view.buf].filetype)
+    eq(vim.fn.fnamemodify(s.path, ":t"), vim.fn.fnamemodify(vim.api.nvim_buf_get_name(view.buf), ":t"))
+
+    press("4G")
+    on_page(view, 4)
+    eq(2, s.page, "the other window stays on its page")
+    vim.api.nvim_set_current_win(first)
+    press("1G")
+    on_page(s, 1)
+    eq(4, view.page)
+    eq(s.ids[s.slot], image_of(s.buf))
+    eq(view.ids[view.slot], image_of(view.buf))
+    truthy(image_of(s.buf) ~= image_of(view.buf), "each window has an image of its own")
+    eq("1 / 4", viewer.status(s.buf))
+    eq("4 / 4", viewer.status(view.buf))
+  end)
+
+  it("starts the view with the fit, zoom, search and marks of the viewer", function()
+    reset()
+    local s = open(make("windows-state", pages(3)))
+    press("w")
+    press("+")
+    settle(s)
+    s.marks.a = { page = 3, mode = "page", zoom = 1, cx = 0.5, cy = 0.5 }
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    eq({ "width", s.zoom }, { view.mode, view.zoom })
+    eq(3, view.marks.a.page)
+    view.marks.b = view.marks.a
+    eq(nil, s.marks.b, "marks set in one window are its own")
+  end)
+
+  it("starts the view with the rotation of the viewer, and turns its pages on its own", function()
+    reset()
+    local s = open(make("windows-rotation", pages(2)))
+    press(">")
+    wait_for(function()
+      return s.rotation == 90 and s.job == nil and s.target == nil
+    end, "the viewer turned")
+    vim.cmd("vsplit")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    eq(90, view.rotation, "starts turned as the viewer is")
+    press(">")
+    wait_for(function()
+      return view.rotation == 180 and view.job == nil and view.target == nil
+    end, "the view turned")
+    eq(90, s.rotation, "the other window stays turned as it was")
+    truthy(viewer.status(view.buf):find("180°", 1, true), viewer.status(view.buf))
+  end)
+
+  it("gives a window that switches to a viewer on screen in another window a view of its own", function()
+    reset()
+    local s = open(make("windows-buffer", pages(3)))
+    local first = vim.api.nvim_get_current_win()
+    vim.cmd("vnew")
+    vim.cmd.buffer(s.buf)
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    eq(s.buf, vim.api.nvim_win_get_buf(first))
+    eq(true, view.own_view)
+  end)
+
+  it("takes the view away with its window, and leaves the viewer and its worker working", function()
+    reset()
+    local s = open(make("windows-close", pages(3)))
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    local buf = view.buf
+    press("3G")
+    on_page(view, 3)
+    vim.cmd("close")
+    wait_for(function()
+      return not vim.api.nvim_buf_is_valid(buf)
+    end, "the view wiped")
+    eq(nil, viewer.sessions[buf])
+    eq(true, view.closed)
+    eq(false, s.closed)
+    press("2G")
+    on_page(s, 2)
+    local position = require("pdf-view.positions").get(s.path)
+    eq(false, position ~= nil and position.page == 3, "the view's page is not the PDF's reading position")
+  end)
+
+  it("reads a window's own view again on :edit, as the same view", function()
+    reset()
+    local s = open(make("windows-edit", pages(3)))
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    press("3G")
+    on_page(view, 3)
+    vim.cmd.edit()
+    local again = view_in(vim.api.nvim_get_current_win(), view)
+    eq(view.buf, again.buf)
+    eq(true, again.own_view)
+    eq(s.path, again.path)
+    eq(3, again.page)
+    eq(1, s.page)
+  end)
+
+  it("keeps the worker that a window's own view shares while the viewer is in no window", function()
+    reset()
+    local stop_worker_after = viewer.stop_worker_after
+    viewer.stop_worker_after = 200
+    local s = open(make("windows-worker", pages(3)))
+    local first = vim.api.nvim_get_current_win()
+    vim.cmd("vsplit")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    vim.api.nvim_win_call(first, function()
+      vim.cmd.enew()
+    end)
+    vim.wait(600)
+    viewer.stop_worker_after = stop_worker_after
+    truthy(mupdf.has_worker(s.path), "the worker kept")
+    press("3G")
+    on_page(view, 3)
+  end)
+
+  it("opens a PDF on screen in another window with a view of its own, and returns its buffer", function()
+    reset()
+    local s = open(make("windows-open", pages(2)))
+    local first = vim.api.nvim_get_current_win()
+    vim.cmd("vnew")
+    local buf = pdf_view.open(s.path)
+    eq(vim.api.nvim_get_current_buf(), buf)
+    truthy(buf ~= s.buf, "not the viewer of the other window")
+    eq(true, viewer.sessions[buf].own_view)
+    eq(s.buf, vim.api.nvim_win_get_buf(first))
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    press("2G")
+    on_page(view, 2)
+    eq(buf, pdf_view.open(s.path), "the window's own view stays")
+    eq(2, view.page)
+  end)
+
+  it("remembers the position of the window on the PDF that was used last", function()
+    reset()
+    local positions = require("pdf-view.positions")
+    local s = open(make("windows-position", pages(5)))
+    press("2G")
+    on_page(s, 2)
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    press("4G")
+    on_page(view, 4)
+    vim.cmd("wincmd p") -- the viewer's window, used last
+    vim.cmd("wincmd p") -- the split again
+    vim.cmd("wincmd o") -- the viewer is in no window now; reading goes on in the split
+    press("5G")
+    on_page(view, 5)
+    vim.cmd.enew() -- the split's view hidden, the window still there
+    vim.cmd("vnew")
+    vim.cmd("wincmd o") -- its window closed: the view goes
+    wait_for(function()
+      return view.closed
+    end, "the view wiped")
+    eq(5, positions.get(s.path).page, "the page of the view that was read last")
+    vim.cmd("silent! %bwipeout!") -- the viewer unloaded too, used before the view: it leaves the position alone
+    eq(5, positions.get(s.path).page)
+  end)
+
+  it("names a view of its own after views that a session brought back", function()
+    reset()
+    local s = open(make("windows-names", pages(2)))
+    vim.cmd("vsplit")
+    local first = view_in(vim.api.nvim_get_current_win(), s)
+    local number = tonumber(vim.api.nvim_buf_get_name(first.buf):match("^pdf%-view://(%d+)/"))
+    vim.cmd("close")
+    -- the name the next view would have, as `:source Session.vim` names a view it brings back
+    local taken = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(taken, ("pdf-view://%d/%s"):format(number + 1, s.path))
+    vim.cmd("vsplit")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    eq(true, view.own_view)
+    truthy(view.buf ~= taken, "a view of its own, under another name")
+  end)
+
+  it("leaves a floating window on a viewer alone", function()
+    reset()
+    local s = open(make("windows-float", pages(2)))
+    local float = vim.api.nvim_open_win(s.buf, false, { relative = "editor", row = 1, col = 1, width = 20, height = 5 })
+    vim.wait(100)
+    eq(s.buf, vim.api.nvim_win_get_buf(float))
+    vim.api.nvim_win_close(float, true)
+  end)
+end)
+
 describe("viewer zoom", function()
   setup()
 
@@ -638,6 +897,48 @@ describe("viewer zoom", function()
     eq(2, s.page)
     truthy(steps >= 4, "reaching the bottom took several scrolls, not one: " .. steps)
     truthy(s.cy < 0.3, "the next page starts at its top, cy = " .. s.cy)
+  end)
+
+  it("scrolls half a window with <C-d> and <C-u>, and turns the page at the edge", function()
+    reset()
+    local s = open(make("half-window", pages(3)))
+    press(vim.keycode("<C-d>")) -- not zoomed: a page turn
+    on_page(s, 2)
+    press(vim.keycode("<C-u>"))
+    on_page(s, 1)
+
+    press("w")
+    settle(s)
+    local top = s.cy
+    press("j")
+    settle(s)
+    local step = s.cy - top
+    truthy(step > 0, "j scrolled, cy = " .. s.cy)
+    press("k")
+    settle(s)
+    harness.near(top, s.cy, 1e-9)
+    press(vim.keycode("<C-d>"))
+    settle(s)
+    eq(1, s.page)
+    harness.near(2.5 * step, s.cy - top, 1e-6, "half a window is 2.5 pan steps")
+    press(vim.keycode("<C-u>"))
+    settle(s)
+    harness.near(top, s.cy, 1e-9)
+    press(vim.keycode("2<C-d>"))
+    settle(s)
+    harness.near(5 * step, s.cy - top, 1e-6, "a count of halves")
+
+    local presses = 1
+    while s.page == 1 and presses < 20 do
+      press(vim.keycode("<C-d>"))
+      settle(s)
+      presses = presses + 1
+    end
+    eq(2, s.page)
+    truthy(s.cy < 0.3, "the next page starts at its top, cy = " .. s.cy)
+    press(vim.keycode("<C-u>"))
+    on_page(s, 1)
+    truthy(s.cy > 0.7, "the previous page is shown from its bottom, cy = " .. s.cy)
   end)
 
   it("keeps the worker when a zoomed page is scrolled faster than it renders", function()
@@ -802,6 +1103,92 @@ local function with_stub(owner, key, replacement, body)
     error(err, 0)
   end
 end
+
+describe("viewer mouse wheel", function()
+  setup()
+
+  --- Press `keys` with the mouse over window `win`.
+  local function over(win, keys)
+    with_stub(vim.fn, "getmousepos", function()
+      return { winid = win, winrow = 1, wincol = 1, line = 1, column = 1, screenrow = 1, screencol = 1 }
+    end, function()
+      press(vim.keycode(keys))
+    end)
+  end
+
+  it("moves a viewer the cursor is not in, and scrolls other windows as before", function()
+    reset()
+    local s = open(make("wheel-unfocused", pages(4)))
+    local pdf_win = vim.api.nvim_get_current_win()
+    vim.cmd("leftabove vnew") -- the source beside its PDF, at the top left where Neovim's own wheel scrolls
+    local text_win = vim.api.nvim_get_current_win()
+    local text = {}
+    for line = 1, 200 do
+      text[line] = "line " .. line
+    end
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, text)
+
+    over(pdf_win, "<ScrollWheelDown>")
+    on_page(s, 2)
+    over(pdf_win, "i<ScrollWheelDown><Esc>") -- in insert mode too
+    on_page(s, 3)
+    over(pdf_win, "<ScrollWheelUp>")
+    on_page(s, 2)
+    eq(text_win, vim.api.nvim_get_current_win(), "the cursor stays in the source")
+    eq(text, vim.api.nvim_buf_get_lines(0, 0, -1, false), "the wheel typed nothing")
+    eq(1, vim.fn.line("w0"))
+
+    over(text_win, "<ScrollWheelDown>")
+    truthy(vim.fn.line("w0") > 1, "the wheel over the source scrolls it, top line " .. vim.fn.line("w0"))
+    eq(2, s.page)
+  end)
+
+  it("maps the wheel globally only while a viewer is open, and keeps the user's own wheel mappings", function()
+    reset()
+    eq("", vim.fn.maparg("<ScrollWheelDown>", "n"), "no viewer, no mapping")
+    vim.keymap.set("n", "<ScrollWheelUp>", "<C-y>", { desc = "mine" })
+    vim.keymap.set("i", "<ScrollWheelLeft>", "<Nop>", { desc = "mine" })
+    local ok, err = pcall(function()
+      local a = open(make("wheel-a", pages(2)))
+      vim.cmd("vsplit")
+      local b = open(make("wheel-b", pages(2)))
+      vim.cmd("vnew") -- maparg() in a buffer that is not a viewer sees the global mappings
+      truthy(vim.fn.maparg("<ScrollWheelDown>", "n") ~= "", "normal mode")
+      truthy(vim.fn.maparg("<ScrollWheelDown>", "i") ~= "", "insert mode")
+      truthy(vim.fn.maparg("<ScrollWheelRight>", "i") ~= "")
+      truthy(vim.fn.maparg("<ScrollWheelUp>", "i") ~= "")
+      eq("mine", vim.fn.maparg("<ScrollWheelUp>", "n", false, true).desc, "the user's own mapping")
+      eq("mine", vim.fn.maparg("<ScrollWheelLeft>", "i", false, true).desc)
+
+      vim.api.nvim_buf_delete(a.buf, { force = true })
+      truthy(vim.fn.maparg("<ScrollWheelDown>", "n") ~= "", "a viewer is still open")
+      vim.api.nvim_buf_delete(b.buf, { force = true })
+      for _, mode in ipairs({ "n", "i" }) do
+        for _, key in ipairs({ "Down", "Right" }) do
+          eq("", vim.fn.maparg("<ScrollWheel" .. key .. ">", mode), "removed with the last viewer")
+        end
+      end
+      eq("", vim.fn.maparg("<ScrollWheelUp>", "i"))
+      eq("mine", vim.fn.maparg("<ScrollWheelUp>", "n", false, true).desc, "the user's mapping stays")
+      eq("mine", vim.fn.maparg("<ScrollWheelLeft>", "i", false, true).desc)
+
+      setup({ keymaps = { scroll_down = {} } })
+      open(make("wheel-off", pages(2)))
+      vim.cmd("vnew")
+      eq("", vim.fn.maparg("<ScrollWheelDown>", "n"), "an empty list leaves the wheel to Neovim")
+      eq("", vim.fn.maparg("j", "n"), "only the wheel actions are mapped globally")
+      truthy(vim.fn.maparg("<ScrollWheelRight>", "n") ~= "", "scroll_right is still mapped")
+      setup({ keymaps = false })
+      eq("", vim.fn.maparg("<ScrollWheelRight>", "n"), "no mappings at all")
+    end)
+    setup()
+    pcall(vim.keymap.del, "n", "<ScrollWheelUp>")
+    pcall(vim.keymap.del, "i", "<ScrollWheelLeft>")
+    if not ok then
+      error(err, 0)
+    end
+  end)
+end)
 
 describe("viewer fit modes", function()
   setup()
@@ -1022,7 +1409,7 @@ describe("viewer fit modes", function()
     press("w")
     settle(s)
     local before = s.grid_key
-    vim.cmd("vsplit")
+    vim.cmd("vnew | wincmd p")
     wait_for(function()
       return s.grid_key ~= before and s.job == nil
     end, "re-layout after the split")
@@ -1252,6 +1639,69 @@ describe("viewer search", function()
     eq(nil, s.search)
     truthy(notes[1] and notes[1]:find("no matches for `zzzz`", 1, true), vim.inspect(notes))
     eq("white", classify(colour_at({ rects = { { 20, 395, 0, 0 } }, width = 612, height = 792 })), "no highlight left")
+  end)
+
+  it("lists the matches with their page and text with g/, and goes to the chosen one as a jump", function()
+    reset()
+    local s = open(search_doc("list"))
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    eq(1, s.page)
+    local offered
+    with_stub(vim.ui, "select", function(items, opts, callback)
+      offered = { items = items, opts = opts }
+      callback(items[3])
+    end, function()
+      press("g/")
+    end)
+    searched(s)
+    eq(3, #offered.items)
+    eq("Matches for `alpha` (3)", offered.opts.prompt)
+    eq("p. 1  alpha beta alpha", offered.opts.format_item(offered.items[1]))
+    eq("p. 3  gamma alpha", offered.opts.format_item(offered.items[3]))
+    eq({ 3, 3 }, { s.search.current, s.page })
+    truthy(vim.wo.winbar:find("/alpha 3/3", 1, true), vim.wo.winbar)
+    press(vim.api.nvim_replace_termcodes("<C-o>", true, false, true))
+    on_page(s, 1)
+  end)
+
+  it("explains g/ without a search, and ignores a cancelled or outdated choice", function()
+    reset()
+    local s = open(search_doc("list-none"))
+    local notes = {}
+    with_stub(vim, "notify", function(message)
+      notes[#notes + 1] = message
+    end, function()
+      press("g/")
+    end)
+    truthy(notes[1] and notes[1]:find("press /", 1, true), vim.inspect(notes))
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    with_stub(vim.ui, "select", function(_, _, callback)
+      callback(nil)
+    end, function()
+      press("g/")
+    end)
+    eq({ 1, 1 }, { s.search.current, s.page }, "a cancelled pick goes nowhere")
+    local pick
+    with_stub(vim.ui, "select", function(items, _, callback)
+      pick = function()
+        callback(items[3])
+      end
+    end, function()
+      press("g/")
+    end)
+    press(vim.api.nvim_replace_termcodes("<Esc>", true, false, true))
+    notes = {}
+    with_stub(vim, "notify", function(message)
+      notes[#notes + 1] = message
+    end, pick)
+    eq({ nil, 1 }, { s.search, s.page }, "the search was cleared before the choice")
+    truthy(notes[1] and notes[1]:find("search has changed", 1, true), vim.inspect(notes))
   end)
 
   it("explains n without a search", function()
@@ -1630,6 +2080,24 @@ describe("viewer reflowable documents", function()
     return layout.reflow(info.width - info.textoff, info.height, 10, 20, 1)
   end
 
+  --- The text of a page of the book of viewer `s` as it is laid out now, without what a layout changes (spaces, line
+  --- breaks). It is read by the viewer's own name for the file, which has the layout: the name a test wrote it by is
+  --- another one where the temporary directory is reached through a link (macOS: /var is /private/var), and the text
+  --- read by that name would be of the book as MuPDF lays it out by default.
+  ---@param s PdfView.Session
+  ---@param page integer
+  ---@return string
+  local function bare_text(s, page)
+    local done, text
+    mupdf.text(s.path, page, function(_, result)
+      done, text = true, result
+    end)
+    wait_for(function()
+      return done
+    end, "the text of the page")
+    return (assert(text):gsub("[%s%-]+", ""))
+  end
+
   it("lays an FB2 book out to fill the window", function()
     reset()
     local book = dir .. "/fill.FB2"
@@ -1652,30 +2120,19 @@ describe("viewer reflowable documents", function()
       press("/")
       searched(s)
     end)
-    --- The text of a page as the book is laid out now, without what a layout changes (spaces, line breaks).
-    local function bare_text(page)
-      local done, text
-      mupdf.text(book, page, function(_, result)
-        done, text = true, result
-      end)
-      wait_for(function()
-        return done
-      end, "the text of the page")
-      return (assert(text):gsub("[%s%-]+", ""))
-    end
     local before = { page = s.page, count = s.count, key = s.laid_out.key, match = s.search.matches[1].page }
     truthy(before.page > 1, "the match is past the first page")
-    local start = bare_text(s.page):sub(1, 40)
+    local start = bare_text(s, s.page):sub(1, 40)
 
-    vim.cmd("vsplit")
+    vim.cmd("vnew | wincmd p")
     wait_for(function()
       return s.laid_out and s.laid_out.key ~= before.key and s.job == nil and s.search_job == nil
     end, "the new layout")
     local size = window_layout()
     eq({ size[1], size[2] }, { s.geom.w, s.geom.h })
     truthy(s.count > before.count, ("narrower pages, more of them: %d, %d"):format(before.count, s.count))
-    local own = bare_text(s.page)
-    local at = (own .. bare_text(s.page + 1)):find(start, 1, true)
+    local own = bare_text(s, s.page)
+    local at = (own .. bare_text(s, s.page + 1)):find(start, 1, true)
     truthy(
       at and at <= #own,
       ("page %d holds the text page %d started with (%s): %s"):format(s.page, before.page, start, own:sub(1, 80))
@@ -1684,6 +2141,34 @@ describe("viewer reflowable documents", function()
     press("n")
     searched(s)
     eq(s.search.matches[1].page, s.page, "n goes to where the match is now")
+  end)
+
+  it("reopens a book at the same point of the text in a window of another size", function()
+    reset()
+    local book = dir .. "/reopen.fb2"
+    fixture.write_fb2(book, { "One", "Two", "Three", "Four", "Five", "Six" }, 30, true)
+    local s = open(book)
+    local wide = { count = s.count, key = s.laid_out.key }
+    local page = math.floor(wide.count / 4)
+    press(page .. "G")
+    on_page(s, page)
+    local start = bare_text(s, page):sub(1, 40)
+    vim.cmd("silent! %bwipeout!") -- forgets the in-memory position: only the state file is left
+
+    vim.cmd("vnew")
+    local again = open(book)
+    wait_for(function()
+      return again.slot ~= 0 and again.job == nil and again.laid_out and again.laid_out.key ~= wide.key
+    end, "the reopened book in the narrower window")
+    truthy(again.count > wide.count, ("narrower pages, more of them: %d, %d"):format(wide.count, again.count))
+    local own = bare_text(again, again.page)
+    local at = (own .. bare_text(again, again.page + 1)):find(start, 1, true)
+    truthy(
+      at and at <= #own,
+      ("page %d holds the text page %d started with (%s): %s"):format(again.page, page, start, own:sub(1, 80))
+    )
+    local stored = require("pdf-view.positions").get(s.path)
+    eq(wide.key, stored and stored.layout and table.concat(stored.layout, "x"), "the state file has the layout")
   end)
 end)
 
@@ -1910,20 +2395,299 @@ describe("viewer links", function()
     on_page(s, 1)
   end)
 
-  it("opens an address with vim.ui.open()", function()
-    reset()
-    local s = open(linked("links-open"))
-    local opened
-    with_stub(vim.ui, "open", function(uri)
-      opened = uri
-      return nil, nil
+  --- Follow the link the picker offers first that `choose` accepts, answering the question whether to open it with
+  --- `answer` (1 opens, 2 cancels). Returns the questions asked and the addresses handed to `vim.ui.open()`.
+  ---@return string[] asked, string[] opened
+  local function follow_answering(answer, choose)
+    local asked, opened = {}, {}
+    with_stub(vim.fn, "confirm", function(message)
+      asked[#asked + 1] = message
+      return answer
     end, function()
-      follow(function(items)
-        return items[1]
+      with_stub(vim.ui, "open", function(uri)
+        opened[#opened + 1] = uri
+        return nil, nil
+      end, function()
+        follow(choose)
       end)
     end)
-    eq("https://example.com/", opened)
+    return asked, opened
+  end
+
+  it("opens a web address with vim.ui.open() without asking", function()
+    reset()
+    local s = open(linked("links-open"))
+    local asked, opened = follow_answering(2, function(items)
+      return items[1]
+    end)
+    eq({}, asked)
+    eq({ "https://example.com/" }, opened)
     eq(1, s.page)
+  end)
+
+  --- A page with links that can start a program: a `file:` address, a Launch action, a custom scheme, and a web
+  --- address in capitals.
+  local function risky(name)
+    return make(name, {
+      vim.tbl_extend("force", LETTER, {
+        links = {
+          { rect = { 70, 690, 250, 730 }, uri = "file:///Applications/Calculator.app" },
+          { rect = { 70, 590, 250, 630 }, action = "<< /S /Launch /F (/usr/bin/xcalc) >>" },
+          { rect = { 70, 490, 250, 530 }, uri = "vscode://file/etc/passwd" },
+          { rect = { 70, 390, 250, 430 }, uri = "HTTPS://example.com/" },
+        },
+      }),
+    })
+  end
+
+  local function by_uri(pattern)
+    return function(items)
+      for _, item in ipairs(items) do
+        if item.uri and item.uri:find(pattern) then
+          return item
+        end
+      end
+      error("no link matching " .. pattern .. " in " .. vim.inspect(items))
+    end
+  end
+
+  it("asks before opening a file: address, and opens nothing when declined", function()
+    reset()
+    local s = open(risky("links-file-declined"))
+    local asked, opened = follow_answering(2, by_uri("^file:///Applications"))
+    eq(1, #asked)
+    truthy(asked[1]:find("file:///Applications/Calculator.app", 1, true), vim.inspect(asked))
+    eq({}, opened)
+    eq(1, s.page)
+  end)
+
+  it("opens a file: address once the user agrees", function()
+    reset()
+    open(risky("links-file-agreed"))
+    local asked, opened = follow_answering(1, by_uri("^file:///Applications"))
+    eq(1, #asked)
+    eq({ "file:///Applications/Calculator.app" }, opened)
+  end)
+
+  it("asks before following a Launch action, with the whole address", function()
+    reset()
+    open(risky("links-launch"))
+    local asked, opened = follow_answering(2, by_uri("xcalc"))
+    eq(1, #asked)
+    local uri = asked[1]:match("\n(.*)$")
+    truthy(uri and uri:find("^file:") and uri:find("/usr/bin/xcalc", 1, true), vim.inspect(asked))
+    eq({}, opened)
+  end)
+
+  it("asks before opening a custom scheme, and matches the trusted schemes ignoring case", function()
+    reset()
+    open(risky("links-scheme"))
+    local asked, opened = follow_answering(2, by_uri("^vscode:"))
+    eq(1, #asked)
+    truthy(asked[1]:find("vscode://file/etc/passwd", 1, true), vim.inspect(asked))
+    eq({}, opened)
+    asked, opened = follow_answering(2, by_uri("^HTTPS:"))
+    eq({}, asked)
+    eq({ "HTTPS://example.com/" }, opened)
+  end)
+
+  it("opens the schemes of link_schemes without asking", function()
+    reset()
+    setup({ link_schemes = { "FILE" } })
+    local ok, err = pcall(function()
+      open(risky("links-trusted"))
+      local asked, opened = follow_answering(2, by_uri("^file:///Applications"))
+      eq({}, asked)
+      eq({ "file:///Applications/Calculator.app" }, opened)
+      asked, opened = follow_answering(2, by_uri("^HTTPS:"))
+      eq(1, #asked, "https is no longer in the list")
+      eq({}, opened)
+    end)
+    setup()
+    if not ok then
+      error(err, 0)
+    end
+  end)
+
+  --- A PDF in `docs/` with three pages and the named destination `intro` (page 2, 400 points from its bottom), and a
+  --- page that links to it: to its page 3 (a /GoToR action), to `intro`, to the file alone, to a page it does not
+  --- have; then to a file that is not there, to a PDF on another machine, and to its own page 2 by its file name.
+  ---@return string source, string other
+  local function documents(name)
+    vim.fn.mkdir(dir .. "/docs", "p")
+    local relative = "docs/" .. name .. " other.pdf"
+    local other = dir .. "/" .. relative
+    fixture.write(other, pages(3), { dests = { intro = { title = "", page = 2, top = 400 } } })
+    local encoded = relative:gsub(" ", "%%20")
+    local source = make(name, {
+      vim.tbl_extend("force", LETTER, {
+        links = {
+          { rect = { 70, 740, 250, 760 }, action = ("<< /S /GoToR /F (%s) /D [2 /Fit] >>"):format(relative) },
+          { rect = { 70, 640, 250, 660 }, action = ("<< /S /GoToR /F (%s) /D (intro) >>"):format(relative) },
+          { rect = { 70, 540, 250, 560 }, uri = "file:" .. encoded },
+          { rect = { 70, 440, 250, 460 }, uri = "file:" .. encoded .. "#page=9" },
+          { rect = { 70, 340, 250, 360 }, uri = "file:docs/missing.pdf#page=2" },
+          { rect = { 70, 240, 250, 260 }, uri = "file://example.com/" .. encoded },
+          { rect = { 70, 140, 250, 160 }, action = ("<< /S /GoToR /F (%s.pdf) /D [1 /Fit] >>"):format(name) },
+        },
+      }),
+      LETTER,
+    })
+    return source, other
+  end
+
+  --- Follow the link the picker offers first that `choose` accepts, as `follow_answering` does, and wait for a
+  --- notification.
+  ---@return string[] asked, string[] opened, string[] notes
+  local function follow_noting(choose)
+    local notes = {}
+    local asked, opened
+    with_stub(vim, "notify", function(message)
+      notes[#notes + 1] = message
+    end, function()
+      asked, opened = follow_answering(2, choose)
+      wait_for(function()
+        return #notes > 0
+      end, "the notification")
+    end)
+    return asked, opened, notes
+  end
+
+  it("shows a link to another PDF as the file and the page or name it leads to", function()
+    reset()
+    local source = documents("links-labels")
+    open(source)
+    local offered = follow(function()
+      return nil
+    end)
+    local labels = vim.tbl_map(offered.opts.format_item, offered.items)
+    eq("docs/links-labels other.pdf, p. 3", labels[1])
+    eq("docs/links-labels other.pdf, intro", labels[2])
+    eq("docs/links-labels other.pdf", labels[3])
+    eq("docs/links-labels other.pdf, p. 9", labels[4])
+  end)
+
+  it("opens a link to another PDF in a viewer in this window, at its page, and <C-o> comes back", function()
+    reset()
+    local source, other = documents("links-other")
+    local s = open(source)
+    local win = vim.api.nvim_get_current_win()
+    local asked, opened = follow_answering(2, by_uri("#page=3"))
+    eq({}, asked, "no question for a document the viewer opens")
+    eq({}, opened)
+    eq(win, vim.api.nvim_get_current_win())
+    local buf = vim.api.nvim_get_current_buf()
+    eq(vim.fn.resolve(other), vim.fn.resolve(vim.api.nvim_buf_get_name(buf)), "resolved against the PDF's directory")
+    local t = viewer.sessions[buf]
+    truthy(t, "the other PDF is in a viewer")
+    truthy(vim.bo[buf].buflisted, "listed, as :edit lists it")
+    on_page(t, 3)
+    press(vim.keycode("<C-o>"))
+    eq(s.buf, vim.api.nvim_get_current_buf(), "<C-o> goes back to the PDF with the link")
+    eq(s, viewer.sessions[s.buf])
+    eq(1, s.page)
+    press(vim.keycode("<C-i>"))
+    eq(buf, vim.api.nvim_get_current_buf(), "<C-i> goes forward to the other PDF again")
+    on_page(t, 3)
+  end)
+
+  it("follows a link from a split's view of its own, and <C-o> comes back to that view", function()
+    reset()
+    local source = documents("links-view")
+    local s = open(source)
+    vim.cmd("vsplit")
+    local win = vim.api.nvim_get_current_win()
+    local view = view_in(win, s)
+    press("2G")
+    on_page(view, 2)
+    press("1G")
+    on_page(view, 1)
+    follow_answering(2, by_uri("#page=3"))
+    local t = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(t and t ~= view and t ~= s, "the other PDF in the split")
+    on_page(t, 3)
+    eq(true, vim.api.nvim_buf_is_valid(view.buf), "the view is kept while its window shows another buffer")
+    press(vim.keycode("<C-o>"))
+    eq(view.buf, vim.api.nvim_get_current_buf(), "<C-o> goes back to the window's own view")
+    eq(win, vim.api.nvim_get_current_win())
+    eq(s.buf, vim.api.nvim_win_get_buf(vim.fn.win_getid(vim.fn.winnr("#"))), "the other window keeps the viewer")
+  end)
+
+  it("opens a link to a named destination of another PDF at its page", function()
+    reset()
+    local source = documents("links-named")
+    local s = open(source)
+    local asked = follow_answering(2, by_uri("#nameddest=intro"))
+    eq({}, asked)
+    local t = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(t and t ~= s, "the other PDF is in a viewer")
+    on_page(t, 2)
+  end)
+
+  it("opens a link to another PDF without a page where its viewer starts", function()
+    reset()
+    local source, other = documents("links-whole")
+    open(source)
+    local asked, opened = follow_answering(2, function(items)
+      for _, item in ipairs(items) do
+        if item.uri and item.uri:find("other%.pdf$") then
+          return item
+        end
+      end
+    end)
+    eq({}, asked)
+    eq({}, opened)
+    local t = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(t, "the other PDF is in a viewer")
+    eq(vim.fn.resolve(other), vim.fn.resolve(t.path))
+    on_page(t, 1)
+  end)
+
+  it("says so when the other PDF has no such page, and keeps it open", function()
+    reset()
+    local source = documents("links-nowhere")
+    open(source)
+    local asked, opened, notes = follow_noting(by_uri("#page=9"))
+    eq({}, asked)
+    eq({}, opened)
+    local t = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(t, "the other PDF is in a viewer")
+    truthy(notes[1]:find("has no #page=9", 1, true), vim.inspect(notes))
+    on_page(t, 1)
+  end)
+
+  it("says so when the other PDF is not there, without asking or opening anything", function()
+    reset()
+    local source = documents("links-missing")
+    local s = open(source)
+    local asked, opened, notes = follow_noting(by_uri("missing%.pdf"))
+    eq({}, asked)
+    eq({}, opened)
+    eq(s.buf, vim.api.nvim_get_current_buf())
+    truthy(notes[1] and notes[1]:find("cannot read", 1, true), vim.inspect(notes))
+  end)
+
+  it("still asks before opening a PDF on another machine", function()
+    reset()
+    local source = documents("links-remote")
+    local s = open(source)
+    local asked, opened = follow_answering(2, by_uri("^file://example%.com/"))
+    eq(1, #asked)
+    eq({}, opened)
+    eq(s.buf, vim.api.nvim_get_current_buf())
+  end)
+
+  it("follows a link to its own file name as a jump in the same viewer", function()
+    reset()
+    local source = documents("links-self")
+    local s = open(source)
+    local asked, opened = follow_answering(2, by_uri("links%-self%.pdf"))
+    eq({}, asked)
+    eq({}, opened)
+    eq(s.buf, vim.api.nvim_get_current_buf())
+    on_page(s, 2)
+    press(vim.keycode("<C-o>"))
+    on_page(s, 1)
   end)
 
   it("does nothing when the picker is cancelled", function()
@@ -2880,6 +3644,56 @@ describe("viewer robustness", function()
     setup()
   end)
 
+  it("comes back as a viewer from a session, and :w! there leaves the PDF alone", function()
+    local sessionoptions = vim.o.sessionoptions
+    for _, auto_open in ipairs({ true, false }) do
+      reset()
+      setup({ auto_open = auto_open })
+      local path = make("session", pages(4))
+      local original = slurp(path)
+      local notes = dir .. "/session-notes.txt"
+      vim.cmd.edit(vim.fn.fnameescape(notes))
+      vim.cmd("vsplit")
+      local buf = pdf_view.open(path)
+      local s = viewer.sessions[buf]
+      wait_for(function()
+        return s.slot ~= 0
+      end, "first render")
+      press("3G")
+      on_page(s, 3)
+      -- with `blank`, a `nofile` window is saved as `enew | file {pdf}`: an empty buffer, no BufReadCmd
+      vim.o.sessionoptions = "blank,buffers,curdir,folds,help,tabpages,winsize"
+      local file = dir .. "/Session.vim"
+      vim.cmd("mksession! " .. vim.fn.fnameescape(file))
+      vim.cmd("silent! only")
+      vim.cmd("silent! %bwipeout!")
+      vim.o.number = true -- the windows the session makes have it, until the viewer takes its window
+      vim.cmd("silent source " .. vim.fn.fnameescape(file))
+      vim.o.sessionoptions = sessionoptions
+
+      eq(2, #vim.api.nvim_tabpage_list_wins(0))
+      local again = viewer.sessions[vim.fn.bufnr(path)]
+      truthy(again, "the PDF's window is a viewer again (auto_open " .. tostring(auto_open) .. ")")
+      local win = vim.fn.bufwinid(again.buf)
+      eq("nofile", vim.bo[again.buf].buftype)
+      eq(false, vim.wo[win].number, "the viewer's window options")
+      eq(true, vim.wo[vim.fn.bufwinid(notes)].number)
+      wait_for(function()
+        return again.slot ~= 0 and again.job == nil
+      end, "the render of the restored viewer")
+      eq({ 3, 4 }, { again.page, again.count })
+      eq(nil, viewer.sessions[vim.fn.bufnr(notes)], "the other window is left alone")
+
+      vim.api.nvim_set_current_win(win)
+      local ok, err = pcall(vim.cmd, "silent write!")
+      eq(false, ok)
+      truthy(tostring(err):find("E382", 1, true), tostring(err))
+      eq(original, slurp(path), "the PDF is untouched")
+      vim.o.number = false
+    end
+    setup()
+  end)
+
   it("saves a copy of the PDF with :w {file}, never the placeholder text", function()
     reset()
     local path = make("write-copy", pages(2))
@@ -3127,6 +3941,21 @@ describe("viewer in zellij", function()
     truthy(writes[#writes]:find("^\0277") and writes[#writes]:find("\0278$"), "the cursor is saved and restored")
   end)
 
+  it("places the page of each window's own view", function()
+    reset()
+    local s = open(make("zellij-views", pages(2)))
+    vim.cmd("vsplit")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    press("2G")
+    on_page(view, 2)
+    vim.cmd.redraw()
+    wait_for(function()
+      return s.placed ~= nil and view.placed ~= nil and s.placed.count > 0 and view.placed.count > 0
+    end, "both pages placed")
+    truthy(s.placed.id ~= view.placed.id, "an image each")
+    eq(1, s.page)
+  end)
+
   it("follows its window when another one opens above it", function()
     reset()
     local s = open(make("zellij-split", pages(1)))
@@ -3313,9 +4142,10 @@ describe("viewer in zellij", function()
 
   it("takes a message that scrolled the screen to have dropped the page, when replies cannot be read", function()
     reset()
-    local positioned = require("pdf-view.positioned")
-    local replies = positioned.replies
-    positioned.replies = false -- as on Neovim 0.11
+    local replies = terminal.replies_readable
+    terminal.replies_readable = function()
+      return false -- as on Neovim 0.11
+    end
     local ok, err = pcall(function()
       local s = open(make("zellij-scrolled", pages(1)))
       local path = transmitted()[1]
@@ -3330,7 +4160,7 @@ describe("viewer in zellij", function()
       eq("", vim.v.scrollstart, "ready for the next scroll")
       eq(false, s.lost)
     end)
-    positioned.replies = replies
+    terminal.replies_readable = replies
     if not ok then
       error(err, 0)
     end
@@ -3433,9 +4263,10 @@ describe("viewer with positioned placements outside zellij (WezTerm, Konsole)", 
 
   it("does not send the page again after a message scrolled the screen, when replies cannot be read", function()
     reset()
-    local positioned = require("pdf-view.positioned")
-    local replies = positioned.replies
-    positioned.replies = false -- as on Neovim 0.11
+    local replies = terminal.replies_readable
+    terminal.replies_readable = function()
+      return false -- as on Neovim 0.11
+    end
     local ok, err = pcall(function()
       open(make("wezterm-scrolled", pages(1)))
       writes = {}
@@ -3446,8 +4277,68 @@ describe("viewer with positioned placements outside zellij (WezTerm, Konsole)", 
       end, "placed again")
       eq({}, transmitted(), "the terminal scrolled the image with the text")
     end)
-    positioned.replies = replies
+    terminal.replies_readable = replies
     vim.v.scrollstart = ""
+    if not ok then
+      error(err, 0)
+    end
+  end)
+
+  it("asks for no replies behind tmux with extended keys, which would type them into the viewer", function()
+    reset()
+    local saved_tmux, saved_system = vim.env.TMUX, vim.system
+    local extended_keys = "on"
+    vim.env.TMUX = "/tmp/tmux-1000/default,1,0"
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(cmd, opts, on_exit)
+      if cmd[1] ~= "tmux" then
+        return saved_system(cmd, opts, on_exit)
+      end
+      local stdout = ""
+      if cmd[2] == "show-options" then
+        stdout = extended_keys
+      elseif cmd[2] == "display-message" then
+        stdout = "0 0 off bottom" -- the pane fills the window
+      end
+      local result = { code = 0, stdout = stdout .. "\n", stderr = "" }
+      if on_exit then
+        on_exit(result)
+      end
+      return {
+        wait = function()
+          return result
+        end,
+      }
+    end
+    --- The `q` key of the last placement, which says which replies the terminal is asked for.
+    local function quiet()
+      for index = #writes, 1, -1 do
+        local q = writes[index]:match("a=p,[^\27]-q=(%d)")
+        if q then
+          return tonumber(q)
+        end
+      end
+    end
+    terminal.forget()
+    local ok, err = pcall(function()
+      local s = open(make("wezterm-tmux-extended-keys", pages(1)))
+      eq(2, quiet(), "no replies asked for")
+      local reply = ("\27_Gi=%d,p=1;ENOENT:unknown image id\27\\"):format(s.ids[s.slot])
+      writes = {}
+      vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = reply } })
+      vim.wait(100)
+      eq({}, transmitted(), "a reply that cannot have been read is not taken for one")
+
+      if vim.fn.has("nvim-0.12") == 1 then
+        extended_keys = "off"
+        terminal.forget() -- as when tmux is attached from another terminal
+        s.dirty = true
+        require("pdf-view.positioned").refresh(s)
+        eq(1, quiet(), "asked again when placing: an image the terminal lost is reported")
+      end
+    end)
+    vim.env.TMUX, vim.system = saved_tmux, saved_system
+    terminal.forget()
     if not ok then
       error(err, 0)
     end
@@ -3924,6 +4815,93 @@ describe("viewer page turns", function()
     end)
   end)
 
+  it("lets go of the page being drawn ahead of time when another page is shown instead", function()
+    reset()
+    local s = open(make("prefetch-leave", pages(5)))
+    idle(s)
+    local kills, finish = {}, {}
+    local render = mupdf.render
+    with_stub(mupdf, "render", function(file, page, width, height, out, cb)
+      if page ~= 3 then
+        return render(file, page, width, height, out, cb)
+      end
+      -- page 3 is slow to draw: held back until the test lets it finish
+      local job = render(file, page, width, height, out, function(...)
+        local args = { ... }
+        finish[#finish + 1] = function()
+          cb(unpack(args))
+        end
+      end)
+      return {
+        kill = function(_, signal, wanted)
+          kills[#kills + 1] = wanted or false
+          return job:kill(signal, wanted)
+        end,
+      }
+    end, function()
+      press("j")
+      on_page(s, 2)
+      wait_for(function()
+        return s.rendering ~= nil and next(s.rendering) ~= nil
+      end, "page 3 being rendered ahead of time")
+      press("5G")
+      on_page(s, 5)
+      wait_for(function()
+        return #kills == 1
+      end, "page 3 let go of")
+      eq(false, kills[1] and kills[1](), "nothing waits for it")
+      wait_for(function()
+        return #finish == 1
+      end, "the render of page 3")
+    end)
+  end)
+
+  it("keeps drawing the page being drawn ahead of time while it is turned to", function()
+    reset()
+    local s = open(make("prefetch-keep", pages(3)))
+    idle(s)
+    local kills, finish = {}, {}
+    local render = mupdf.render
+    with_stub(mupdf, "render", function(file, page, width, height, out, cb)
+      local job = render(file, page, width, height, out, function(...)
+        local args = { ... }
+        finish[#finish + 1] = function()
+          cb(unpack(args))
+        end
+      end)
+      return {
+        kill = function(_, signal, wanted)
+          kills[#kills + 1] = wanted or false
+          return job:kill(signal, wanted)
+        end,
+      }
+    end, function()
+      press("j")
+      on_page(s, 2)
+      wait_for(function()
+        return s.rendering ~= nil and next(s.rendering) ~= nil
+      end, "page 3 being rendered ahead of time")
+      press("j")
+      vim.wait(50)
+      eq({}, kills, "the page turn waits for it, so it is not stopped")
+      press("k") -- turned away before it is done: nothing waits for it any more
+      on_page(s, 2)
+      wait_for(function()
+        return #kills == 1
+      end, "page 3 let go of")
+      eq(false, kills[1] and kills[1](), "nothing waits for it")
+      press("j") -- turned back to within the time it is given to finish
+      vim.wait(50)
+      eq(true, kills[1](), "the page turn waits for it again, which keeps it going")
+      wait_for(function()
+        return #finish == 1
+      end, "the render of page 3")
+      eq(1, #kills)
+      finish[1]()
+      on_page(s, 3)
+    end)
+  end)
+
   it("shows a page it turns back to without sending it to the terminal again", function()
     reset()
     local s = open(make("terminal-cache", pages(3)))
@@ -4055,7 +5033,7 @@ describe("viewer password-protected documents", function()
 
     -- a resized window shows the page again, which keeps the message and does not ask
     local before = s.requested_key
-    vim.cmd("vsplit")
+    vim.cmd("vnew | wincmd p")
     wait_for(function()
       return s.requested_key ~= before and s.job == nil
     end, "re-layout after the split")
@@ -4322,6 +5300,76 @@ describe("viewer SyncTeX", function()
     setup()
   end)
 
+  it("forward search moves the view of the PDF that was used last, of the windows that show it", function()
+    setup({ synctex = fake })
+    reset()
+    local pdf, tex = project("sync-views")
+    answer("view", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Page:2",
+      "x:72",
+      "y:400",
+      "h:72",
+      "v:400",
+      "W:300",
+      "H:40",
+      "SyncTeX result end",
+    })
+    vim.cmd.edit(vim.fn.fnameescape(tex))
+    local source = vim.api.nvim_get_current_win()
+    vim.cmd("vertical rightbelow split")
+    local s = open(pdf)
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    vim.api.nvim_set_current_win(source)
+    vim.cmd("PdfViewForward")
+    wait_for(function()
+      return view.synced ~= nil and view.page == 2 and view.job == nil and view.target == nil
+    end, "the view on page 2")
+    eq(1, s.page, "the other window stays")
+    eq(nil, s.synced)
+    eq(3, #vim.api.nvim_tabpage_list_wins(0), "no other split opens")
+    setup()
+  end)
+
+  it("forward search to a PDF on screen in another tab opens a split with a view of its own", function()
+    setup({ synctex = fake })
+    reset()
+    local pdf, tex = project("sync-tab")
+    answer("view", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Page:2",
+      "x:72",
+      "y:400",
+      "h:72",
+      "v:400",
+      "W:300",
+      "H:40",
+      "SyncTeX result end",
+    })
+    local s = open(pdf)
+    vim.cmd.tabnew()
+    vim.cmd.edit(vim.fn.fnameescape(tex))
+    local source = vim.api.nvim_get_current_win()
+    vim.cmd("PdfViewForward")
+    local view
+    wait_for(function()
+      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        local candidate = viewer.sessions[vim.api.nvim_win_get_buf(win)]
+        if candidate and candidate ~= s then
+          view = candidate
+        end
+      end
+      return view ~= nil and view.synced ~= nil and view.page == 2 and view.job == nil and view.target == nil
+    end, "a view of its own on page 2")
+    eq(source, vim.api.nvim_get_current_win(), "the cursor stays in the source")
+    eq(1, s.page, "the viewer in the other tab stays")
+    vim.cmd("silent! tabonly")
+    setup()
+  end)
+
   it("forward search says so when the line is not in the SyncTeX data", function()
     setup({ synctex = fake })
     reset()
@@ -4376,6 +5424,78 @@ describe("viewer SyncTeX", function()
     eq("2", page)
     harness.near(306, tonumber(x), 612 / fit.cols, "x")
     harness.near(396, tonumber(y), 792 / fit.rows, "y")
+    setup()
+  end)
+
+  it("forward search scrolls to the typeset line on a turned page", function()
+    setup({ synctex = fake })
+    reset()
+    local pdf, tex = project("sync-turned")
+    answer("view", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Page:2",
+      "x:72",
+      "y:400",
+      "h:72",
+      "v:400",
+      "W:300",
+      "H:40",
+      "SyncTeX result end",
+    })
+    vim.cmd.edit(vim.fn.fnameescape(tex))
+    local source = vim.api.nvim_get_current_win()
+    vim.cmd("vertical rightbelow split")
+    local s = open(pdf)
+    press(">w")
+    settle(s)
+    eq({ 90, 792, 612 }, { s.rotation, s.geom.w, s.geom.h })
+    vim.api.nvim_set_current_win(source)
+    vim.cmd("PdfViewForward")
+    wait_for(function()
+      return s.synced ~= nil and s.page == 2 and s.job == nil and s.target == nil
+    end, "the viewer on page 2")
+    eq({ { 72, 360, 372, 400 } }, s.synced.rects, "the box stays in the points SyncTeX gave")
+    -- the middle of the box, 222 points from the left of the 612 point wide page, is that far down the turned page
+    harness.near(222 / 612, s.cy, 0.01, "the line is in the middle of the window")
+    setup()
+  end)
+
+  it("inverse search asks SyncTeX about the point of the page before it was turned", function()
+    setup({ synctex = fake })
+    reset()
+    os.remove(log)
+    local pdf, tex = project("sync-inverse-turned")
+    answer("edit", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Input:./sync-inverse-turned.tex",
+      "Line:7",
+      "Column:-1",
+      "SyncTeX result end",
+    })
+    local s = open(pdf)
+    press(">")
+    settle(s)
+    local win = vim.api.nvim_get_current_win()
+    local fit = s.fit
+    -- a quarter of the way down the turned page, in the middle across it
+    local row, col = fit.pad_top + math.floor(fit.rows / 4), fit.pad_left + math.floor(fit.cols / 2)
+    local turned_x = (col - fit.pad_left + 0.5) / fit.cols * 792
+    local turned_y = (row - fit.pad_top + 0.5) / fit.rows * 612
+    with_stub(vim.fn, "getmousepos", function()
+      return { winid = win, winrow = row + 2, wincol = col + 1 }
+    end, function()
+      press(vim.keycode("<2-LeftMouse>"))
+      wait_for(function()
+        return vim.api.nvim_buf_get_name(0) == tex
+      end, "the source")
+    end)
+    local page, x, y = logged()[1]:match("^edit %-o (%d+):([%d.]+):([%d.]+):" .. vim.pesc(pdf) .. "$")
+    eq("1", page)
+    -- turned back: what is down the turned page is across the page, what is across it is up from its bottom
+    harness.near(turned_y, tonumber(x), 612 / fit.rows, "x")
+    harness.near(792 - turned_x, tonumber(y), 792 / fit.cols, "y")
     setup()
   end)
 
@@ -4706,6 +5826,22 @@ describe("viewer continuous scrolling", function()
     setup()
   end)
 
+  it("scrolls half windows on into the next page", function()
+    setup({ continuous = true })
+    reset()
+    local s = open(coloured("continuous-half"))
+    press("w")
+    settle(s)
+    until_done(s, vim.keycode("<C-d>"), function()
+      return s.page == 2
+    end, 20)
+    truthy(s.scrolled, "scrolled into the page, not turned to it")
+    until_done(s, vim.keycode("<C-u>"), function()
+      return s.page == 1
+    end, 20)
+    setup()
+  end)
+
   it("turns pages that fit the window, as without it", function()
     setup({ continuous = true })
     reset()
@@ -4714,5 +5850,274 @@ describe("viewer continuous scrolling", function()
     on_page(s, 2)
     eq(nil, s.scrolled)
     setup()
+  end)
+end)
+
+describe("viewer rotation", function()
+  setup()
+  local LANDSCAPE = { w = 600, h = 400, color = { 1, 1, 1 } }
+
+  --- How many pages mutool is asked to draw while `body` runs.
+  local function counting_renders(body)
+    local count = 0
+    local render, render_clip, render_sheet = mupdf.render, mupdf.render_clip, mupdf.render_sheet
+    with_stub(mupdf, "render", function(...)
+      count = count + 1
+      return render(...)
+    end, function()
+      with_stub(mupdf, "render_clip", function(...)
+        count = count + 1
+        return render_clip(...)
+      end, function()
+        with_stub(mupdf, "render_sheet", function(...)
+          count = count + 1
+          return render_sheet(...)
+        end, body)
+      end)
+    end)
+    return count
+  end
+
+  it("turns the pages with > and <, a quarter turn each, and says so in the winbar", function()
+    reset()
+    local s = open(make("rotate-keys", { LANDSCAPE, LANDSCAPE }))
+    eq({ 0, 600, 400 }, { s.rotation, s.geom.w, s.geom.h })
+    press(">")
+    settle(s)
+    eq({ 90, 400, 600 }, { s.rotation, s.geom.w, s.geom.h })
+    local paths = transmitted()
+    local width, height = fixture.png_size(paths[#paths])
+    truthy(height > width, ("the page on screen is upright: %dx%d"):format(width, height))
+    truthy(vim.wo.winbar:find("90°", 1, true), vim.wo.winbar)
+    eq("1 / 2 90°", pdf_view.status())
+
+    press("2>")
+    settle(s)
+    eq({ 270, 400, 600 }, { s.rotation, s.geom.w, s.geom.h })
+    press("<")
+    settle(s)
+    eq(180, s.rotation)
+    press("2<")
+    settle(s)
+    eq({ 0, 600, 400 }, { s.rotation, s.geom.w, s.geom.h })
+    eq(false, vim.wo.winbar:find("°", 1, true) ~= nil, vim.wo.winbar)
+
+    -- every page is turned, and a page turn keeps the rotation
+    press(">j")
+    on_page(s, 2)
+    eq({ 90, 400, 600 }, { s.rotation, s.geom.w, s.geom.h })
+  end)
+
+  it("keeps the pages turned each way apart in the render cache", function()
+    reset()
+    local s = open(make("rotate-cache", { LANDSCAPE }))
+    idle(s)
+    eq(
+      1,
+      counting_renders(function()
+        press(">")
+        idle(s)
+      end),
+      "the turned page is drawn"
+    )
+    local turned = 0
+    for key in pairs(s.cache) do
+      turned = turned + (key:find("@r90", 1, true) and 1 or 0)
+    end
+    eq(1, turned, vim.inspect(s.cache))
+    eq(
+      0,
+      counting_renders(function()
+        press("<")
+        idle(s)
+      end),
+      "the page as it was is still in the cache"
+    )
+    eq(0, s.rotation)
+  end)
+
+  it("keeps the rotation where the viewer was left, in the marks and in the jump list", function()
+    reset()
+    local path = make("rotate-remembered", pages(3))
+    local s = open(path)
+    press(">")
+    settle(s)
+    press("ma")
+    press("<")
+    settle(s)
+    eq(0, s.rotation)
+    press("'a")
+    settle(s)
+    eq(90, s.rotation, "the mark turned the pages back")
+    press("G")
+    on_page(s, 3)
+    press("<")
+    settle(s)
+    press(vim.keycode("<C-o>"))
+    on_page(s, 1)
+    eq(90, s.rotation, "the jump came back turned")
+
+    press("3G")
+    on_page(s, 3)
+    vim.cmd("silent! %bwipeout!")
+    eq({ 3, 90 }, {
+      require("pdf-view.positions").get(s.path).page,
+      require("pdf-view.positions").get(s.path).rotation,
+    })
+    reset()
+    s = open(path)
+    settle(s)
+    eq({ 3, 90, 792, 612 }, { s.page, s.rotation, s.geom.w, s.geom.h }, "reopened turned")
+    press(">")
+    settle(s)
+    vim.cmd("silent! %bwipeout!")
+    local again = open(path)
+    settle(again)
+    eq({ 180, 612, 792 }, { again.rotation, again.geom.w, again.geom.h }, "reopened upside down")
+  end)
+
+  it("keeps the point in the middle of the window there when the pages turn", function()
+    reset()
+    local s = open(make("rotate-centre", pages(1)))
+    press("++++++")
+    settle(s)
+    press("jjjll")
+    settle(s)
+    local cx, cy = s.cx, s.cy
+    truthy(cx > 0.55 and cy > 0.55, ("away from the middle of the page: %.2f %.2f"):format(cx, cy))
+    press(">")
+    settle(s)
+    harness.near(1 - cy, s.cx, 0.02, "what was down the page is across it, from the right")
+    harness.near(cx, s.cy, 0.02, "what was across the page is down it")
+  end)
+
+  it("fits the content of a turned page", function()
+    reset()
+    local s = open(make("rotate-content", {
+      { w = 612, h = 792, color = { 1, 1, 1 }, label = "", texts = { { x = 120, y = 250, text = "Middle" } } },
+    }))
+    press("c")
+    settle(s)
+    local box = s.geom.box
+    press(">")
+    settle(s)
+    eq({ 90, "content" }, { s.rotation, s.mode })
+    local expected = rotation.rect(90, 612, 792, box)
+    for index = 1, 4 do
+      harness.near(expected[index], s.geom.box[index], 3, "side " .. index)
+    end
+  end)
+
+  it("scrolls to a search match where it is on the turned page", function()
+    reset()
+    local s = open(make("rotate-search", {
+      {
+        w = 2400,
+        h = 300,
+        color = { 1, 1, 1 },
+        label = "alpha",
+        texts = { { x = 1100, y = 150, text = "alpha" }, { x = 2200, y = 150, text = "alpha" } },
+      },
+    }))
+    press(">w")
+    settle(s)
+    eq({ 300, 2400 }, { s.geom.w, s.geom.h })
+    local function in_view(match)
+      local at = corner(s)
+      local cols, rows = require("pdf-view.session").text_area(vim.api.nvim_get_current_win())
+      local cell = terminal.cell_size()
+      local view = require("pdf-view.layout").viewport(
+        s.geom.w,
+        s.geom.h,
+        cols,
+        rows,
+        cell.w,
+        cell.h,
+        s.zoom,
+        s.cx,
+        s.cy,
+        s.mode,
+        s.geom.box
+      )
+      local rect = rotation.rect(90, match.width, match.height, match.rects[1])
+      local top, bottom = at.y * s.geom.h, at.y * s.geom.h + view.view_h / view.scale
+      return rect[2] >= top - 0.5 and rect[4] <= bottom + 0.5,
+        ("%s lies between %.1f and %.1f"):format(vim.inspect(rect), top, bottom)
+    end
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    eq(3, #s.search.matches)
+    for index = 1, 3 do
+      if index > 1 then
+        press("n")
+        searched(s)
+      end
+      eq(index, s.search.current)
+      truthy(in_view(s.search.matches[index]))
+    end
+    truthy(s.cy > 0.8, "the last match is far down the turned page, cy = " .. s.cy)
+  end)
+
+  --- Follow the first link on the page.
+  local function follow_first(s)
+    local chosen = false
+    with_stub(vim.ui, "select", function(items, _, callback)
+      chosen = true
+      callback(items[1])
+    end, function()
+      press("f")
+      wait_for(function()
+        return chosen
+      end, "the link picker")
+    end)
+    settle(s)
+  end
+
+  it("brings the point a link leads to to the top left of the window, turned", function()
+    reset()
+    -- 30% across and 30% down page 3
+    local link = { rect = { 70, 290, 250, 330 }, page = 3, top = 792 * 0.7, left = 612 * 0.3 }
+    local s = open(make("rotate-link", { vim.tbl_extend("force", LETTER, { links = { link } }), LETTER, LETTER }))
+    press(">w++++++")
+    settle(s)
+    follow_first(s)
+    on_page(s, 3)
+    local at = corner(s)
+    truthy(at.scroll_x and at.scroll_y, "a zoomed width fit scrolls both ways")
+    -- turned clockwise, 30% down the page is 70% across it, and 30% across it is 30% down
+    harness.near(0.7, at.x, 0.005, "x")
+    harness.near(0.3, at.y, 0.005, "y")
+  end)
+
+  it("brings the point a bookmark leads to to the top of the window, turned", function()
+    reset()
+    local path = dir .. "/rotate-outline.pdf"
+    fixture.write(path, pages(3), { outline = { { title = "Figure", page = 3, top = 792 * 0.6 } } })
+    local s = open(path)
+    press("<w++++++")
+    settle(s)
+    with_stub(vim.ui, "select", function(items, _, callback)
+      callback(items[1])
+    end, function()
+      press("gO")
+      on_page(s, 3)
+    end)
+    local at = corner(s)
+    -- turned counter-clockwise, 40% down the page is 40% across it; the bookmark says nothing about across the page,
+    -- which is down the turned page: its top
+    harness.near(0.4, at.x, 0.005, "x")
+    harness.near(0, at.y, 0.005, "y")
+  end)
+
+  it("turns each of two facing pages", function()
+    reset()
+    local s = open(make("rotate-spread", { LANDSCAPE, LANDSCAPE }))
+    press("d>")
+    settle(s)
+    eq(2, #s.parts)
+    eq({ 400, 600 }, { s.parts[1].width, s.parts[1].height })
+    eq({ 400 + 400 + 8, 600 }, { s.geom.w, s.geom.h })
   end)
 end)

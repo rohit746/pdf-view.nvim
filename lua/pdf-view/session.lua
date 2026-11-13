@@ -56,6 +56,8 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field mode PdfView.FitMode what zoom 1 means: the whole page, the page as wide / as tall as the window, or the
 --- part of the page with content on it
 ---@field zoom number multiplies the fitted size: 1 is as fitted, 2 is twice that
+---@field rotation PdfView.Rotation how far every page is turned clockwise, in degrees. `geom`, `fit`, `cx` and `cy` are
+--- of the turned pages; search matches and SyncTeX boxes stay in the unturned page's points
 ---@field search? PdfView.Search the active search, whose matches are highlighted
 ---@field search_job? PdfView.Job in-flight search
 ---@field searching? string the needle of the in-flight search, for the winbar
@@ -80,8 +82,9 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field slot integer which of `ids` is on screen (0 = none yet)
 ---@field images table<integer, string> the PNG the terminal holds under each id, to show it again without sending it
 ---@field image_used table<integer, integer> when each id was last put on screen, to reuse the oldest one
----@field rendering table<string, { waiters: fun(err?: string, png?: string)[] }> renders in progress, by cache key
----@field prefetch? { stopped: boolean } the pages next to the one on screen being rendered ahead of time
+---@field rendering table<string, PdfView.Rendering> renders in progress, by cache key
+---@field prefetch? { stopped: boolean, job?: PdfView.Job } the pages next to the one on screen being rendered ahead of
+--- time, and the render it is waiting for
 ---@field win? integer window the layout was computed for
 ---@field cache table<string, string> render cache: key -> PNG path
 ---@field cache_order string[]
@@ -111,11 +114,34 @@ local NO_HIGHLIGHT = "PdfViewNone"
 --- edges, into the pages next to it; a jump or a change of fit or zoom keeps it inside the page again
 ---@field last? integer the last page on screen: `page` + 1 when two facing pages are, else `page`
 ---@field parts? PdfView.SheetLayout[] where the pages on screen lie in `geom`, when there are two side by side
+---@field worker_timer? uv.uv_timer_t stops the mutool worker once the viewer has been in no window for a while
+---@field reflow? PdfView.Layout the layout a reflowable document was last asked for in this viewer's window
+---@field own_view? boolean the buffer is a window's own view of a PDF that another window shows (`viewer.separate`)
+---@field home? integer the window that an own view belongs to: it is wiped once that window closes
+---@field entered integer when the buffer was last entered, to tell which of the viewers of a PDF was used last
+---@field announced? string the pages on screen that the `User PdfViewPage` autocommand last told of, "page-last"
+---@field announcing? boolean the `User PdfViewPage` autocommand is about to run
 ---@field closed boolean
 
 ---@type table<integer, PdfView.Session>
 local sessions = {}
 M.sessions = sessions
+
+--- Whether another open viewer shows the file of `s` (a window's own view of it, see `viewer.separate`), and with
+--- `on_screen`, one in a window. They share the file's mutool worker.
+---@param s PdfView.Session
+---@param on_screen? boolean
+---@return boolean
+function M.shares_file(s, on_screen)
+  for _, other in pairs(sessions) do
+    if other ~= s and not other.closed and other.path == s.path then
+      if not on_screen or #vim.fn.win_findbuf(other.buf) > 0 then
+        return true
+      end
+    end
+  end
+  return false
+end
 
 local next_image_id
 
@@ -417,6 +443,9 @@ local function update_winbar(s, win)
   if s.zoom > 1 then
     label[#label + 1] = ("%d%%"):format(math.floor(s.zoom * 100 + 0.5))
   end
+  if s.rotation ~= 0 then
+    label[#label + 1] = ("%d°"):format(s.rotation)
+  end
 
   local found = ""
   local needle = s.searching or (s.search and s.search.needle)
@@ -494,9 +523,14 @@ local function wrap_text(text, cols)
         line = ""
       end
       line = line == "" and word or (line .. " " .. word)
-      while width(line) > cols do -- one word wider than the window, such as a long path
-        lines[#lines + 1] = vim.fn.strcharpart(line, 0, cols)
-        line = vim.fn.strcharpart(line, cols)
+      while width(line) > cols and vim.fn.strchars(line) > 1 do -- one word wider than the window, such as a path
+        -- cut by cells, not characters: a double-width character takes two (at least one character per piece)
+        local n = 1
+        while width(vim.fn.strcharpart(line, 0, n + 1)) <= cols do
+          n = n + 1
+        end
+        lines[#lines + 1] = vim.fn.strcharpart(line, 0, n)
+        line = vim.fn.strcharpart(line, n)
       end
     end
     lines[#lines + 1] = line
@@ -530,7 +564,14 @@ local function destroy(s)
   if s.search_job then
     s.search_job:kill(15)
   end
-  mupdf.release(s.path)
+  if s.worker_timer then
+    s.worker_timer:stop()
+    s.worker_timer:close()
+    s.worker_timer = nil
+  end
+  if not M.shares_file(s) then -- the worker is the file's: other windows' views of it still ask it for pages
+    mupdf.release(s.path)
+  end
   if s.watcher then
     s.watcher.stop()
   end
@@ -545,6 +586,41 @@ local function destroy(s)
   sessions[s.buf] = nil
   -- a later :edit! attaches a fresh session to the same buffer; don't leave this one's autocmds behind
   pcall(vim.api.nvim_clear_autocmds, { group = augroup, buffer = s.buf })
+end
+
+--- Lay the document of `s` out for its own window again, before asking mutool about it. The layout of a reflowable
+--- document is kept per file, and the views of one file in windows of other sizes take turns with it.
+---@param s PdfView.Session
+local function use_layout(s)
+  if s.reflow then
+    mupdf.set_layout(s.path, s.reflow)
+  end
+end
+
+--- Tell other code, with the `User PdfViewPage` autocommand, that another page is on screen in `s` (or other facing
+--- pages): `data` holds the viewer's `buf`, the `page` and `last` page on screen, and the document's page `count`.
+--- Called whenever a page was put on screen, which is often the same one; run from the event loop, once for pages
+--- shown one after the other at once, and so that an error in an autocommand cannot stop the viewer.
+---@param s PdfView.Session
+function M.announce_page(s)
+  if s.announcing then
+    return
+  end
+  s.announcing = true
+  vim.schedule(function()
+    s.announcing = nil
+    local page, last = s.page, s.last or s.page
+    local key = page .. "-" .. last
+    if s.closed or s.announced == key then
+      return
+    end
+    s.announced = key
+    vim.api.nvim_exec_autocmds("User", {
+      pattern = "PdfViewPage",
+      modeline = false,
+      data = { buf = s.buf, page = page, last = last, count = s.count },
+    })
+  end)
 end
 
 --- "3" for the page on screen, "3-4" for two facing pages.
@@ -587,5 +663,6 @@ M.wrap_text = wrap_text
 M.display_message = display_message
 M.allocate_ids = allocate_ids
 M.destroy = destroy
+M.use_layout = use_layout
 
 return M

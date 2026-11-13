@@ -16,6 +16,7 @@ local M = {}
 ---@field top? number where on that page, in points from its bottom edge (a /XYZ destination); the whole page without
 ---@field left? number the same in points from its left edge
 ---@field uri? string address it opens instead
+---@field action? string the link's action dictionary as written in the PDF (`<< /S /Launch /F (app) >>`), instead
 
 ---@class PdfView.FixtureOutline
 ---@field title string
@@ -38,7 +39,8 @@ end
 --- Write a PDF with one page per entry of `pages` (a proper xref table, so no repair warnings).
 ---@param path string
 ---@param pages PdfView.FixturePage[]
----@param opts? { outline?: PdfView.FixtureOutline[] } bookmarks to add
+---@param opts? { outline?: PdfView.FixtureOutline[], dests?: table<string, PdfView.FixtureOutline> } bookmarks to add,
+--- and named destinations (the catalog's /Dests), by name; their `title` is not used
 function M.write(path, pages, opts)
   opts = opts or {}
   local objects = {}
@@ -82,6 +84,7 @@ function M.write(path, pages, opts)
     local annots = {}
     for _, link in ipairs(page.links or {}) do
       local action = link.page and "/Dest " .. dest(page_objects[link.page], link)
+        or link.action and "/A " .. link.action
         or ("/A << /S /URI /URI (%s) >>"):format(link.uri)
       local annot = add(
         ("<< /Type /Annot /Subtype /Link /Rect [%g %g %g %g] /Border [0 0 0] %s >>"):format(
@@ -134,6 +137,15 @@ function M.write(path, pages, opts)
     local first, last, count = build(opts.outline, root)
     objects[root] = ("<< /Type /Outlines /First %d 0 R /Last %d 0 R /Count %d >>"):format(first, last, count)
     catalog = ("<< /Type /Catalog /Pages 2 0 R /Outlines %d 0 R >>"):format(root)
+  end
+  if opts.dests then
+    local names = vim.tbl_keys(opts.dests)
+    table.sort(names)
+    local entries = {}
+    for _, name in ipairs(names) do
+      entries[#entries + 1] = ("/%s %s"):format(name, dest(page_objects[opts.dests[name].page], opts.dests[name]))
+    end
+    catalog = catalog:gsub(" >>$", (" /Dests << %s >> >>"):format(table.concat(entries, " ")))
   end
   objects[1] = catalog
 

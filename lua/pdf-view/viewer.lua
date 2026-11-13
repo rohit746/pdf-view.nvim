@@ -5,8 +5,10 @@ local actions = require("pdf-view.actions")
 local config = require("pdf-view.config")
 local cursor = require("pdf-view.cursor")
 local kitty = require("pdf-view.kitty")
+local mupdf = require("pdf-view.mupdf")
 local positions = require("pdf-view.positions")
 local render = require("pdf-view.render")
+local rotation = require("pdf-view.rotation")
 local session = require("pdf-view.session")
 local terminal = require("pdf-view.terminal")
 local watch = require("pdf-view.watch")
@@ -25,17 +27,81 @@ local RELOAD_RETRIES = 8
 
 --- Where the viewer of a buffer was when the buffer was unloaded, with its jump list and marks. `:edit` unloads a
 --- buffer and reads it again, and this is what brings it back to the same page instead of the first one.
----@type table<integer, PdfView.Position|{ jumps?: PdfView.Position[], jump_index?: integer, marks?: table<string, PdfView.Position> }>
+---@type table<integer, PdfView.Remembered|{ jumps?: PdfView.Position[], jump_index?: integer, marks?: table<string, PdfView.Position> }>
 local resume = {}
 
 --- Holds each viewer's own `BufReadCmd`, which outlives the session (`destroy` clears only `augroup`) so `:edit`
 --- re-attaches the buffer even when `auto_open` is off and no `*.pdf` handler exists.
 local reread = vim.api.nvim_create_augroup("PdfViewReread", { clear = true })
 
---- Where the viewer `s` is, for `resume`.
+--- Buffers that are a window's own view of a PDF that another window shows (`separate`) are named
+--- `pdf-view://{n}/{path}`. The file a viewer buffer shows: its name, or the path in such a name.
+---@param buf integer
+---@return string path, boolean own_view
+local function file_of(buf)
+  local name = vim.api.nvim_buf_get_name(buf)
+  local path = name:match("^pdf%-view://%d+/(.+)$")
+  return path or name, path ~= nil
+end
+
+local own_views = 0 -- views made by `separate`, numbering their names
+local entered = 0 -- buffer entries, for `PdfView.Session.entered`
+---@type table<string, integer> per file, `entered` of the viewer of it that was used last, open or not
+local last_entered = {}
+
+--- Note that the viewer `s` is the one used last, of its file and of all.
 ---@param s PdfView.Session
+local function mark_entered(s)
+  entered = entered + 1
+  s.entered = entered
+  last_entered[s.path] = entered
+end
+
+--- The windows (not floating) that show the viewer `s`, and the one of them that keeps it when `separate` gives the
+--- others views of their own: the window it was drawn in, else the current one, else the first.
+---@param s PdfView.Session
+---@return integer[] wins, integer? keep
+local function shared_windows(s)
+  local wins = {}
+  for _, win in ipairs(s.closed and {} or vim.fn.win_findbuf(s.buf)) do
+    if vim.api.nvim_win_get_config(win).relative == "" then
+      wins[#wins + 1] = win
+    end
+  end
+  local keep = s.win
+  if not vim.tbl_contains(wins, keep) then
+    local current = vim.api.nvim_get_current_win()
+    keep = vim.tbl_contains(wins, current) and current or wins[1]
+  end
+  return wins, keep
+end
+
+--- Wipe the windows' own views (`give_own_view`) that are in no window and whose window is closed: hidden while their
+--- window shows another buffer, they come back with `<C-o>` there.
+local function wipe_own_views()
+  for _, s in ipairs(vim.tbl_values(sessions)) do
+    if s.own_view and not s.closed and not (s.home and vim.api.nvim_win_is_valid(s.home)) then
+      if #vim.fn.win_findbuf(s.buf) == 0 then
+        pcall(vim.api.nvim_buf_delete, s.buf, { force = true })
+      end
+    end
+  end
+end
+
+--- Where the viewer `s` is, for `resume`: with the layout of an e-book, whose page numbers follow it.
+---@param s PdfView.Session
+---@return PdfView.Remembered
 local function position(s)
-  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+  local size = s.reflowable and s.laid_out and s.laid_out.size or nil
+  return {
+    page = s.target or s.page,
+    mode = s.mode,
+    zoom = s.zoom,
+    cx = s.cx,
+    cy = s.cy,
+    rotation = s.rotation,
+    layout = size,
+  }
 end
 
 --- What `resume` keeps of the viewer `s`: where it is, its jump list and its marks.
@@ -49,13 +115,56 @@ end
 local function leave(s)
   local where = position(s)
   resume[s.buf] = kept(s)
-  if config.options.remember_position then
+  -- of several windows on the file (`separate`), the reading position is the one of the window used last
+  if config.options.remember_position and (last_entered[s.path] or 0) <= s.entered then
     pcall(positions.set, s.path, where)
   end
 end
 
 M.sessions = sessions
 M.reload = actions.reload
+
+--- Milliseconds a viewer may be in no window before its mutool worker is stopped, which frees the parsed document.
+--- Long enough that flipping between buffers does not start it again and again. The next request starts another.
+M.stop_worker_after = 30000
+
+--- Forget the pending stop of the worker of `s`.
+---@param s PdfView.Session
+local function keep_worker(s)
+  if s.worker_timer then
+    s.worker_timer:stop()
+    s.worker_timer:close()
+    s.worker_timer = nil
+  end
+end
+
+--- Stop the worker of `s` once it has been in no window for `M.stop_worker_after` milliseconds. A worker still busy
+--- then (a page drawn ahead of time) is given as long again.
+---@param s PdfView.Session
+local function stop_worker_later(s)
+  keep_worker(s)
+  local timer = uv.new_timer()
+  if not timer then
+    return
+  end
+  s.worker_timer = timer
+  timer:start(
+    M.stop_worker_after,
+    0,
+    vim.schedule_wrap(function()
+      if s.worker_timer ~= timer then
+        return -- shown again, or closed, meanwhile
+      end
+      keep_worker(s)
+      if s.closed or #vim.fn.win_findbuf(s.buf) > 0 or session.shares_file(s, true) then
+        return -- a window's own view of the file keeps the worker it shares busy
+      end
+      if mupdf.stop_idle(s.path) then
+        stop_worker_later(s)
+      end
+    end)
+  )
+end
 
 --- Show the new version of the file of `s`, which live reload or a re-fit of the page (whichever comes first) found
 --- changed on disk.
@@ -109,6 +218,20 @@ local function set_global_autocmds()
     desc = "Re-fit PDF pages to their window",
     callback = schedule_relayout,
   })
+  vim.api.nvim_create_autocmd("WinNew", {
+    group = augroup,
+    desc = "Give a new window on a PDF viewer a view of its own",
+    callback = function()
+      M.schedule_separate()
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    group = augroup,
+    desc = "Wipe the PDF views of their own that closed windows had",
+    callback = function()
+      vim.schedule(wipe_own_views) -- the window is still there while this runs
+    end,
+  })
   vim.api.nvim_create_autocmd({ "FocusGained", "UIEnter" }, {
     group = augroup,
     desc = "Send PDF pages again when tmux is attached from another terminal",
@@ -158,6 +281,8 @@ local function set_global_autocmds()
         if not s.closed then
           leave(s)
         end
+      end
+      for _, s in pairs(sessions) do
         destroy(s)
       end
     end,
@@ -172,7 +297,7 @@ function M.attach(buf)
     return sessions[buf]
   end
 
-  local path = vim.api.nvim_buf_get_name(buf)
+  local path, own_view = file_of(buf)
   local last = resume[buf] or (config.options.remember_position and positions.get(path)) or {}
   resume[buf] = nil
 
@@ -183,6 +308,7 @@ function M.attach(buf)
     page = last.page or 1,
     mode = last.mode or "page",
     zoom = math.max(1, math.min(last.zoom or 1, config.options.max_zoom)),
+    rotation = rotation.valid(last.rotation) and last.rotation or 0,
     cx = math.max(0, math.min(last.cx or 0.5, 1)),
     cy = math.max(0, math.min(last.cy or 0.5, 1)),
     jumps = last.jumps or {},
@@ -196,15 +322,26 @@ function M.attach(buf)
     rendering = {},
     cache = {},
     cache_order = {},
+    own_view = own_view or nil,
+    entered = 0,
     closed = false,
   }
   sessions[buf] = s
+  if type(last.layout) == "table" then
+    -- the page is one of an e-book laid out this way: the first `show` finds where its text is in the window's
+    -- layout, as it does when the window is resized
+    s.reflowable = true
+    s.laid_out = { key = table.concat(last.layout, "x"), size = last.layout }
+  end
 
   -- `nofile` stops Neovim from reading the PDF's bytes into the buffer and refuses `:w` over the original
   local bo = vim.bo[buf]
   bo.buftype = "nofile"
   bo.swapfile = false
   bo.bufhidden = "hide"
+  if own_view then -- not a buffer to switch to: it goes when its window closes (`wipe_own_views`)
+    bo.buflisted = false
+  end
   bo.undolevels = -1
   bo.modifiable = false
   bo.filetype = "pdf-view"
@@ -214,7 +351,19 @@ function M.attach(buf)
     buffer = buf,
     desc = "Show the PDF page in the entered window",
     callback = function()
-      apply_window_options(s, vim.api.nvim_get_current_win())
+      keep_worker(s)
+      local win = vim.api.nvim_get_current_win()
+      if s.own_view then
+        s.home = win
+      end
+      local wins, keep = shared_windows(s)
+      if #wins > 1 then
+        M.schedule_separate()
+        if win ~= keep and vim.tbl_contains(wins, win) then
+          return -- on screen in another window already: this one gets a view of its own, and that one stays
+        end
+      end
+      apply_window_options(s, win)
       relayout(s)
       if s.search_stale then
         rescan(s)
@@ -223,13 +372,18 @@ function M.attach(buf)
   })
   -- The terminal drops the oldest images once it holds too many (kitty and Ghostty keep about 320 MB), and says
   -- nothing about it: a viewer in no window frees its images, and sends its page again when a window shows it.
+  -- Its mutool worker is stopped a while later; the render cache keeps the pages it drew.
   vim.api.nvim_create_autocmd("BufHidden", {
     group = augroup,
     buffer = buf,
-    desc = "Free the images of a PDF viewer in no window",
+    desc = "Free the images and the mutool worker of a PDF viewer in no window",
     callback = function()
       vim.schedule(function() -- the buffer is still in its last window while this runs
-        if s.closed or #vim.fn.win_findbuf(buf) > 0 or terminal.placement() == "positioned" then
+        if s.closed or #vim.fn.win_findbuf(buf) > 0 then
+          return
+        end
+        stop_worker_later(s)
+        if terminal.placement() == "positioned" then
           return -- `positioned` takes a page away from a window that no longer shows it
         end
         for _, id in ipairs(s.ids) do
@@ -247,6 +401,7 @@ function M.attach(buf)
     buffer = buf,
     desc = "Hide the cursor over the PDF page",
     callback = function()
+      mark_entered(s)
       cursor.hide(buf)
     end,
   })
@@ -267,6 +422,7 @@ function M.attach(buf)
         leave(s)
       end
       destroy(s)
+      actions.set_global_wheel() -- removed with the last viewer
     end,
   })
 
@@ -306,6 +462,7 @@ function M.attach(buf)
 
   if vim.api.nvim_get_current_buf() == buf then
     cursor.hide(buf) -- BufEnter may already have fired for this buffer
+    mark_entered(s)
   end
   vim.schedule(function()
     relayout(s)
@@ -349,7 +506,7 @@ function M.save_copy(s, target)
     end
   end
   vim.api.nvim_echo({ { ('"%s" written'):format(vim.fn.fnamemodify(target, ":~:.")) } }, false, {})
-  if vim.api.nvim_buf_get_name(s.buf) ~= s.path then -- :saveas has renamed the buffer: view the copy
+  if file_of(s.buf) ~= s.path then -- :saveas has renamed the buffer: view the copy
     resume[s.buf] = kept(s)
     destroy(s)
     M.attach(s.buf)
@@ -359,7 +516,7 @@ end
 --- `BufReadCmd` handler: take over local PDF files and leave everything else (new files, URLs) alone.
 ---@param buf integer
 function M.read(buf)
-  local stat = uv.fs_stat(vim.api.nvim_buf_get_name(buf))
+  local stat = uv.fs_stat((file_of(buf)))
   if not stat or stat.type ~= "file" then
     return
   end
@@ -370,9 +527,107 @@ function M.read(buf)
   M.attach(buf)
 end
 
+--- `SessionLoadPost` handler for a buffer that a session brought back in place of a viewer. `:mksession` does not
+--- save a `nofile` buffer as a file: with `blank` in 'sessionoptions' it saves `enew | file {pdf}`, which brings back
+--- an empty buffer named after the PDF, without `BufReadCmd`. Make it a viewer again.
+---@param buf integer
+function M.restore(buf)
+  M.read(buf)
+  local s = sessions[buf]
+  if s then -- no BufWinEnter follows: the buffer is in its windows already
+    for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+      apply_window_options(s, win)
+    end
+  end
+end
+
+--- Show the PDF of the viewer `s` in window `win` with a view of its own: a buffer of its own, unlisted, that starts
+--- where `s` is (page, fit, zoom, search, jump list and marks) and turns its pages on its own.
+---@param s PdfView.Session
+---@param win integer
+local function give_own_view(s, win)
+  -- the view this window had of the file, before it showed another buffer
+  for _, other in pairs(sessions) do
+    if other.own_view and other.home == win and other.path == s.path and not other.closed then
+      if #vim.fn.win_findbuf(other.buf) == 0 and pcall(vim.api.nvim_win_set_buf, win, other.buf) then
+        return
+      end
+    end
+  end
+  local buf = vim.api.nvim_create_buf(false, true)
+  local named = false
+  for _ = 1, 100 do -- a session may have brought back views with these numbers
+    own_views = own_views + 1
+    named = pcall(vim.api.nvim_buf_set_name, buf, ("pdf-view://%d/%s"):format(own_views, s.path))
+    if named then
+      break
+    end
+  end
+  if not named then
+    return vim.api.nvim_buf_delete(buf, { force = true })
+  end
+  resume[buf] = vim.deepcopy(kept(s))
+  local view = M.attach(buf)
+  view.home = win
+  view.recolor, view.spread, view.scrolled, view.synced = s.recolor, s.spread, s.scrolled, s.synced
+  view.count, view.reflowable, view.laid_out = s.count, s.reflowable, s.laid_out
+  view.last_needle, view.locked = s.last_needle, s.locked
+  if s.search then -- the same matches; the current one is the view's own
+    view.search = vim.tbl_extend("force", {}, s.search)
+  end
+  if not pcall(vim.api.nvim_win_set_buf, win, buf) then -- 'winfixbuf': the window shows the same page
+    vim.api.nvim_buf_delete(buf, { force = true })
+    apply_window_options(s, win)
+  end
+end
+
+--- Give each window that shows a viewer which another window shows too a view of its own (`give_own_view`), so that
+--- the windows turn their pages each on its own. The window the viewer was drawn in keeps it. Floating windows (a
+--- picker's preview) are left alone, and show the same page.
+function M.separate()
+  local separated = false
+  local list = vim.tbl_values(sessions)
+  for _, s in ipairs(list) do
+    local wins, keep = shared_windows(s)
+    if #wins > 1 then
+      for _, win in ipairs(wins) do
+        if win ~= keep then
+          give_own_view(s, win)
+          separated = true
+        end
+      end
+    end
+  end
+  if not separated then
+    return
+  end
+  -- a buffer switched in another window than the current one moved the cursor's hiding to it
+  local current = vim.api.nvim_get_current_buf()
+  if sessions[current] then
+    cursor.hide(current)
+  else
+    cursor.show()
+  end
+end
+
+local separate_pending = false
+
+--- `separate()` once the command that made a window or changed its buffer is done: `:split file.pdf` makes a window
+--- on the current buffer first.
+function M.schedule_separate()
+  if separate_pending then
+    return
+  end
+  separate_pending = true
+  vim.schedule(function()
+    separate_pending = false
+    M.separate()
+  end)
+end
+
 --- Open a PDF in the current window.
 ---@param path string
----@return integer buf
+---@return integer buf the viewer's buffer, or the window's own view of it (`separate`)
 function M.open(path)
   -- not expand(): it would rewrite a name with `{`, `$` or a backtick in it (":PdfView" has expanded its argument)
   path = vim.fn.fnamemodify(path, ":p")
@@ -380,14 +635,21 @@ function M.open(path)
   if not stat or stat.type ~= "file" then
     error(("pdf-view: cannot read `%s`"):format(path), 0)
   end
+  local current = sessions[vim.api.nvim_get_current_buf()]
+  if current and current.own_view and current.path == path then -- the window's own view of it: it stays
+    return current.buf
+  end
   local buf = vim.fn.bufadd(path)
   vim.bo[buf].buflisted = true -- as :edit lists it, for :ls, :bnext and bufferlines
   M.attach(buf)
   vim.api.nvim_win_set_buf(0, buf)
-  return buf
+  -- on screen in another window already: this window gets a view of its own, now, for the caller to move
+  M.separate()
+  return vim.api.nvim_get_current_buf()
 end
 
---- "page / pages" of the viewer in `buf`, plus "x1.56" while zoomed, for statuslines. Empty for other buffers.
+--- "page / pages" of the viewer in `buf`, plus the fit, "x1.56" while zoomed and "90°" while the pages are turned, for
+--- statuslines. Empty for other buffers.
 ---@param buf? integer
 ---@return string
 function M.status(buf)
@@ -397,7 +659,8 @@ function M.status(buf)
   end
   local mode = s.mode ~= "page" and (" " .. s.mode) or ""
   local zoom = s.zoom > 1 and (" x%.2f"):format(s.zoom) or ""
-  return ("%s / %s%s%s"):format(session.pages_label(s), s.count or "?", mode, zoom)
+  local turned = s.rotation ~= 0 and (" %d°"):format(s.rotation) or ""
+  return ("%s / %s%s%s%s"):format(session.pages_label(s), s.count or "?", mode, zoom, turned)
 end
 
 return M

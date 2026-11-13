@@ -110,9 +110,21 @@ require("pdf-view").open("paper.pdf")
 
 The viewer is a regular buffer named after the file, so buffer lists, `:bdelete`, session plugins and statuslines work
 as usual. Its winbar shows `paper.pdf   3 / 11`; for a statusline use `require("pdf-view").status()` (`3 / 11`, with
-`width` and `x1.25` added while fitted to the width or zoomed).
+`width`, `x1.25` and `90°` added while fitted to the width, zoomed or turned).
 
-A PDF opens where you left it: the page, fit and zoom of the last 100 PDFs are kept in
+A session (`:mksession`, or a session plugin) brings the viewer back only when `'sessionoptions'` has `blank`, as it
+does by default. Without it the session leaves the viewer's window out; persistence.nvim with LazyVim's settings saves
+sessions this way. Add it with `vim.opt.sessionoptions:append("blank")`.
+
+Split a viewer (`:split`, `:vsplit`, `<C-w>v`) to read two pages of one PDF at once, such as a figure and the text about
+it: each window turns its pages, fits, zooms and rotates them on its own. The new window starts where the viewer was
+(page, fit, zoom and rotation), with its search, jump list and marks, in a view of its own: an unlisted buffer named
+`pdf-view://2//path/to/paper.pdf`, which goes away with its window (while the window shows another buffer it is kept, so
+`<C-o>` comes back to it). A window that switches to a PDF already on screen in another (`:b`, `:PdfView`) gets one too.
+The window that showed the PDF first keeps the viewer's own buffer, and the position remembered for next time is the one
+of the window used last. Floating windows, such as a picker's preview, show the same page as the viewer.
+
+A PDF opens where you left it: the page, fit, zoom and rotation of the last 100 PDFs are kept in
 `stdpath("state")/pdf-view/positions.json`, so this survives restarting Neovim. `remember_position = false` turns it
 off.
 
@@ -122,15 +134,17 @@ show it. Cancel the prompt to leave the PDF locked, and `:edit` to be asked agai
 
 ### Keys
 
-All are buffer-local and normal mode. The keys that move, zoom or step between matches take a count.
+All are buffer-local and normal mode, except the mouse wheel (below). The keys that move, zoom or step between matches
+take a count.
 
 | Keys                         | Action                                                                          |
 | ---------------------------- | ------------------------------------------------------------------------------- |
 | `j` `<Down>`                 | scroll down; at the bottom edge (or when not zoomed) next page. `5j`: five times |
 | `k` `<Up>`                   | scroll up; at the top edge (or when not zoomed) previous page                   |
+| `<C-d>` `<C-u>`              | scroll down / up half a window, turning the page at the edge as `j` `k` do      |
 | `l` `<Right>`                | scroll right; at the right edge (or when not zoomed) next page                  |
 | `h` `<Left>`                 | scroll left; at the left edge (or when not zoomed) previous page                |
-| mouse wheel                  | like `j` `k` `l` `h`, while a viewer has focus: moves the viewer under the mouse |
+| mouse wheel                  | like `j` `k` `l` `h` in the viewer under the mouse, wherever the cursor is       |
 | `<PageDown>` `<C-f>`         | next page, always (`3<PageDown>`: three pages ahead)                            |
 | `<PageUp>` `<BS>` `<C-b>`    | previous page, always                                                           |
 | `gg` `<Home>`                | first page; `12gg` goes to page 12                                              |
@@ -141,16 +155,18 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `w`                          | fit the page's width to the window                                              |
 | `W`                          | fit the page's height to the window                                             |
 | `c`                          | fit the page's content to the window, cropping the margins                      |
+| `>` `<`                      | turn the pages a quarter clockwise / counter-clockwise; see [Rotation](#rotation) |
 | `/`                          | search forward: prompts for text, jumps to the first match                      |
 | `?`                          | search backward                                                                 |
 | `n` `N`                      | next / previous match (`n` repeats the direction of the search; takes a count)  |
 | `<Esc>`                      | remove the search highlights                                                    |
+| `g/`                         | list the matches of the search with their page and line of text; go to one      |
 | `gO`                         | pick a bookmark from the document's outline and go to its page                  |
-| `f`                          | pick a link on the page: go to its page, or open its address                    |
+| `f`                          | pick a link on the page: go to its page or another PDF, or open its address     |
 | `y`                          | yank the page's text, linewise (`"+y`: to the clipboard)                        |
 | `t`                          | show the page's text in a scratch split                                         |
 | `<C-o>` `<C-i>` `<Tab>`      | back / forward through the jump list (takes a count)                            |
-| `m{a-z}`                     | mark the page, with its fit, zoom and view                                      |
+| `m{a-z}`                     | mark the page, with its fit, zoom, rotation and view                            |
 | `'{a-z}` `` `{a-z} ``        | go to a mark; `''` goes back to where the latest jump started                   |
 | double-click                 | open the TeX source at the line the point was typeset from; see [SyncTeX](#synctex) |
 | `d`                          | show facing pages side by side, or one page at a time; see [Facing pages](#facing-pages) |
@@ -161,6 +177,11 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 
 > [!NOTE]
 > `<Space>` is deliberately unbound so `<leader>` mappings keep working.
+
+While a viewer is open, the wheel keys are also mapped globally in normal and insert mode, so the wheel moves the PDF
+next to your source without leaving it. Over any other window the wheel scrolls that window as before. A wheel key
+you have mapped yourself is left alone, `scroll_down = {}` (and so on) leaves that key to Neovim, and the mappings are
+removed when the last viewer closes.
 
 ### Zoom
 
@@ -191,6 +212,15 @@ figures. Each page is cropped to its own content, which is found the first time 
 extra render of the page) and remembered until the file changes. Zoom scrolls over the content only, leaving the
 margins out. A page with a coloured background has no margins to crop, so it is shown whole.
 
+### Rotation
+
+Scans often have pages lying on their side, and a landscape table in a portrait document reads better turned. `>`
+turns every page a quarter turn clockwise and `<` a quarter turn back (`2>` turns them upside down). The rotation
+applies to every page, like the fit, and the fit, zoom and scrolling work on the turned page: `w` fits the width of the
+turned page. The point in the middle of the window stays there. The winbar shows it (`90°`), and it is kept with the
+position the PDF was left at, in marks and in the jump list. Search highlights, SyncTeX, links and bookmarks follow the
+turned page. Only the view turns: the file is never changed.
+
 ### Search
 
 `/` prompts for text (through `vim.ui.input`, so you get the same prompt as the rest of your config), searches the whole
@@ -214,6 +244,11 @@ Highlights are drawn into the page image, multiplied onto it so text stays reada
 a translucent fill instead, which dulls the text under a match a little). The colours are configurable
 (`highlight`), and at most `search_limit` matches are collected (the winbar shows `17/5000+` when that cuts the list).
 
+`g/` lists the matches of the search through `vim.ui.select`, one per match with its page and the line of text it is
+on, cut down around the match when the line is long (`p. 12  …the viewport is a window-sized crop of…`). A picker
+that filters finds the one that matters among many; choosing it goes there as `n` would, a jump that `<C-o>` comes back
+from.
+
 ### Outline
 
 `gO` lists the document's bookmarks, indented by depth, through `vim.ui.select` (a picker such as snacks.nvim's if you
@@ -232,7 +267,11 @@ bookmarks say so.
 `f` lists the links on the page on screen, top to bottom, with the text under each and where it leads, through
 `vim.ui.select`. A link to a page of the document goes there (a jump, so `<C-o>` comes back), with the point it leads to,
 like a figure or a citation, at the top of the window when the page is zoomed or fitted to its width; a web address or
-an e-mail opens with `vim.ui.open()`. A page without links says so.
+an e-mail opens with `vim.ui.open()`. A link to another PDF, or to any file with one of the `extensions`, opens it in a
+viewer in the same window, at the page or named destination it leads to; a relative name is found next to the PDF with
+the link, the picker shows it as `other.pdf, p. 3`, and `<C-o>` comes back. Any other address, such as another `file:`
+address or a PDF's Launch action, could start a program, so `f` shows it in full and asks before opening it;
+`link_schemes` lists the schemes that open without asking. A page without links says so.
 
 ### Page text
 
@@ -277,8 +316,9 @@ list of where they started, as Vim does for lines. `<C-o>` goes back through it 
 viewer's list, `<C-o>` and `<C-i>` go on through Vim's own jump list, so `<C-o>` goes back to the file the PDF was
 opened from.
 
-`m{a-z}` marks where the viewer is: the page, its fit, zoom and the centre of the view. `'{a-z}` or `` `{a-z} `` goes
-back to it, as it was. Marks and the jump list belong to the viewer, and they stay through `:edit`.
+`m{a-z}` marks where the viewer is: the page, its fit, zoom, rotation and the centre of the view. `'{a-z}` or
+`` `{a-z} `` goes back to it, as it was. Marks and the jump list belong to the viewer, and they stay through `:edit`.
+A split's view of its own starts with a copy of them.
 
 ### SyncTeX
 
@@ -288,7 +328,8 @@ TeX Live and MiKTeX install:
 
 - `:PdfViewForward` in a `.tex` buffer (forward search) shows where the cursor's line is typeset: the page, with the
   line highlighted and, on a zoomed or width-fitted page, in the middle of the window. The cursor stays in the
-  source, and a PDF that is in no window opens in a split next to it. The PDF is vimtex's, else one open in a viewer
+  source, and a PDF that is in no window opens in a split next to it. Of several windows on the PDF, the one used last
+  moves. The PDF is vimtex's, else one open in a viewer
   whose SyncTeX data has the file, else the PDF named after the file; `:PdfViewForward {file.pdf}` names it. `<Esc>`
   in the viewer removes the highlight. It is a jump, so `<C-o>` in the viewer goes back.
 - Double-click a point of a page (inverse search) to open the source at the line it was typeset from: in a window that
@@ -318,7 +359,7 @@ require("pdf-view").setup({
   reload_delay = 200,      -- ms the file must stay quiet before reloading
   winbar = true,           -- "<file>   <page> / <pages>" in the window's winbar
   hide_cursor = true,      -- hide the cursor while a viewer is focused (it would sit on top of the page)
-  remember_position = true, -- reopen a PDF at its last page, fit and zoom, also after restarting Neovim
+  remember_position = true, -- reopen a PDF at its last page, fit, zoom and rotation, also after restarting Neovim
   mutool = "mutool",       -- executable
   synctex = "synctex",     -- executable, for SyncTeX
   transmission = "auto",   -- "file": the terminal reads the PNG itself; "direct": send the bytes (SSH). auto = SSH-aware
@@ -333,15 +374,18 @@ require("pdf-view").setup({
   max_zoom = 8,            -- largest zoom, relative to the fitted page
   pan_step = 0.2,          -- one scroll key moves this fraction of the window
   search_limit = 5000,     -- stop collecting matches after this many
+  link_schemes = { "http", "https", "mailto" }, -- addresses `f` opens without asking; it asks before any other
   text_scale = 1,          -- text size of EPUB, FB2 and MOBI books, relative to the terminal's
   highlight = { match = "#ffe14d", current = "#ff8c1a" }, -- multiplied onto search matches
   recolor = "off",         -- "invert": dark pages, hues kept; "colorscheme": in the Normal colours. `i` toggles it
   continuous = false,      -- scrolling goes on from the end of a page into the next one
   spread = "off",          -- "on": facing pages side by side, 1-2, 3-4; "cover": 1 alone, then 2-3. `d` toggles it
   cell_size = nil,         -- { width, height } in px, only if your terminal does not report its pixel size
-  keymaps = {              -- a list per action; `false` for no mappings at all
+  keymaps = {              -- a list per action; `false` for none (map the Lua API yourself)
     down = { "j", "<Down>" },
     up = { "k", "<Up>" },
+    half_down = { "<C-d>" },                  -- half a window; `3<C-d>`: three halves
+    half_up = { "<C-u>" },
     right = { "l", "<Right>" },
     left = { "h", "<Left>" },
     scroll_down = { "<ScrollWheelDown>" },   -- the wheel; `{}` leaves it to Neovim
@@ -358,11 +402,14 @@ require("pdf-view").setup({
     fit_width = { "w" },
     fit_height = { "W" },
     fit_content = { "c" },
+    rotate = { ">" },     -- turn the pages clockwise; `2>` turns them upside down
+    rotate_back = { "<" },
     search = { "/" },
     search_back = { "?" },
     search_next = { "n" },
     search_prev = { "N" },
     search_clear = { "<Esc>" },
+    search_list = { "g/" },
     outline = { "gO" },
     follow_link = { "f" },
     yank_text = { "y" },
@@ -393,8 +440,54 @@ and `:PdfView {file}` take any file MuPDF can open, whatever its extension.
 
 E-books (EPUB, FB2, MOBI) have no pages of their own: they are laid out on pages as large as the window, with text
 about the size of the terminal's (`text_scale = 1.5` makes it half as large again). When the window changes size the
-book is laid out again and the viewer stays at the same point of the text. Page numbers change with the layout, so
-marks and the jump list, which remember page numbers, may point elsewhere afterwards.
+book is laid out again and the viewer stays at the same point of the text, and a book reopened in a window of another
+size opens at the point of the text it was left at. Page numbers change with the layout, so marks and the jump list,
+which remember page numbers, may point elsewhere afterwards.
+
+## Lua API
+
+Every action of `keymaps` can be run from Lua, so `keymaps = false` and your own mappings, a `:PdfViewPage` command
+or a notes plugin can drive a viewer:
+
+```lua
+local pdf = require("pdf-view")
+pdf.action("next", { count = 2 })    -- any name of `keymaps`; `buf` (default: current), `count` (default: v:count)
+pdf.goto_page(12)                    -- a jump, as 12G; clamped to the document
+pdf.set_zoom(1.5)                    -- times the fitted size, up to max_zoom
+pdf.set_fit("width")                 -- "page" | "width" | "height" | "content", at zoom 1
+pdf.search("theorem", { backward = true }) -- as / or ?; n and N step on
+pdf.get()                            -- { buf, path, page, last, count, fit, zoom }, nil off a viewer
+```
+
+Each takes `{ buf = n }` for a viewer in another buffer (it runs in that viewer's window, and the cursor stays where
+it is) and returns `false`, with a warning, when the buffer is not a viewer. Unknown actions and bad arguments raise
+an error. From Vim script, every action also has a `<Plug>(pdf-view-{name})` mapping that passes its count on:
+
+```lua
+require("pdf-view").setup({ keymaps = false })
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "pdf-view", -- the viewer's buffers
+  callback = function(args)
+    vim.keymap.set("n", "J", "<Plug>(pdf-view-next)", { buffer = args.buf }) -- 3J: three pages
+    vim.keymap.set("n", "K", "<Plug>(pdf-view-prev)", { buffer = args.buf })
+  end,
+})
+vim.api.nvim_create_user_command("PdfViewPage", function(args)
+  require("pdf-view").goto_page(tonumber(args.args))
+end, { nargs = 1 })
+```
+
+When another page is on screen, a `User PdfViewPage` autocommand runs with `data = { buf, page, last, count }`
+(`last` is the right page of facing pages, else `page`):
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+  pattern = "PdfViewPage",
+  callback = function(args)
+    vim.notify(("page %d of %d"):format(args.data.page, args.data.count))
+  end,
+})
+```
 
 ## Live reload
 
@@ -423,7 +516,8 @@ taken away while its window is hidden or in another tab page, and put back after
   `config.enable_kitty_graphics = true` in `wezterm.lua`; without it the viewer says so instead of staying blank.
 - Konsole draws an image under the text only where a cell has the terminal's own background, which Neovim never
   leaves, so there the page is drawn over the text. Konsole cannot read image files, so pages are sent as bytes.
-- When a PDF is shown in several windows of one tab page, only one of them shows the page.
+- A floating window on a viewer's buffer (a picker's preview) shares the page with the viewer's window, and only one
+  of them shows it. Split windows have views of their own, and each shows its page.
 - Inside tmux the page is placed on the outer terminal, at the position of Neovim's pane. tmux does not know about it,
   so it is taken away when Neovim's tmux window is left, which Neovim only learns with `set -g focus-events on`.
 
@@ -478,10 +572,26 @@ plugin encodes it once, in Lua, with a fixed palette of greys and colours (no ot
 `protocol = "sixel"` uses sixel in another terminal. WezTerm draws it well; Konsole draws an image over the row below
 it, and both keep Kitty graphics by default.
 
+## Over SSH, under sudo and in containers
+
+The terminal is recognised by the variables it sets (`$TERM`, `$TERM_PROGRAM`, `$KITTY_WINDOW_ID`, ...). ssh does not
+pass most of them on, and `sudo`, `su` and `docker exec` reset them. When they name no terminal, Neovim 0.12 asks the
+terminal its name (XTVERSION), once, together with its device attributes before the first page is shown. kitty,
+Ghostty, WezTerm, Konsole, iTerm2, foot, Contour and xterm answer, so kitty or Ghostty with `TERM=xterm-256color` show
+their pages, and WezTerm and Konsole get Kitty graphics instead of sixel. A name the environment gives is kept, and
+inside tmux (which knows the name of the terminal attached to it) and zellij the terminal is not asked.
+`:checkhealth pdf-view` reports the name it gave. On Neovim 0.11, which cannot read the answer, `force = true` shows
+pages in kitty or Ghostty, and `placement = "positioned"` in WezTerm or Konsole.
+
 ## Terminals without images
 
 In a terminal that can show none of these, over a plain SSH session for instance, the viewer says why at the top of
-the window and shows the text of the page under it. The page keys turn the pages as usual.
+the window and shows the text of the page under it. The page keys turn the pages as usual, and `<C-d>`/`<C-u>` scroll a
+page's text that is taller than the window.
+
+A GUI (Neovide, nvim-qt, any front end that attaches over RPC) draws no images either, and it gets the text too, even
+when it was started from a shell in kitty or Ghostty and inherited that terminal's `$TERM`. Neovim with the TUI, or
+`nvim --remote-ui`, in such a terminal shows the pages.
 
 ## zellij
 
@@ -499,7 +609,8 @@ Compared with kitty or Ghostty on their own:
 
 - Turning pages is slower: zellij passes every image on to the terminal as raw pixels, about ten times the size of
   the PNG ([zellij#5596](https://github.com/zellij-org/zellij/issues/5596), fixed in zellij's main branch).
-- When a PDF is shown in several windows of one tab page, only one of them shows the page.
+- A floating window on a viewer's buffer (a picker's preview) shares the page with the viewer's window, and only one
+  of them shows it. Split windows have views of their own, and each shows its page.
 - The page is drawn under the text, so text the plugin does not cut the page around shows on top of it.
 - In zellij 0.45.1 the page is sent again whenever a float over it moves or changes size. This works around zellij
   drawing the wrong part of a cropped image.
@@ -511,7 +622,8 @@ Set `placement = "placeholders"` once your zellij supports Unicode placeholders
 
 1. A `mutool run` worker, one per open PDF, reports the page count and the exact size of the page (rotation, crop box
    and `UserUnit` applied). It keeps the document open between requests, so a page turn does not start mutool and
-   parse the document again; it is restarted when the file changes on disk.
+   parse the document again; it is restarted when the file changes on disk, and stopped once the viewer has been in
+   no window for 30 seconds (the pages it drew stay in the render cache).
 2. The page is fitted to the window in whole terminal cells and rendered by the worker to a PNG of exactly
    `cols × cell_width` by `rows × cell_height` pixels, so the terminal maps pixels to cells one to one.
 3. The PNG is uploaded to the terminal (`a=t`) and a virtual placement is created (`a=p,U=1`).
@@ -539,16 +651,25 @@ sending all of its bytes). In zellij, which forgets an image once nothing shows 
 ## Development
 
 ```
+plugin/pdf-view.lua registers the commands, the <Plug> mappings and the handler at startup (Neovim 0.11+ check)
 lua/pdf-view/
-  init.lua        setup(), the :PdfView command, the *.pdf (and *.cbz, ...) handler
+  init.lua        setup(), the Lua API (action(), goto_page(), get(), ...), :PdfView and :PdfViewForward, the <Plug>
+                  mappings, the *.pdf (and *.cbz, ...) handler, bringing viewers back from a session
   config.lua      defaults and validation
-  viewer.lua      a PDF buffer's lifecycle: attach, open, file watching, cleanup
-  session.lua     per-buffer state and the helpers that touch windows, the winbar and the render cache
+  viewer.lua      a PDF buffer's lifecycle: attach, open, file watching, a window's own view (pdf-view://), applying a
+                  later setup(), saving a copy (:w {file}), cleanup
+  session.lua     per-buffer state and the helpers that touch windows, the winbar and the render cache; the
+                  User PdfViewPage autocommand
   render.lua      showing a page: mutool -> PNG -> terminal -> placeholder cells, latest request wins
-  actions.lua     what the keys do: page turns, scrolling, zoom, fit modes, search, outline, links, page text
+  actions.lua     what the keys do: page turns, scrolling (keys and the mouse wheel), zoom, fit modes, rotation, search
+                  and its match picker, outline, links (to pages, other PDFs, addresses), page text, jumps and marks,
+                  SyncTeX forward and inverse search, facing pages, recolouring; the buffer and wheel mappings
   cursor.lua      hiding the cursor while a viewer is focused
   layout.lua      fitting a page into whole terminal cells; zoomed viewports (pure)
+  rotation.lua    turning pages a quarter turn: sizes, points, rectangles and destinations on the turned page (pure)
   search.lua      search results: parsing, stepping, highlight strings (pure)
+  positions.lua   where each PDF was left, kept across restarts in stdpath("state")/pdf-view/positions.json
+  synctex.lua     running the `synctex` tool (view, edit) and reading what it prints
   mupdf.lua       async wrapper around mutool, and the worker that keeps a document open
   kitty.lua       graphics protocol encoding, tmux passthrough
   placeholder.lua Unicode placeholder text
@@ -556,10 +677,11 @@ lua/pdf-view/
                   step with floats and redraws
   iterm2.lua      iTerm2 inline images (OSC 1337)
   sixel.lua       sixel encoding of the pixels mutool writes
-  terminal.lua    terminal detection, cell size, tmux
+  terminal.lua    terminal detection (environment, XTVERSION, DA1, GUIs), cell size, tmux
   watch.lua       file watching
   health.lua      :checkhealth pdf-view
 scripts/          JavaScript run by `mutool run`: the worker (page geometry, rendering, page text, links), search, outline
+doc/pdf-view.txt  :help pdf-view
 tests/            headless suite (`make test`)
 ```
 

@@ -26,6 +26,9 @@ local SIXEL = { foot = true, xterm = true, ["windows-terminal"] = true, contour 
 local da1_sixel
 -- whether it has been asked, answered or not
 local da1_asked = false
+---@type string|false|nil the name and version the terminal gave when asked with XTVERSION (see `ask_sixel()`): false
+--- when it did not answer, nil until it has been asked
+local xtversion
 
 --- The image protocol pages are sent with: Kitty graphics, iTerm2 inline images (OSC 1337) for the terminals that
 --- have no Kitty graphics but draw those (iTerm2, VS Code), or sixel for the ones that draw that (foot, Windows
@@ -84,6 +87,30 @@ end
 function M.ui_attached()
   return #vim.api.nvim_list_uis() > 0
 end
+
+--- The attached UI that draws on a terminal: the built-in TUI, or `nvim --remote-ui`. Nil when none does, as when only
+--- a GUI (Neovide, nvim-qt, any front end attached over RPC) or no UI at all is attached. Neovim tells them apart the
+--- same way: a terminal UI says its stdout is a tty.
+---@return table?
+function M.terminal_ui()
+  for _, ui in ipairs(vim.api.nvim_list_uis()) do
+    if ui.stdout_tty then
+      return ui
+    end
+  end
+  return nil
+end
+
+--- Whether the UIs attached are all GUIs. A GUI started from a shell in kitty or Ghostty inherits its $TERM and the
+--- variables `detect()` reads, but draws neither the images nor the placeholder text. False when no UI is attached:
+--- then the TUI has not attached yet.
+---@return boolean
+function M.gui_only()
+  return #vim.api.nvim_list_uis() > 0 and M.terminal_ui() == nil
+end
+
+M.GUI_ONLY = "pdf-view: this Neovim UI is not a terminal, so it cannot show pages. "
+  .. "Open the PDF in Neovim running in a terminal that shows images (kitty, Ghostty, WezTerm, ...)."
 
 ---@param cmd string[]
 ---@return string?
@@ -184,9 +211,23 @@ local PLACEHOLDERS = {
 ---@field name? PdfView.TerminalName nil when the terminal is not recognised
 ---@field term? string $TERM_PROGRAM or $TERM, to name it in messages
 ---@field placeholders? boolean whether it draws Unicode placeholders; nil when it is not recognised
+---@field xtversion? string the name and version the terminal gave when it was asked (see `ask_sixel()`)
+
+--- The terminal a name or version string names: "kitty(0.36.4)", "XTerm(390)", "WezTerm 20240203-110809-5046fc22".
+---@param value string?
+---@return PdfView.TerminalName?
+local function classify(value)
+  value = (value or ""):lower()
+  for _, known in ipairs(KNOWN) do
+    if value:find(known[1], 1, true) then
+      return known[2]
+    end
+  end
+end
 
 --- Identify a terminal that can show images (with the Kitty graphics protocol, or iTerm2 inline images), and whether
---- it has Unicode placeholders.
+--- it has Unicode placeholders. The environment names it at once; where it does not (over SSH, under sudo, in a
+--- container), the name the terminal gives when asked (see `ask_sixel()`) is used once it is in.
 ---@return PdfView.Terminal
 function M.detect()
   if detected then
@@ -195,15 +236,6 @@ function M.detect()
   local env = vim.env
   local term = env.TERM or ""
   local program = (env.TERM_PROGRAM or ""):lower()
-
-  local function classify(value)
-    value = (value or ""):lower()
-    for _, known in ipairs(KNOWN) do
-      if value:find(known[1], 1, true) then
-        return known[2]
-      end
-    end
-  end
 
   local function set(var)
     return (env[var] or "") ~= ""
@@ -230,9 +262,15 @@ function M.detect()
     or (set("MLTERM") and "mlterm")
     or (set("WT_SESSION") and "windows-terminal")
     or (set("XTERM_VERSION") and "xterm")
+    or (xtversion and classify(xtversion)) -- asked only when the environment named nothing (see `name_askable()`)
     or nil
 
-  detected = { name = name, term = program ~= "" and program or term, placeholders = PLACEHOLDERS[name] }
+  detected = {
+    name = name,
+    term = program ~= "" and program or term,
+    placeholders = PLACEHOLDERS[name],
+    xtversion = xtversion or nil,
+  }
   return detected
 end
 
@@ -250,10 +288,11 @@ local waiting
 ---@type boolean? whether the terminal can be asked at all
 local askable
 
---- Whether the terminal can be asked a question whose answer comes back as a TermResponse: Neovim 0.11 cannot read
---- it, and behind tmux with extended keys it would arrive as typed keys (see `replies_arrive_as_keys()`).
+--- Whether the terminal's replies (to a question, or to a graphics command) can be read: they come back as a
+--- TermResponse, which Neovim 0.11 cannot read, and behind tmux with extended keys they would arrive as typed keys (see
+--- `replies_arrive_as_keys()`). Known until `forget()`.
 ---@return boolean
-local function can_ask()
+function M.replies_readable()
   if not M.ui_attached() then
     return false
   end
@@ -275,7 +314,7 @@ end
 --- at once when it is known already or the terminal cannot be asked.
 ---@param callback fun()
 function M.ask_graphics(callback)
-  if graphics ~= nil or not can_ask() then
+  if graphics ~= nil or not M.replies_readable() then
     return callback()
   end
   if waiting then
@@ -335,7 +374,32 @@ end
 --- Whether `ask_sixel()` can find out whether the terminal draws sixel images: by asking it, or from tmux.
 ---@return boolean
 function M.sixel_askable()
-  return M.in_tmux() or can_ask()
+  return M.in_tmux() or M.replies_readable()
+end
+
+--- The name and version in an XTVERSION reply (`DCS > | kitty(0.36.4) ST`), or nil when `sequence` is not one.
+---@param sequence string
+---@return string?
+function M.xtversion_reply(sequence)
+  local text = sequence:match("^\27P>|(.-)\27?\\?$")
+  if not text or text == "" then
+    return nil
+  end
+  return text
+end
+
+--- Whether the terminal is asked its name with XTVERSION when `ask_sixel()` asks it for its device attributes: when
+--- the environment does not name it, outside tmux (which answers for itself, and tells `detect()` the attached
+--- terminal's name) and zellij (which draws Kitty graphics whatever the terminal is), and where replies are read, so
+--- that on Neovim 0.11 and behind a GUI the environment alone names it.
+---@return boolean
+function M.name_askable()
+  return xtversion == nil
+    and M.detect().name == nil
+    and not M.in_tmux()
+    and not M.in_zellij()
+    and not M.gui_only()
+    and M.replies_readable()
 end
 
 --- The attributes of a DA1 reply (`CSI ? 65 ; 4 ; 6 c`), or nil when `sequence` is not one.
@@ -357,6 +421,11 @@ end
 --- answers list 4 when it does. Inside tmux, which answers DA1 for itself, the features tmux found in the attached
 --- terminal are read instead. `callback` runs once the answer is in, at once when it is known already or the terminal
 --- cannot be asked.
+---
+--- A terminal the environment does not name is asked its name too (see `name_askable()`), with XTVERSION sent before
+--- DA1: terminals answer in order, so once the DA1 reply is in, a terminal that has not given its name will not, and
+--- there is no wait for one that does not know the question. DA1 is sent twice then, and the name waited for until the
+--- second reply: Neovim asks DA1 itself as it starts, and the reply to that may come in just before the name.
 ---@param callback fun()
 function M.ask_sixel(callback)
   if da1_asked or not M.sixel_askable() then
@@ -375,6 +444,9 @@ function M.ask_sixel(callback)
     return
   end
   waiting_da1 = { callback }
+  local ask_name = M.name_askable()
+  local name ---@type string?
+  local replies = 0 -- DA1 replies come in so far
   local autocmd, timer
   local function finish(answer)
     if not waiting_da1 then
@@ -384,6 +456,10 @@ function M.ask_sixel(callback)
     timer:stop()
     timer:close()
     da1_sixel, da1_asked = answer, true
+    if ask_name then
+      xtversion = name or false
+      detected = nil -- named again, with the answer
+    end
     local callbacks = waiting_da1
     waiting_da1 = nil
     for _, waiter in ipairs(callbacks) do
@@ -393,9 +469,15 @@ function M.ask_sixel(callback)
   autocmd = vim.api.nvim_create_autocmd("TermResponse", {
     desc = "pdf-view: whether the terminal draws sixel images",
     callback = function(args)
+      local sequence = (args.data and args.data.sequence) or vim.v.termresponse or ""
+      name = name or (ask_name and M.xtversion_reply(sequence)) or nil
       -- the reply to anyone's DA1 says the same
-      local attributes = M.da1_attributes((args.data and args.data.sequence) or vim.v.termresponse or "")
-      if attributes then
+      local attributes = M.da1_attributes(sequence)
+      if not attributes then
+        return
+      end
+      replies = replies + 1
+      if not ask_name or name or replies >= 2 then
         vim.schedule(function()
           finish(vim.list_contains(attributes, 4))
         end)
@@ -408,34 +490,55 @@ function M.ask_sixel(callback)
       finish(nil) -- not answered: the protocol is chosen by name alone
     end)
   end)
-  require("pdf-view.kitty").write(ESC .. "[c") -- tmux is not asked (see above), so this needs no passthrough
+  -- tmux is not asked (see above), so this needs no passthrough
+  local da1 = ESC .. "[c"
+  require("pdf-view.kitty").write(ask_name and (ESC .. "[>q" .. da1 .. da1) or da1)
+end
+
+--- The name and version the terminal gave when it was asked (see `ask_sixel()`): false when it did not answer, nil
+--- until it has been asked, and when it is not.
+---@return string|false|nil
+function M.xtversion()
+  return xtversion
+end
+
+--- Whether `check()` waits for the answer of `ask_graphics()`: Kitty graphics on a terminal without Unicode
+--- placeholders, or on one that is not recognised when `placement = "positioned"` is set.
+---@return boolean
+local function needs_graphics()
+  local found = M.detect()
+  local positioned = not found.placeholders and (found.name ~= nil or config.options.placement == "positioned")
+  return graphics == nil and positioned and M.protocol() == "kitty"
 end
 
 --- Ask the terminal what `check()` needs to know, at the same time: whether it has Kitty graphics, and whether it
---- draws sixel images. `callback` runs once both answers are in.
+--- draws sixel images (and, when the environment does not name it, its name). `callback` runs once the answers are
+--- in. A terminal named only by its answer (WezTerm or Konsole over SSH) is asked about Kitty graphics after that.
 ---@param callback fun()
 function M.ask(callback)
-  local found = M.detect()
   local questions = {}
   if M.needs_da1() then
     questions[#questions + 1] = M.ask_sixel
   end
-  -- Kitty graphics on a terminal without Unicode placeholders, as `check()` asks about them
-  local positioned = not found.placeholders and (found.name ~= nil or config.options.placement == "positioned")
-  if graphics == nil and positioned and M.protocol() == "kitty" then
+  if needs_graphics() then
     questions[#questions + 1] = M.ask_graphics
   end
   local left = #questions
   if left == 0 then
     return callback()
   end
+  local function answered()
+    left = left - 1
+    if left > 0 then
+      return
+    end
+    if needs_graphics() then
+      return M.ask_graphics(callback)
+    end
+    callback()
+  end
   for _, question in ipairs(questions) do
-    question(function()
-      left = left - 1
-      if left == 0 then
-        callback()
-      end
-    end)
+    question(answered)
   end
 end
 
@@ -455,7 +558,7 @@ end
 --- and that addon answers DA1 with sixel graphics listed. Inside tmux, which answers DA1 itself, it is not asked.
 ---@return boolean
 function M.vscode_images_askable()
-  return M.detect().name == "vscode" and M.protocol() == "iterm2" and not M.in_tmux() and can_ask()
+  return M.detect().name == "vscode" and M.protocol() == "iterm2" and not M.in_tmux() and M.replies_readable()
 end
 
 --- Whether VS Code said it shows no images (see `vscode_images_askable()`).
@@ -471,6 +574,7 @@ M.VSCODE_IMAGES_OFF = "pdf-view: VS Code's terminal shows no images. Add "
 --- Forget what was found out about the terminal, for another one attached through tmux.
 function M.forget()
   detected, graphics, askable, pane_offset, da1_sixel, da1_asked = nil, nil, nil, nil, nil, false
+  xtversion = nil
 end
 
 --- Whether pages can be displayed here. The second return value explains a failure. Nil when the terminal has to be
@@ -479,11 +583,14 @@ end
 --- A terminal without Unicode placeholders gets positioned placements, which need nothing but Kitty graphics: it is
 --- asked whether it has them, as is an unrecognised terminal when `placement = "positioned"` is set. A terminal that
 --- draws sixel images is asked whether it does (xterm does only as a VT340), and so is an unrecognised one, which then
---- gets sixel.
+--- gets sixel. A GUI is not a terminal, whatever the environment it inherited says (see `gui_only()`).
 ---@return boolean?, string?
 function M.check()
   if config.options.force then
     return true
+  end
+  if M.gui_only() then
+    return false, M.GUI_ONLY -- the environment may name a terminal, but it is the one the GUI was started from
   end
   local found = M.detect()
   if M.needs_da1() then
@@ -521,7 +628,7 @@ function M.check()
   end
   local positioned = M.placement() == "positioned"
   if positioned and (found.name or config.options.placement == "positioned") then
-    if graphics == nil and can_ask() then
+    if graphics == nil and M.replies_readable() then
       return nil
     end
     if graphics ~= false then

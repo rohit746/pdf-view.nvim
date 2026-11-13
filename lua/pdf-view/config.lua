@@ -5,6 +5,8 @@ local M = {}
 ---@field prev string[] previous page (accepts a count)
 ---@field down string[] scroll down when zoomed in, else (or at the bottom edge) next page
 ---@field up string[] scroll up when zoomed in, else (or at the top edge) previous page
+---@field half_down string[] scroll down half a window when zoomed in, else (or at the bottom edge) next page
+---@field half_up string[] scroll up half a window when zoomed in, else (or at the top edge) previous page
 ---@field right string[] scroll right when zoomed in, else (or at the right edge) next page
 ---@field left string[] scroll left when zoomed in, else (or at the left edge) previous page
 ---@field scroll_down string[] mouse wheel: `down` for the viewer under the mouse
@@ -19,13 +21,17 @@ local M = {}
 ---@field fit_width string[] fit the page's width to the window
 ---@field fit_height string[] fit the page's height to the window
 ---@field fit_content string[] fit the part of the page with content on it to the window, cropping the margins
+---@field rotate string[] turn every page a quarter turn clockwise (accepts a count: `2>` turns them upside down)
+---@field rotate_back string[] turn every page a quarter turn counter-clockwise
 ---@field search string[] prompt for text and search forward
 ---@field search_back string[] prompt for text and search backward
 ---@field search_next string[] next match, in the direction of the search
 ---@field search_prev string[] previous match
 ---@field search_clear string[] remove the highlights
+---@field search_list string[] pick one of the matches of the search, listed with their pages and lines of text
 ---@field outline string[] pick a bookmark to jump to
----@field follow_link string[] pick a link on the page: go to its page, or open its address with `vim.ui.open()`
+---@field follow_link string[] pick a link on the page: go to its page, open another PDF in the viewer, or open its
+--- address with `vim.ui.open()`
 ---@field yank_text string[] yank the text of the page into the register given (`"+y`), linewise
 ---@field show_text string[] show the text of the page in a scratch buffer in a split
 ---@field jump_back string[] back through the jump list (`gg`, `G`, bookmarks, searches and marks are jumps)
@@ -67,6 +73,8 @@ local M = {}
 ---@field max_zoom number largest zoom, relative to the fit-to-window size
 ---@field pan_step number how far one scroll key moves, as a fraction of the window (0 to 1]
 ---@field search_limit integer stop collecting matches after this many
+---@field link_schemes string[] the schemes of the addresses that `f` opens with `vim.ui.open()` without asking, matched
+--- ignoring case. Any other address (a `file:` address, a PDF's Launch action) can start a program, so `f` asks first
 ---@field text_scale number size of the text of reflowable documents (EPUB, FB2, MOBI), which are laid out to fit the
 --- window, relative to the terminal's text
 ---@field highlight { match: string, current: string } `#rrggbb` colours multiplied onto search matches
@@ -100,6 +108,7 @@ local defaults = {
   max_zoom = 8,
   pan_step = 0.2,
   search_limit = 5000,
+  link_schemes = { "http", "https", "mailto" },
   text_scale = 1,
   highlight = { match = "#ffe14d", current = "#ff8c1a" },
   recolor = "off",
@@ -112,6 +121,8 @@ local defaults = {
     prev = { "<PageUp>", "<BS>", "<C-b>" },
     down = { "j", "<Down>" },
     up = { "k", "<Up>" },
+    half_down = { "<C-d>" },
+    half_up = { "<C-u>" },
     right = { "l", "<Right>" },
     left = { "h", "<Left>" },
     scroll_down = { "<ScrollWheelDown>" },
@@ -126,11 +137,14 @@ local defaults = {
     fit_width = { "w" },
     fit_height = { "W" },
     fit_content = { "c" },
+    rotate = { ">" },
+    rotate_back = { "<" },
     search = { "/" },
     search_back = { "?" },
     search_next = { "n" },
     search_prev = { "N" },
     search_clear = { "<Esc>" },
+    search_list = { "g/" },
     outline = { "gO" },
     follow_link = { "f" },
     yank_text = { "y" },
@@ -238,6 +252,14 @@ local function validate(opts)
       end
     end
   end
+  if opts.link_schemes ~= nil then
+    check_string_list("link_schemes", opts.link_schemes)
+    for _, scheme in ipairs(opts.link_schemes) do
+      if not scheme:match("^%a[%w+.-]*$") then
+        fail("link_schemes", 'schemes without the colon, like { "https", "mailto" }', scheme)
+      end
+    end
+  end
   if opts.transmission ~= nil and not vim.tbl_contains({ "auto", "file", "direct" }, opts.transmission) then
     fail("transmission", '"auto", "file" or "direct"', opts.transmission)
   end
@@ -306,6 +328,15 @@ end
 
 ---@type PdfView.Config
 M.options = vim.deepcopy(defaults)
+
+--- The names of the actions, sorted: the keys of `keymaps`, which has an entry for every action. Read here rather than
+--- from the actions themselves, which would load most of the plugin at startup.
+---@return string[]
+function M.actions()
+  local names = vim.tbl_keys(defaults.keymaps)
+  table.sort(names)
+  return names
+end
 
 --- Replace the configuration with the defaults merged with `opts`. Invalid input raises immediately.
 ---@param opts? table

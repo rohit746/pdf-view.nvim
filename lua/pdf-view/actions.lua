@@ -1,10 +1,12 @@
---- What the keys do: turning pages, scrolling, zooming, fitting, searching and jumping to bookmarks. Each action
---- changes the session and asks `render` to show it.
+--- What the keys do: turning pages, scrolling (also with the mouse wheel), zooming, fitting, rotating, searching,
+--- bookmarks, links, page text, jumps and marks, SyncTeX, facing pages and recolouring. Each action changes the session
+--- and asks `render` to show it.
 local config = require("pdf-view.config")
 local cursor = require("pdf-view.cursor")
 local layout = require("pdf-view.layout")
 local mupdf = require("pdf-view.mupdf")
 local render = require("pdf-view.render")
+local rotation = require("pdf-view.rotation")
 local search = require("pdf-view.search")
 local session = require("pdf-view.session")
 local synctex = require("pdf-view.synctex")
@@ -16,6 +18,24 @@ local uv = vim.uv
 local show = render.show
 local stamp_of, purge_cache, window_for, text_area, uses_viewport =
   session.stamp_of, session.purge_cache, session.window_for, session.text_area, session.uses_viewport
+
+--- The count that `require("pdf-view").action()` gave the action that is running, which `action_count()` and
+--- `action_count1()` return in place of `v:count`. Actions read their count only through these, so that both a key
+--- and `action()` give them one.
+---@type integer?
+local given_count
+
+--- The count of the action: the one `action()` gave, or `v:count`. 0 for none.
+---@return integer
+local function action_count()
+  return given_count or vim.v.count
+end
+
+--- The count of the action, 1 for none, as `v:count1`.
+---@return integer
+local function action_count1()
+  return math.max(action_count(), 1)
+end
 
 ---@param s PdfView.Session
 local function refresh_winbar(s)
@@ -46,6 +66,7 @@ end
 ---@param waited? boolean the user is waiting for it, so the winbar says "searching…" until it finishes
 local function start_search(s, needle, done, waited)
   cancel_search(s)
+  session.use_layout(s)
   local job
   job = mupdf.search(s.path, needle, config.options.search_limit, function(...)
     if s.search_job ~= job then
@@ -96,18 +117,19 @@ local function rescan(s)
   end)
 end
 
---- Where a viewer is: its page, fit, zoom and the centre of the view. The jump list and the marks hold these.
----@alias PdfView.Position { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }
+--- Where a viewer is: its page, fit, zoom, the centre of the view and how far the pages are turned. The jump list and
+--- the marks hold these.
+---@alias PdfView.Position { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number, rotation?: PdfView.Rotation }
 
 local JUMP_LIMIT = 100 -- as in Vim
 
 ---@param s PdfView.Session
 ---@return PdfView.Position
 local function here(s)
-  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy, rotation = s.rotation }
 end
 
---- Go back to `where`, with the fit and zoom it had.
+--- Go back to `where`, with the fit, zoom and rotation it had.
 ---@param s PdfView.Session
 ---@param where PdfView.Position
 local function restore(s, where)
@@ -115,6 +137,7 @@ local function restore(s, where)
     return
   end
   s.mode, s.zoom, s.cx, s.cy = where.mode, where.zoom, where.cx, where.cy
+  s.rotation = where.rotation or s.rotation
   s.scrolled = nil
   s.target = math.max(1, math.min(where.page, s.count or where.page))
   show(s, s.target)
@@ -208,26 +231,27 @@ local function go(s, page, anchor, jump)
   show(s, page)
 end
 
---- The anchor that brings the point (`x`, `y`) of page `page`, as fractions of it, to the top left of the window,
---- where a link or a bookmark leads: the top of the page when it says nothing more, or when the whole page is on
---- screen. The window is measured with the page on screen, which is the size of the other pages of almost every
---- document.
+--- The anchor that brings the point (`x`, `y`) of page `page`, as fractions of it before it is turned, to the top left
+--- of the window, where a link or a bookmark leads: the top of the page when it says nothing more, or when the whole
+--- page is on screen. The window is measured with the page on screen, which is the size of the other pages of almost
+--- every document.
 ---@param s PdfView.Session
 ---@param page integer
 ---@param x? number
 ---@param y? number
 ---@return PdfView.Anchor
 local function anchor_at(s, page, x, y)
-  local win = y and uses_viewport(s) and s.geom and window_for(s)
+  x, y = rotation.destination(s.rotation, x, y) -- on the page as it is shown
+  local win = (x or y) and uses_viewport(s) and s.geom and window_for(s)
   if not win then
     return TOP
   end
-  local sheet_x, sheet_y = session.sheet_point(s, page, x or 0, y --[[@as number]]) -- facing pages are one sheet
-  x, y = x and sheet_x, sheet_y
+  local sheet_x, sheet_y = session.sheet_point(s, page, x or 0, y or 0) -- facing pages are one sheet
+  x, y = x and sheet_x, y and sheet_y
   local cols, rows = text_area(win)
   local cell = terminal.cell_size()
   local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)
-  local anchor = { cy = view.scroll_y and y + view.view_h / 2 / view.full_h or 0 }
+  local anchor = { cy = y and view.scroll_y and y + view.view_h / 2 / view.full_h or 0 }
   if x and view.scroll_x then
     anchor.cx = x + view.view_w / 2 / view.full_w
   end
@@ -264,6 +288,21 @@ local function set_mode(s, mode)
   show(s)
 end
 
+--- Turn every page `degrees` further clockwise (a multiple of 90; negative turns counter-clockwise). The point in the
+--- middle of the window stays there, turned with the page.
+---@param s PdfView.Session
+---@param degrees integer
+local function rotate(s, degrees)
+  local turn = rotation.normalize(degrees)
+  if turn == 0 then
+    return
+  end
+  s.rotation = rotation.normalize(s.rotation + turn)
+  s.cx, s.cy = rotation.fraction(turn, s.cx, s.cy)
+  s.scrolled = nil -- the page scrolled into lies elsewhere now: back inside the page
+  show(s)
+end
+
 ---@param s PdfView.Session
 ---@param zoom number multiplies the fitted size; below 1 steps back from a width/height fit to the whole page
 local function set_zoom(s, zoom)
@@ -283,7 +322,7 @@ local function set_zoom(s, zoom)
     local found = s.search
     local match = found and found.current and found.matches[found.current]
     if match and session.on_screen(s, match.page) then
-      s.cx, s.cy = session.sheet_point(s, match.page, match.cx, match.cy)
+      s.cx, s.cy = session.sheet_point(s, match.page, rotation.fraction(s.rotation, match.cx, match.cy))
     else
       s.cx, s.cy = 0.5, 0.5
     end
@@ -292,13 +331,14 @@ local function set_zoom(s, zoom)
   show(s)
 end
 
---- Scroll a zoomed page by `steps` of `config.pan_step` windows. Returns whether the view moved.
+--- Scroll a zoomed page by `steps` of `fraction` windows. Returns whether the view moved.
 ---@param s PdfView.Session
 ---@param dx -1|0|1
 ---@param dy -1|0|1
 ---@param steps integer
+---@param fraction number of the window, per step
 ---@return boolean
-local function pan(s, dx, dy, steps)
+local function pan(s, dx, dy, steps, fraction)
   local win = uses_viewport(s) and s.geom and window_for(s)
   if not win then
     return false
@@ -323,7 +363,7 @@ local function pan(s, dx, dy, steps)
 
   local moved = false
   if dx ~= 0 and view.scroll_x then
-    local x = math.min(math.max(view.vx + dx * steps * config.options.pan_step * view.view_w, view.min_x), view.max_x)
+    local x = math.min(math.max(view.vx + dx * steps * fraction * view.view_w, view.min_x), view.max_x)
     if math.abs(x - view.vx) > 0.5 then
       s.cx, moved = (x + view.view_w / 2) / view.full_w, true
     end
@@ -335,7 +375,7 @@ local function pan(s, dx, dy, steps)
       top = s.page > 1 and -math.huge or top
       bottom = (s.last or s.page) < (s.count or 0) and math.huge or bottom
     end
-    local y = math.min(math.max(view.vy + dy * steps * config.options.pan_step * view.view_h, top), bottom)
+    local y = math.min(math.max(view.vy + dy * steps * fraction * view.view_h, top), bottom)
     if math.abs(y - view.vy) > 0.5 then
       s.cy, moved = (y + view.view_h / 2) / view.full_h, true
       s.scrolled = continuous or nil
@@ -349,9 +389,10 @@ end
 ---@param s PdfView.Session
 ---@param dx -1|0|1
 ---@param dy -1|0|1
-local function move(s, dx, dy)
-  local count = vim.v.count1
-  if pan(s, dx, dy, count) then
+---@param fraction? number of the window per key press, `config.pan_step` by default
+local function move(s, dx, dy, fraction)
+  local steps = action_count1()
+  if pan(s, dx, dy, steps, fraction or config.options.pan_step) then
     return show(s)
   end
   local forward = dx + dy > 0
@@ -361,25 +402,41 @@ local function move(s, dx, dy)
   else
     anchor = dx ~= 0 and { cx = 1, cy = 1 } or { cy = 1 }
   end
-  go(s, session.spread_step(s, s.target or s.page, forward and count or -count), anchor)
+  go(s, session.spread_step(s, s.target or s.page, forward and steps or -steps), anchor)
 end
 
---- The mouse wheel moves the viewer it is over, as `move` does. These keys are mapped in the focused viewer only,
---- so over any other window the wheel does what it would do there without the mapping.
----@param s PdfView.Session
+--- The mouse wheel moves the viewer it is over, as `move` does. These keys are mapped in each viewer, and while a
+--- viewer is open also globally (`set_global_wheel`), so the wheel moves a viewer the cursor is not in. Over any other
+--- window the wheel does what it would do there without the mappings.
+--- Run by `action()` instead of a key, they move the viewer they are given, as `move` does.
+---@param s? PdfView.Session the focused viewer; nil for the global mappings
 ---@param dx -1|0|1
 ---@param dy -1|0|1
----@param lhs string the key that was pressed
+---@param lhs? string the key that was pressed; nil from `action()`
 local function wheel(s, dx, dy, lhs)
   local win = vim.fn.getmousepos().winid
-  if win == 0 then -- no mouse position: the key came from a script or another mapping
+  if s and (win == 0 or not lhs) then -- no mouse position: the key came from a script or another mapping
     return move(s, dx, dy)
   end
-  local over = session.sessions[vim.api.nvim_win_get_buf(win)]
-  if over then
+  local over = win ~= 0 and session.sessions[vim.api.nvim_win_get_buf(win)]
+  if over and not over.closed then
     return move(over, dx, dy)
   end
-  vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+  if lhs then
+    vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+  end
+end
+
+--- Half a window down or up, as `move` does. The text shown instead of a page (a terminal that cannot show pages)
+--- scrolls as any text does with `<C-d>` and `<C-u>`.
+---@param s PdfView.Session
+---@param dy -1|1
+local function half(s, dy)
+  if s.page_text then
+    local count = action_count() > 0 and action_count() or ""
+    return vim.cmd("normal! " .. count .. vim.keycode(dy > 0 and "<C-d>" or "<C-u>"))
+  end
+  move(s, 0, dy, 0.5)
 end
 
 ---@param message string
@@ -411,7 +468,8 @@ local function match_visible(s, match)
       ox, oy = part.x, part.y
     end
   end
-  for _, rect in ipairs(match.rects) do
+  for _, unturned in ipairs(match.rects) do
+    local rect = rotation.rect(s.rotation, match.width, match.height, unturned)
     local inside = (ox + rect[1]) * view.scale >= view.vx
       and (ox + rect[3]) * view.scale <= view.vx + view.view_w
       and (oy + rect[2]) * view.scale >= view.vy
@@ -431,7 +489,7 @@ local function goto_match(s, index)
   record_jump(s)
   s.search.current = index
   if not match_visible(s, match) then
-    s.cx, s.cy = session.sheet_point(s, match.page, match.cx, match.cy)
+    s.cx, s.cy = session.sheet_point(s, match.page, rotation.fraction(s.rotation, match.cx, match.cy))
     s.scrolled = nil
   end
   s.target = match.page
@@ -501,7 +559,7 @@ local function step_match(s, reverse)
   if index and not session.on_screen(s, found.matches[index].page) then
     index = nil -- the user has moved on: continue from where they are, not from the old match
   end
-  local wrapped, steps = false, vim.v.count1
+  local wrapped, steps = false, action_count1()
   if not index then
     index, wrapped = search.start(found, s.target or s.page, sign)
     steps = steps - 1 -- landing on the first match from here is the first step
@@ -519,6 +577,40 @@ local function step_match(s, reverse)
   if index then
     goto_match(s, index)
   end
+end
+
+--- Pick one of the matches of the search from a list of them, each with its page and line of text, and go to it as
+--- `n` would.
+---@param s PdfView.Session
+local function pick_match(s)
+  local found = s.search
+  if s.searching then
+    return notify(("still searching for `%s`"):format(s.searching))
+  end
+  if not found then
+    return notify("no search yet: press / to search")
+  end
+  local indices = {}
+  for index = 1, #found.matches do
+    indices[index] = index
+  end
+  local count = #found.matches .. (found.truncated and "+" or "")
+  vim.ui.select(indices, {
+    prompt = ("Matches for `%s` (%s)"):format(found.needle, count),
+    kind = "pdf-view.matches",
+    format_item = function(index)
+      return search.describe(found, index)
+    end,
+  }, function(index)
+    -- a picker that answers later leaves time to close the viewer, or to search again (or the file to change)
+    if not index or s.closed then
+      return
+    end
+    if s.search ~= found then
+      return notify("the search has changed since the list was shown: list its matches again")
+    end
+    goto_match(s, index)
+  end)
 end
 
 ---@param s PdfView.Session
@@ -544,6 +636,7 @@ local function show_synced(s, boxes)
       rects[#rects + 1] = box.rect
     end
   end
+  session.use_layout(s)
   mupdf.info(s.path, page, function(err, info)
     if s.closed then
       return
@@ -556,12 +649,9 @@ local function show_synced(s, boxes)
     s.synced = { id = next_sync, page = info.page, rects = rects }
     local first = rects[1]
     if uses_viewport(s) then
-      local cx, cy = session.sheet_point(
-        s,
-        info.page,
-        (first[1] + first[3]) / 2 / info.width,
-        (first[2] + first[4]) / 2 / info.height
-      )
+      -- the boxes are in the points of the page before it is turned, as `info` measures it
+      local x, y = (first[1] + first[3]) / 2 / info.width, (first[2] + first[4]) / 2 / info.height
+      local cx, cy = session.sheet_point(s, info.page, rotation.fraction(s.rotation, x, y))
       s.cy = cy
       local win = window_for(s)
       if win then
@@ -569,7 +659,8 @@ local function show_synced(s, boxes)
         local cell = terminal.cell_size()
         -- facing pages are measured with the sheet on screen
         local spread = session.spread_mode(s) ~= "off" and s.geom
-        local w, h = spread and s.geom.w or info.width, spread and s.geom.h or info.height
+        local turned_w, turned_h = rotation.size(s.rotation, info.width, info.height)
+        local w, h = spread and s.geom.w or turned_w, spread and s.geom.h or turned_h
         local view = layout.viewport(w, h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, nil)
         if view.scroll_x then
           s.cx = cx
@@ -665,24 +756,37 @@ function M.forward_search(opts)
         last_err = err and err:match("^cannot run") and err or last_err
         return try(index + 1)
       end
-      -- by the file, not the name: a symlink and the PDF it points to share the viewer
+      -- by the file, not the name: a symlink and the PDF it points to share the viewer. Of several views of it
+      -- (windows of their own, see `viewer.separate`), one on screen in this tab, and of those the one used last.
       local real = vim.uv.fs_realpath(pdf) or pdf
-      local s
+      local tab = vim.api.nvim_get_current_tabpage()
+      local s, shown
       for _, candidate in pairs(session.sessions) do
         if (vim.uv.fs_realpath(candidate.path) or candidate.path) == real and not candidate.closed then
-          s = candidate
+          local in_tab = false
+          for _, win in ipairs(vim.fn.win_findbuf(candidate.buf)) do
+            in_tab = in_tab or vim.api.nvim_win_get_tabpage(win) == tab
+          end
+          local better = not s
+            or (in_tab and not shown)
+            or (
+              in_tab == shown
+              and (
+                candidate.entered > s.entered
+                or (candidate.entered == s.entered and s.own_view and not candidate.own_view)
+              )
+            )
+          if better then
+            s, shown = candidate, in_tab
+          end
         end
-      end
-      local tab = vim.api.nvim_get_current_tabpage()
-      local shown = false
-      for _, win in ipairs(s and vim.fn.win_findbuf(s.buf) or {}) do
-        shown = shown or vim.api.nvim_win_get_tabpage(win) == tab
       end
       if not shown then
         -- next to the source, and back to it: the cursor stays where the search started
         local from = vim.api.nvim_win_is_valid(source_win) and source_win or 0
         vim.api.nvim_win_call(from, function()
           vim.cmd("vertical rightbelow split")
+          -- a viewer on screen in another tab stays there: this window gets a view of its own
           s = session.sessions[require("pdf-view.viewer").open(pdf)]
         end)
         -- the viewer's BufEnter hid the cursor, and nvim_win_call comes back without the BufLeave that shows it
@@ -702,11 +806,12 @@ function M.forward_search(opts)
 end
 
 --- The page under the cell at `row`, `col` (0-based, in the window's text area) of the viewer `s`, and the point of
---- it there, in points from the page's top-left corner. Nil off the page.
+--- it there, in points from the top-left corner of the page as it is shown (turned), with the size of that page. Nil
+--- off the page.
 ---@param s PdfView.Session
 ---@param row integer
 ---@param col integer
----@return integer? page, number? x, number? y
+---@return integer? page, number? x, number? y, number? width, number? height
 local function point_at(s, row, col)
   local fit, geom = s.fit, s.geom
   if not (fit and geom) then
@@ -721,7 +826,7 @@ local function point_at(s, row, col)
     for _, part in ipairs(fit.parts) do
       local clip = part.clip
       if px >= clip[1] and px <= clip[3] and py >= clip[2] and py <= clip[4] then
-        return part.page, (px - part.dx) / part.scale_x, (py - part.dy) / part.scale_y
+        return part.page, (px - part.dx) / part.scale_x, (py - part.dy) / part.scale_y, part.width, part.height
       end
     end
     return nil -- between the pages
@@ -734,13 +839,13 @@ local function point_at(s, row, col)
   end
   for _, part in ipairs(s.parts or {}) do -- facing pages: the one under the cell
     if x >= part.x and x <= part.x + part.width and y >= part.y and y <= part.y + part.height then
-      return part.page, x - part.x, y - part.y
+      return part.page, x - part.x, y - part.y, part.width, part.height
     end
   end
   if s.parts then
     return nil -- between the pages
   end
-  return s.page, x, y
+  return s.page, x, y, geom.w, geom.h
 end
 
 --- Open `source` at its line: in a window of the current tab that shows it, else in the previous window when that is
@@ -791,20 +896,24 @@ end
 
 --- Inverse search (SyncTeX): open the TeX source at the line that the point under the mouse was typeset from.
 ---@param s PdfView.Session
----@param lhs string the key that was pressed
+---@param lhs? string the key that was pressed, which does what it would do without the mapping off a viewer
 local function inverse_search(s, lhs)
   local mouse = vim.fn.getmousepos()
   local over = mouse.winid ~= 0 and session.sessions[vim.api.nvim_win_get_buf(mouse.winid)]
   if not over then
-    return vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+    if lhs then
+      vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+    end
+    return
   end
   s = over
   local info = vim.fn.getwininfo(mouse.winid)[1] -- `winrow` counts the winbar, `wincol` the sign and number columns
-  local page, x, y = point_at(s, mouse.winrow - 1 - info.winbar, mouse.wincol - 1 - info.textoff)
-  if not page then
+  local page, x, y, width, height = point_at(s, mouse.winrow - 1 - info.winbar, mouse.wincol - 1 - info.textoff)
+  if not (page and x and y and width and height) then
     return
   end
-  synctex.edit(s.path, page, x --[[@as number]], y --[[@as number]], function(err, source)
+  x, y = rotation.unpoint(s.rotation, width, height, x, y) -- SyncTeX knows the page before it is turned
+  synctex.edit(s.path, page, x, y, function(err, source)
     if s.closed then
       return
     end
@@ -843,6 +952,7 @@ local function pick_outline(s)
   if s.outline and s.outline.stamp == stamp then
     return choose(s.outline.entries)
   end
+  session.use_layout(s)
   mupdf.outline(s.path, function(err, entries)
     if s.closed then
       return
@@ -868,6 +978,7 @@ local function for_pages_on_screen(s, fetch, done)
     if page > last then
       return done(nil, results)
     end
+    session.use_layout(s)
     fetch(s.path, page, function(err, result)
       if s.closed then
         return
@@ -889,8 +1000,162 @@ local function pages_on_screen(s)
   return (s.last and s.last ~= s.page and "pages " or "page ") .. session.pages_label(s)
 end
 
---- Pick one of the links on the page on screen and follow it: a link into the document jumps to where it leads, any
---- other (a web address, an e-mail) opens with `vim.ui.open()`. Facing pages offer the links of both.
+--- The scheme of an address, in lower case ("https" for "HTTPS://example.com"), or nil when it has none.
+---@param uri string
+---@return string?
+local function scheme_of(uri)
+  local scheme = uri:match("^(%a[%w+.-]*):")
+  return scheme and scheme:lower()
+end
+
+--- Open the address of a link with `vim.ui.open()`. An address whose scheme is not in `link_schemes` (a `file:`
+--- address, which a PDF's Launch action becomes too, or a custom scheme) can start a program on this machine, so the
+--- user is asked first, with the whole address.
+---@param uri string
+local function open_address(uri)
+  local scheme = scheme_of(uri)
+  local trusted = scheme ~= nil
+    and vim.tbl_contains(config.options.link_schemes, function(allowed)
+      return allowed:lower() == scheme
+    end, { predicate = true })
+  if not trusted then
+    local answer = vim.fn.confirm(
+      ("pdf-view: this link can start a program. Open it?\n%s"):format(uri),
+      "&Open\n&Cancel",
+      2,
+      "Warning"
+    )
+    if answer ~= 1 then
+      return
+    end
+  end
+  local _, open_err = vim.ui.open(uri)
+  if open_err then
+    notify(("cannot open %s: %s"):format(uri, open_err), vim.log.levels.WARN)
+  end
+end
+
+---@class PdfView.DocumentLink
+---@field name string the file as the link names it, decoded ("other.pdf")
+---@field path string the file, absolute: a relative name is resolved against the directory of the linking document
+---@field fragment? string where in the file it leads, with its `#` ("#page=3&view=Fit", "#nameddest=intro")
+---@field page? integer the page of `#page=N`
+---@field dest? string the name of `#nameddest=...`, decoded
+
+--- `%20` and the like decoded.
+---@param text string
+---@return string
+local function percent_decode(text)
+  return (text:gsub("%%(%x%x)", function(hex)
+    return string.char(tonumber(hex, 16))
+  end))
+end
+
+--- The document that the address `uri` of a link in the viewer `s` leads to, when the viewer can open it: a `file:`
+--- address, or one without a scheme, of a local file with one of the `extensions`. A link to another PDF (`/GoToR`)
+--- reaches here as `file:other.pdf#page=3&view=Fit`. Nil for any other address.
+---@param s PdfView.Session
+---@param uri string
+---@return PdfView.DocumentLink?
+local function document_link(s, uri)
+  local scheme = scheme_of(uri)
+  local rest = uri
+  if scheme == "file" then
+    rest = uri:sub(#"file:" + 1)
+    local host = rest:match("^//([^/]*)")
+    if host then
+      if host ~= "" and host:lower() ~= "localhost" then
+        return nil -- a file on another machine
+      end
+      rest = rest:sub(#host + 3)
+    end
+  elseif scheme then
+    return nil
+  end
+  local file, fragment = rest:match("^([^#]*)(#?.*)$")
+  local name = percent_decode(file)
+  if
+    name == ""
+    or not vim.tbl_contains(config.options.extensions, function(extension)
+      return extension:lower() == vim.fn.fnamemodify(name, ":e"):lower()
+    end, { predicate = true })
+  then
+    return nil
+  end
+  local base = vim.fn.fnamemodify(s.path, ":p:h")
+  local path = name:sub(1, 1) == "/" and name or vim.fs.joinpath(base, name)
+  ---@type PdfView.DocumentLink
+  local link = { name = name, path = vim.fs.normalize(path), fragment = #fragment > 1 and fragment or nil }
+  for param in fragment:sub(2):gmatch("[^&]+") do
+    local key, value = param:match("^([^=]*)=(.*)$")
+    if key == "page" then
+      link.page = tonumber(value:match("^%d+$"))
+    elseif key == "nameddest" then
+      link.dest = percent_decode(value)
+    end
+  end
+  return link
+end
+
+--- How the picker shows where a link to another document leads: "other.pdf, p. 3".
+---@param link PdfView.DocumentLink
+---@return string
+local function document_label(link)
+  if link.page then
+    return ("%s, p. %d"):format(link.name, link.page)
+  end
+  return link.dest and ("%s, %s"):format(link.name, link.dest) or link.name
+end
+
+--- Follow a link from the viewer `s` to another document: open it in a viewer in the same window, at the page it leads
+--- to. `<C-o>` past the start of the new viewer's jump list comes back to `s`, through Vim's jump list.
+---@param s PdfView.Session
+---@param link PdfView.DocumentLink
+local function open_document(s, link)
+  local real = vim.uv.fs_realpath(link.path)
+  local stat = real and vim.uv.fs_stat(real)
+  if not stat or stat.type ~= "file" then
+    return notify(("cannot read %s"):format(vim.fn.fnamemodify(link.path, ":~:.")), vim.log.levels.WARN)
+  end
+  local target = s
+  if real ~= (vim.uv.fs_realpath(s.path) or s.path) then
+    local win = window_for(s)
+    if win and win ~= vim.api.nvim_get_current_win() then
+      vim.api.nvim_set_current_win(win)
+    end
+    vim.cmd("normal! m'") -- `<C-o>` comes back here
+    local ok, buf = pcall(require("pdf-view.viewer").open, link.path)
+    if not ok then
+      return notify(tostring(buf), vim.log.levels.WARN)
+    end
+    target = session.sessions[buf]
+  end
+  if not link.fragment or not target then
+    return
+  end
+  session.use_layout(target)
+  mupdf.destination(target.path, link.fragment, function(err, dest)
+    if target.closed then
+      return
+    end
+    if err then
+      if not mupdf.password_error(err) then -- the viewer asks for the password itself
+        notify(("cannot follow the link to %s: %s"):format(link.name, err), vim.log.levels.WARN)
+      end
+      return
+    end
+    if not dest then
+      return notify(("%s has no %s"):format(link.name, link.fragment), vim.log.levels.WARN)
+    end
+    -- in the same document a jump, so `<C-o>` comes back; a new viewer's first page is not one
+    go(target, dest.page, anchor_at(target, dest.page, dest.x, dest.y), target == s)
+  end)
+end
+
+--- Pick one of the links on the page on screen and follow it: a link into the document jumps to where it leads, a link
+--- to another document that the viewer opens (a PDF) opens it in this window at the page it leads to, any other opens
+--- with `vim.ui.open()`, a web address or an e-mail right away, another address once the user agrees. Facing pages
+--- offer the links of both.
 ---@param s PdfView.Session
 local function follow_link(s)
   local label = pages_on_screen(s)
@@ -908,7 +1173,8 @@ local function follow_link(s)
     vim.ui.select(links, {
       prompt = "Links",
       format_item = function(link)
-        local target = link.page and ("p. %d"):format(link.page) or link.uri
+        local document = link.uri and document_link(s, link.uri)
+        local target = link.page and ("p. %d"):format(link.page) or document and document_label(document) or link.uri
         return link.text ~= "" and ("%s  (%s)"):format(link.text, target) or target
       end,
     }, function(link)
@@ -918,10 +1184,12 @@ local function follow_link(s)
       if link.page then
         return go(s, link.page, anchor_at(s, link.page, link.x, link.y), true)
       end
-      local _, open_err = vim.ui.open(link.uri)
-      if open_err then
-        notify(("cannot open %s: %s"):format(link.uri, open_err), vim.log.levels.WARN)
+      -- before `link_schemes`: a document the viewer opens itself starts no program, so it needs no question
+      local document = document_link(s, link.uri)
+      if document then
+        return open_document(s, document)
       end
+      open_address(link.uri)
     end)
   end)
 end
@@ -1048,6 +1316,8 @@ end
 local ACTION_ORDER = {
   "down",
   "up",
+  "half_down",
+  "half_up",
   "right",
   "left",
   "scroll_down",
@@ -1064,11 +1334,14 @@ local ACTION_ORDER = {
   "fit_width",
   "fit_height",
   "fit_content",
+  "rotate",
+  "rotate_back",
   "search",
   "search_back",
   "search_next",
   "search_prev",
   "search_clear",
+  "search_list",
   "outline",
   "follow_link",
   "yank_text",
@@ -1085,7 +1358,8 @@ local ACTION_ORDER = {
   "help",
 }
 
----@type table<string, { desc: string, run: fun(s: PdfView.Session, lhs: string) }>
+--- What each action of `keymaps` does. `lhs` is the key that was pressed, nil when `action()` runs it.
+---@type table<string, { desc: string, run: fun(s: PdfView.Session, lhs?: string) }>
 local ACTIONS = {}
 
 ACTIONS.down = {
@@ -1099,6 +1373,20 @@ ACTIONS.up = {
   desc = "scroll up, or previous page",
   run = function(s)
     move(s, 0, -1)
+  end,
+}
+
+ACTIONS.half_down = {
+  desc = "scroll down half a window, or next page ({count} halves)",
+  run = function(s)
+    half(s, 1)
+  end,
+}
+
+ACTIONS.half_up = {
+  desc = "scroll up half a window, or previous page",
+  run = function(s)
+    half(s, -1)
   end,
 }
 
@@ -1147,42 +1435,42 @@ ACTIONS.scroll_left = {
 ACTIONS.next = {
   desc = "next page ({count} pages ahead)",
   run = function(s)
-    go(s, session.spread_step(s, s.target or s.page, vim.v.count1), TOP)
+    go(s, session.spread_step(s, s.target or s.page, action_count1()), TOP)
   end,
 }
 
 ACTIONS.prev = {
   desc = "previous page ({count} pages back)",
   run = function(s)
-    go(s, session.spread_step(s, s.target or s.page, -vim.v.count1), TOP)
+    go(s, session.spread_step(s, s.target or s.page, -action_count1()), TOP)
   end,
 }
 
 ACTIONS.first = {
   desc = "first page, or page {count}",
   run = function(s)
-    go(s, vim.v.count > 0 and vim.v.count or 1, TOP, true)
+    go(s, action_count() > 0 and action_count() or 1, TOP, true)
   end,
 }
 
 ACTIONS.last = {
   desc = "last page, or page {count}",
   run = function(s)
-    go(s, vim.v.count > 0 and vim.v.count or math.huge, TOP, true)
+    go(s, action_count() > 0 and action_count() or math.huge, TOP, true)
   end,
 }
 
 ACTIONS.zoom_in = {
   desc = "zoom in ({count} steps)",
   run = function(s)
-    set_zoom(s, s.zoom * config.options.zoom_step ^ vim.v.count1)
+    set_zoom(s, s.zoom * config.options.zoom_step ^ action_count1())
   end,
 }
 
 ACTIONS.zoom_out = {
   desc = "zoom out",
   run = function(s)
-    set_zoom(s, s.zoom / config.options.zoom_step ^ vim.v.count1)
+    set_zoom(s, s.zoom / config.options.zoom_step ^ action_count1())
   end,
 }
 
@@ -1211,6 +1499,20 @@ ACTIONS.fit_content = {
   desc = "fit the page's content to the window, without its margins",
   run = function(s)
     set_mode(s, "content")
+  end,
+}
+
+ACTIONS.rotate = {
+  desc = "turn the pages clockwise ({count} quarter turns)",
+  run = function(s)
+    rotate(s, 90 * action_count1())
+  end,
+}
+
+ACTIONS.rotate_back = {
+  desc = "turn the pages counter-clockwise",
+  run = function(s)
+    rotate(s, -90 * action_count1())
   end,
 }
 
@@ -1247,6 +1549,11 @@ ACTIONS.search_clear = {
   run = clear_search,
 }
 
+ACTIONS.search_list = {
+  desc = "list the matches of the search, with their text, and go to one",
+  run = pick_match,
+}
+
 ACTIONS.outline = {
   desc = "jump to a bookmark",
   run = pick_outline,
@@ -1270,14 +1577,14 @@ ACTIONS.show_text = {
 ACTIONS.jump_back = {
   desc = "back to where the previous jump started ({count} jumps)",
   run = function(s)
-    walk_jumps(s, -vim.v.count1)
+    walk_jumps(s, -action_count1())
   end,
 }
 
 ACTIONS.jump_forward = {
   desc = "forward in the jump list",
   run = function(s)
-    walk_jumps(s, vim.v.count1)
+    walk_jumps(s, action_count1())
   end,
 }
 
@@ -1347,8 +1654,133 @@ ACTIONS.help = {
   end,
 }
 
+--- The direction of each wheel action, as `wheel` takes it.
+local WHEEL = { scroll_down = { 0, 1 }, scroll_up = { 0, -1 }, scroll_right = { 1, 0 }, scroll_left = { -1, 0 } }
+
+--- The global wheel mappings that `set_global_wheel` made, to remove them again.
+---@type { mode: string, lhs: string, callback: function }[]
+local global_wheel = {}
+
+--- The global (not buffer-local) mapping of `lhs` in `mode`, if there is one.
+---@param mode string
+---@param lhs string
+---@return table?
+local function global_mapping(mode, lhs)
+  local raw = vim.keycode(lhs)
+  for _, map in ipairs(vim.api.nvim_get_keymap(mode)) do
+    if map.lhsraw == raw or map.lhsrawalt == raw then
+      return map
+    end
+  end
+end
+
+--- While a viewer is open, map the wheel keys of the `scroll_*` actions globally, in normal and insert mode, so the
+--- wheel over a viewer moves it while the cursor is in another window (the TeX or Typst source beside its PDF). Over
+--- other windows the key is passed on unmapped. A key the user has mapped globally is left alone, and only keys of
+--- the wheel itself are mapped. The mappings are removed when the last viewer closes.
+local function set_global_wheel()
+  for _, done in ipairs(global_wheel) do
+    local map = global_mapping(done.mode, done.lhs)
+    if map and map.callback == done.callback then -- not replaced by the user's own mapping since
+      pcall(vim.keymap.del, done.mode, done.lhs)
+    end
+  end
+  global_wheel = {}
+  local keymaps = config.options.keymaps
+  if not keymaps or next(session.sessions) == nil then
+    return
+  end
+  for action, dir in pairs(WHEEL) do
+    for _, lhs in ipairs(keymaps[action] or {}) do
+      if lhs:lower():find("scrollwheel", 1, true) then
+        for _, mode in ipairs({ "n", "i" }) do
+          if not global_mapping(mode, lhs) then
+            local function callback()
+              wheel(nil, dir[1], dir[2], lhs)
+            end
+            local desc = "PDF: " .. ACTIONS[action].desc .. " in the viewer under the mouse"
+            vim.keymap.set(mode, lhs, callback, { silent = true, desc = desc })
+            global_wheel[#global_wheel + 1] = { mode = mode, lhs = lhs, callback = callback }
+          end
+        end
+      end
+    end
+  end
+end
+
+--- Run the action `name` of `ACTIONS` in the viewer `s`, as its key does. `n` stands in for the count typed before
+--- the key (nil: `v:count`), and `lhs` is the key that was pressed (nil when no key was).
+---@param s PdfView.Session
+---@param name string
+---@param n? integer
+---@param lhs? string
+local function run(s, name, n, lhs)
+  local outer = given_count
+  given_count = n
+  local ok, err = pcall(ACTIONS[name].run, s, lhs)
+  given_count = outer
+  if not ok then
+    error(err, 0)
+  end
+end
+
+--- Run the action `name` in the viewer `s` for `require("pdf-view").action()`: in a window that shows the viewer,
+--- the current one when it does, as if its key was pressed there.
+---@param s PdfView.Session
+---@param name string
+---@param n? integer the count, `v:count` when nil
+function M.run(s, name, n)
+  local win = window_for(s)
+  if win and win ~= vim.api.nvim_get_current_win() then
+    return vim.api.nvim_win_call(win, function()
+      run(s, name, n)
+    end)
+  end
+  run(s, name, n)
+end
+
+--- Whether `name` is an action.
+---@param name string
+---@return boolean
+function M.exists(name)
+  return ACTIONS[name] ~= nil
+end
+
+--- The names of the actions, sorted.
+---@return string[]
+function M.names()
+  local names = vim.tbl_keys(ACTIONS)
+  table.sort(names)
+  return names
+end
+
+--- Go to page `page` (clamped to the document), at its top. A jump: `<C-o>` comes back.
+---@param s PdfView.Session
+---@param page integer
+function M.goto_page(s, page)
+  go(s, page, TOP, true)
+end
+
+--- Zoom to `zoom` times the fitted size, between 1 and `max_zoom`.
+---@param s PdfView.Session
+---@param zoom number
+function M.set_zoom(s, zoom)
+  set_zoom(s, math.max(zoom, 1))
+end
+
+M.set_fit = set_mode
+
+--- Search for `needle`, as `/` (`dir` 1) or `?` (-1) does after the text was typed: an empty `/` searches for it again.
+---@param s PdfView.Session
+---@param needle string
+---@param dir 1|-1
+function M.search(s, needle, dir)
+  s.last_needle = needle
+  run_search(s, needle, dir)
+end
+
 --- Map the keys of `config.options.keymaps` in the viewer's buffer, replacing the ones mapped before (`setup()` may
---- have changed them since).
+--- have changed them since), and the global wheel keys.
 ---@param s PdfView.Session
 local function set_keymaps(s)
   for _, lhs in ipairs(s.mapped or {}) do
@@ -1357,21 +1789,23 @@ local function set_keymaps(s)
   s.mapped = {}
   local keymaps = config.options.keymaps
   if not keymaps then
-    return
+    return set_global_wheel()
   end
   for action, keys in pairs(keymaps) do
     for _, lhs in ipairs(keys) do
       vim.keymap.set("n", lhs, function()
-        ACTIONS[action].run(s, lhs)
+        run(s, action, nil, lhs)
       end, { buffer = s.buf, nowait = true, silent = true, desc = "PDF: " .. ACTIONS[action].desc })
       s.mapped[#s.mapped + 1] = lhs
     end
   end
+  set_global_wheel()
 end
 
 M.rescan = rescan
 -- a reflowable document laid out again has its matches on other pages
 render.on_reflow = rescan
 M.set_keymaps = set_keymaps
+M.set_global_wheel = set_global_wheel
 
 return M

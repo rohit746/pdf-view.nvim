@@ -5,8 +5,50 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A Lua API to drive a viewer without its keys, so `keymaps = false` no longer leaves it unusable:
+  `require("pdf-view").action(name, { buf, count })` runs any action of `keymaps` (the keys call the same code), and
+  every action also has a `<Plug>(pdf-view-{name})` mapping that passes its count on. `goto_page()`, `set_zoom()`,
+  `set_fit()` and `search()` take an argument, `get()` returns `{ buf, path, page, last, count, fit, zoom }`, and a
+  `User PdfViewPage` autocommand tells other code when another page is on screen.
+- A terminal the environment does not name (over SSH, under `sudo` or `su`, in `docker exec`) is asked its name with
+  XTVERSION on Neovim 0.12, together with its device attributes before the first page. kitty or Ghostty with
+  `TERM=xterm-256color` show their pages now instead of the text, and WezTerm and Konsole get Kitty graphics instead
+  of sixel. A name from the environment is kept, and the terminal is not asked inside tmux or zellij, nor where its
+  reply could not be read. `:checkhealth pdf-view` reports the name it gave.
+- `g/` lists the matches of the search through `vim.ui.select`, each with its page and the line of text it is on, and
+  goes to the chosen one as `n` would (a jump, so `<C-o>` comes back). The key is the `search_list` action.
+- `<C-d>` and `<C-u>` scroll a zoomed or fitted page by half a window, turning the page at its edge as `j` and `k` do
+  (and going on into the next page with `continuous`). A count is the number of half windows. The actions are
+  `half_down` and `half_up` in `keymaps`. In a terminal that cannot show pages they still scroll the page's text.
+- `f` opens a link to another PDF (a `/GoToR` action, as in document sets and papers that link to a supplement), or
+  to any file with one of the `extensions`, in a viewer in the same window, at the page or named destination it leads
+  to. A relative name is found next to the PDF with the link, and `<C-o>` comes back to it. The picker shows such a
+  link as `other.pdf, p. 3`. Before, the address went to `vim.ui.open()` and the system's PDF viewer.
+- Scans with pages lying on their side, and landscape tables in portrait documents, can be read turned. `>` turns
+  every page a quarter turn clockwise and `<` back (`2>` turns them upside down); the winbar shows `90°`. Fit, zoom,
+  scrolling, the `c` fit, search highlights, SyncTeX, links and bookmarks all follow the turned page, and the rotation
+  is kept with the remembered position, in marks and in the jump list. The `rotate` and `rotate_back` keymaps set the
+  keys. The file itself is never changed.
+- Two windows on one PDF show different pages (#131). A split of a viewer (`:split`, `:vsplit`) gets a view of its own,
+  an unlisted buffer that starts on the same page, fit, zoom, rotation and search and then turns its pages, fits, zooms
+  and rotates them on its own; a window that switches to a PDF already on screen in another gets one too. Before,
+  turning the page in one window turned it in both, and with positioned placements (zellij, WezTerm, Konsole) only one
+  of them showed the page. Forward search moves the window on the PDF that was used last, and the position remembered
+  for the next time the PDF is opened is that window's.
+
 ### Fixed
 
+- The help file's `pdf-view.setup()` entry said a second `setup()` gives open viewers only the new `keymaps`,
+  `live_reload` and `reload_delay`; it lists all it applies now (also `winbar`, `recolor`, the `highlight` colours and
+  `hide_cursor`). The help file also lists every keymap action with its default keys, and has the README's live reload
+  and tmux notes (`:help pdf-view-live-reload`, `:help pdf-view-tmux`). The README's module list covers every module,
+  `positions.lua`, `synctex.lua` and `rotation.lua` among them.
+- The mouse wheel did nothing over a viewer while the cursor was in another window, such as the TeX or Typst source
+  next to its PDF. While a viewer is open, the wheel keys are now also mapped globally in normal and insert mode: over
+  a viewer they move it, over other windows they scroll as before. A wheel key mapped by the user is left alone, and
+  the mappings are removed when the last viewer closes.
 - With an input plugin that prompts asynchronously (snacks.nvim, dressing.nvim, noice.nvim), confirming `/` or `?`
   after the viewer was closed searched the closed document again. The answer is ignored now.
 - `setup()` changing `hide_cursor` while a viewer is focused now shows or hides the cursor right away. Before, the
@@ -31,6 +73,34 @@ All notable changes to this project are documented here. The format follows
 - A changed PDF noticed first by a window switch or resize (always when `live_reload` is off) is now reloaded like
   live reload does it: the search is repeated, an old forward search highlight is dropped, and a file still being
   written keeps the old page on screen and is tried again instead of showing an error.
+- With positioned placements (WezTerm, Konsole, `placement = "positioned"`) inside tmux with `extended-keys` on (or
+  `always`), the terminal was asked to report a page it had lost, and tmux would type that report into the viewer as
+  keys (`G`, `i`, `=`, ...), as 0.4.1 fixed for the file check. The terminal is asked for no replies there now, as on
+  Neovim 0.11. Whether replies can be read is checked again after tmux is attached from another terminal.
+- Text shown in place of a page (and other messages in the viewer) ran past the window's right edge when a word of
+  double-width characters (Chinese, Japanese, Korean) was wider than the window. Such a word is now cut by its width
+  on screen.
+- A session (`:mksession`) brought a viewer's window back as an empty buffer named after the PDF, and `:w!` there
+  emptied the PDF. The window is a viewer again now. Sessions saved without `blank` in `'sessionoptions'` leave the
+  window out, as the README now says.
+- A viewer in no window, as after `:edit` of another file, kept its `mutool` process running, with the parsed
+  document in memory, until Neovim exited or the buffer was wiped. The process is stopped once the viewer has been
+  in no window for 30 seconds, and started again when a page that was not drawn yet is needed.
+- A GUI (Neovide, nvim-qt) started from a shell in kitty or Ghostty was taken for that terminal: the buffer was
+  filled with placeholder characters it cannot draw. A GUI now gets the page's text, and `:checkhealth pdf-view` says
+  that it cannot show pages.
+- A page that is slow to draw (a dense vector drawing, a scanned map at a high zoom) held up every later page when it
+  was left within a second of starting, or when it was being drawn ahead of time: the next page waited for the whole
+  render. Such a render is now stopped once it has run for a second, unless the page is turned back to.
+- An e-book (EPUB, FB2, MOBI) reopened in a window of another size opened at the same page number, which is another
+  place in the text once the book is laid out again. It opens at the point of the text it was left at now. Positions
+  stored before this have no layout, and still open at their page number.
+
+### Security
+
+- `f` opened every link that does not lead into the document with `vim.ui.open()`, including `file:` addresses and
+  PDF Launch actions, which can start a program on the reader's machine. It now asks first, showing the whole address,
+  for any address whose scheme is not in the new `link_schemes` option (`http`, `https` and `mailto` by default).
 
 ## [0.7.0] - 2026-11-09
 

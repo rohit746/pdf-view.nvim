@@ -17,13 +17,14 @@ local MAX_PAGE = 2 ^ 31 - 1
 local CONTENT_MARGIN = 8
 
 ---@class PdfView.Job
----@field kill fun(self: PdfView.Job, signal?: integer): boolean? true when the job stopped, so that its callback gets
---- an error; a request the worker is busy with may be left to finish instead (see `ask()`)
+---@field kill fun(self: PdfView.Job, signal?: integer, wanted?: fun(): boolean): boolean? true when the job stopped, so
+--- that its callback gets an error; a request the worker is busy with may be stopped later instead, unless `wanted()`
+--- then says that something waits for it again (see `ask()`)
 
 ---@class PdfView.PageInfo
 ---@field count integer pages in the document
 ---@field page integer the requested page, clamped to the document
----@field width number page width in points
+---@field width number page width in points, turned by the rotation it was asked with
 ---@field height number page height in points
 ---@field reflowable boolean the document is laid out to a page size (EPUB, FB2, MOBI), so its pages follow the layout
 ---@field content? number[] `{ x0, y0, x1, y1 }`: the part of the page with something drawn on it, in points from the
@@ -86,6 +87,8 @@ end
 ---@field cb fun(err?: string, result?: string)
 ---@field done? boolean
 ---@field started? number when the worker was handed it, from `vim.uv.hrtime()`
+---@field deadline? boolean it was killed before it had run for `M.kill_after`: it is stopped once it has
+---@field wanted? fun(): boolean what the last `kill()` was given: true when something waits for it again
 
 ---@class PdfView.WorkerProcess
 ---@field system? vim.SystemObj
@@ -123,7 +126,8 @@ local LINE = 200
 local STDERR_LIMIT = 4096
 
 --- Milliseconds a request may have been worked on before killing it stops its worker. A request killed sooner is
---- left to finish: starting another worker opens and parses the document again, which costs more than most renders.
+--- given the rest of that time to finish: starting another worker opens and parses the document again, which costs
+--- more than most renders.
 M.kill_after = 1000
 
 ---@param path string
@@ -332,14 +336,18 @@ local function ask(path, request, cb)
     pump(w)
   end)
   return {
-    --- A waiting request is dropped. One that is being worked on is left to finish, and `cb` gets its result, unless
-    --- it has run for `M.kill_after` milliseconds: then its worker is stopped, so that a page that is slow to draw does
-    --- not hold up the next one, and the next request starts another worker.
+    --- A waiting request is dropped. One that is being worked on has its worker stopped once it has run for
+    --- `M.kill_after` milliseconds, at once when it has already, so that a page that is slow to draw does not hold up
+    --- the next one, and the next request starts another worker. Until then it may still finish, and `cb` gets its
+    --- result. It is not stopped while `wanted()` says that something waits for it again: kill it once more when
+    --- nothing does.
+    ---@param wanted? fun(): boolean
     ---@return boolean killed
-    kill = function()
+    kill = function(_, _, wanted)
       if entry.done then
         return false
       end
+      entry.wanted = wanted
       for index, queued in ipairs(w.queue) do
         if queued == entry then
           table.remove(w.queue, index)
@@ -350,7 +358,23 @@ local function ask(path, request, cb)
         end
       end
       if w.process and w.process.current == entry then
-        if (vim.uv.hrtime() - entry.started) / 1e6 < M.kill_after then
+        if wanted and wanted() then
+          return false
+        end
+        local left = M.kill_after - (vim.uv.hrtime() - entry.started) / 1e6
+        if left > 0 then
+          if not entry.deadline then
+            entry.deadline = true
+            vim.defer_fn(function()
+              entry.deadline = nil
+              local process = w.process
+              if entry.done or not process or process.current ~= entry or (entry.wanted and entry.wanted()) then
+                return
+              end
+              stop(w, "mutool was killed (signal 15)")
+              pump(w)
+            end, math.ceil(left))
+          end
           return false
         end
         stop(w, "mutool was killed (signal 15)")
@@ -379,6 +403,22 @@ function M.release(path)
   for _, request in ipairs(queue) do
     finish(request, "mutool was killed (signal 15)")
   end
+end
+
+--- Stop the worker process of `path` if it is idle, freeing the parsed document. Unlike `release()`, the layout is
+--- kept, and the next request starts another process.
+---@param path string
+---@return boolean busy the worker is working on a request or has some waiting, so it was left running
+function M.stop_idle(path)
+  local w = workers[path]
+  if not w then
+    return false
+  end
+  if #w.queue > 0 or (w.process and w.process.current) then
+    return true
+  end
+  stop(w, "mutool was killed (signal 15)")
+  return false
 end
 
 --- Unlock `path` with `password` from the next request on; nil forgets it. It is kept until Neovim exits, also after
@@ -463,9 +503,11 @@ end
 ---@param content? boolean also find the part of the page that has content (`info.content`), which renders the page
 ---@param of? PdfView.Layout `page` is a page of a reflowable document as it was laid out this way: the answer is the
 --- page that now holds the point of the text it starts at
+---@param rotation? PdfView.Rotation measure the page turned clockwise by this many degrees: its size and content
 ---@return PdfView.Job
-function M.info(path, page, cb, content, of)
-  local request = { "info", math.min(math.max(math.floor(page), 1), MAX_PAGE), content == true, of or vim.NIL }
+function M.info(path, page, cb, content, of, rotation)
+  local request =
+    { "info", math.min(math.max(math.floor(page), 1), MAX_PAGE), content == true, of or vim.NIL, rotation or 0 }
   return ask(path, request, function(err, result)
     if err then
       return cb(err)
@@ -502,6 +544,8 @@ end
 ---@field height integer
 ---@field highlights? string rectangles to multiply onto the page, as built by `search.highlights()`
 ---@field recolor? string how to recolour the image, as built by `session.recolor_spec()`: "" (or nil) for not at all
+---@field rotation? PdfView.Rotation the page is drawn turned clockwise by this many degrees; the rectangle is of the
+--- turned page, `highlights` are of the page before it is turned
 
 --- Render a rectangle of a page to a PNG of exactly `clip.width` x `clip.height` pixels. Only that rectangle is
 --- rasterised, so the cost does not grow with the zoom level.
@@ -524,6 +568,7 @@ function M.render_clip(path, page, clip, out, cb)
     out,
     clip.highlights or "",
     clip.recolor or "",
+    clip.rotation or 0,
   }
   return ask(path, request, rendered(out, cb))
 end
@@ -536,6 +581,9 @@ end
 ---@field dy number
 ---@field clip number[] `{ x0, y0, x1, y1 }`: the part of the image the page may draw on, in pixels
 ---@field highlights? string as for `PdfView.Clip`
+---@field rotation? PdfView.Rotation as for `PdfView.Clip`
+---@field width? number the size of the page in points, turned (not sent to mutool: for finding a point on it)
+---@field height? number
 
 --- Render several pages into one PNG of exactly `width` x `height` pixels, such as two facing pages side by side.
 ---@param path string
@@ -560,6 +608,7 @@ function M.render_sheet(path, width, height, parts, out, cb, recolor)
       part.clip[3],
       part.clip[4],
       part.highlights or "",
+      part.rotation or 0,
     }
   end
   local request = { "sheet", math.floor(width), math.floor(height), out, recolor or "", list }
@@ -574,12 +623,14 @@ end
 ---@param out string destination PNG
 ---@param cb fun(err?: string)
 ---@param recolor? string how to recolour the image, as built by `session.recolor_spec()`
+---@param rotation? PdfView.Rotation the page is drawn turned clockwise by this many degrees
 ---@return PdfView.Job
-function M.render(path, page, width, height, out, cb, recolor)
+function M.render(path, page, width, height, out, cb, recolor, rotation)
   local done = rendered(out, function(err)
     cb(err)
   end)
-  return ask(path, { "draw", page, math.floor(width), math.floor(height), out, recolor or "" }, done)
+  local request = { "draw", page, math.floor(width), math.floor(height), out, recolor or "", rotation or 0 }
+  return ask(path, request, done)
 end
 
 --- Copy a rectangle of the PNG `png` (a page rendered before), in its pixels, to the PNG `out`, or stretched to
@@ -628,7 +679,7 @@ end
 ---@field page? integer 1-based page of the document it leads to
 ---@field x? number where on that page it leads, as a fraction of the page's width from its left edge, when it says
 ---@field y? number the same as a fraction of the page's height from its top edge
----@field uri? string where it leads otherwise: a web address, an e-mail
+---@field uri? string where it leads otherwise: a web address, an e-mail, another document (`file:other.pdf#page=3`)
 
 --- The links on one page, top to bottom, then left to right. Links that lead nowhere are left out.
 ---@param path string
@@ -645,6 +696,30 @@ function M.links(path, page, cb)
       return cb("could not read the links of the page")
     end
     cb(nil, links)
+  end)
+end
+
+---@class PdfView.Destination
+---@field page integer 1-based page of the document
+---@field x? number where on that page, as a fraction of the page's width from its left edge, when it says
+---@field y? number the same as a fraction of the page's height from its top edge
+
+--- Where the fragment of a link from another document leads in `path`: `#page=3&view=Fit`, `#nameddest=intro`. Nil
+--- (without an error) when it leads to no page of the document.
+---@param path string
+---@param fragment string with its `#`
+---@param cb fun(err?: string, dest?: PdfView.Destination)
+---@return PdfView.Job
+function M.destination(path, fragment, cb)
+  return ask(path, { "dest", fragment }, function(err, result)
+    if err then
+      return cb(err)
+    end
+    local ok, dest = pcall(vim.json.decode, result or "")
+    if not ok or (dest ~= vim.NIL and type(dest) ~= "table") then
+      return cb("could not read where the link leads")
+    end
+    cb(nil, dest ~= vim.NIL and dest or nil)
   end)
 end
 

@@ -153,6 +153,7 @@ local function present(s, win, png, info, fit, rows)
     s.cx, s.cy = fit.cx, fit.cy -- what was reachable, after clamping to the page
   end
   update_winbar(s, win)
+  session.announce_page(s)
   pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
 end
 
@@ -207,6 +208,9 @@ local function sheet_parts(s, info, scale_x, scale_y, x, y, width, height, band)
         dy = dy,
         clip = clip,
         highlights = highlights,
+        rotation = s.rotation,
+        width = part.width, -- the size of the turned page, for a click on it (`actions.point_at`)
+        height = part.height,
       }
       keys[#keys + 1] = part.page .. "=" .. highlights_key
     end
@@ -272,6 +276,7 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
           height = view.height,
           highlights = highlights,
           recolor = recolor,
+          rotation = s.rotation,
         }
         return mupdf.render_clip(s.path, info.page, clip, out, cb)
       end
@@ -303,10 +308,11 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
           height = fit.height,
           highlights = highlights,
           recolor = recolor,
+          rotation = s.rotation,
         }
         return mupdf.render_clip(s.path, info.page, clip, out, cb)
       end
-      return mupdf.render(s.path, info.page, fit.width, fit.height, out, cb, recolor)
+      return mupdf.render(s.path, info.page, fit.width, fit.height, out, cb, recolor, s.rotation)
     end
 end
 
@@ -330,6 +336,7 @@ local function sheet_of(s, stamp, first, last, content, track, cb)
       infos[#infos + 1] = known
       return step(page + 1)
     end
+    session.use_layout(s)
     track(mupdf.info(s.path, page, function(err, info)
       if err or not info then
         return cb(err or "mutool returned no page information")
@@ -339,10 +346,16 @@ local function sheet_of(s, stamp, first, last, content, track, cb)
       end
       infos[#infos + 1] = info
       step(page + 1)
-    end, content))
+    end, content, nil, s.rotation))
   end
   step(first)
 end
+
+---@class PdfView.Rendering
+---@field waiters fun(err?: string, png?: string)[] called when the render is done
+---@field job? PdfView.Job the request to mutool, set once it is made
+---@field leave fun(waiter: fun(err?: string, png?: string)) stop waiting with `waiter`: once nothing waits, the render
+--- is stopped (see `mupdf`: one the worker is busy with is given the rest of `mupdf.kill_after` to finish)
 
 --- Render into the render cache under `key`, calling `done` and whoever waits on `s.rendering[key]` when it is done.
 ---@param s PdfView.Session
@@ -353,9 +366,32 @@ end
 local function start_render(s, key, render, done)
   png_counter = png_counter + 1
   local out = ("%s/pdf-view-%d-%d.png"):format(temp_dir(), s.buf, png_counter)
-  local entry = { waiters = { done } }
+  ---@type PdfView.Rendering
+  local entry
+  entry = {
+    waiters = { done },
+    leave = function(waiter)
+      for index, other in ipairs(entry.waiters) do
+        if other == waiter then
+          table.remove(entry.waiters, index)
+          break
+        end
+      end
+      if #entry.waiters > 0 then
+        return
+      end
+      -- something that waits on it from now on, such as a page turned back to, keeps it going
+      local stopped = entry.job and entry.job:kill(15, function()
+        return #entry.waiters > 0
+      end)
+      if stopped and s.rendering[key] == entry then
+        s.rendering[key] = nil -- nobody else may wait on it now
+      end
+    end,
+  }
   s.rendering[key] = entry
-  local job = render(out, function(err)
+  session.use_layout(s)
+  entry.job = render(out, function(err)
     if s.rendering[key] == entry then
       s.rendering[key] = nil
     end
@@ -369,12 +405,10 @@ local function start_render(s, key, render, done)
     end
   end)
   return {
-    --- A render the worker is busy with may be left to finish (see `mupdf`): it is still kept in the render cache,
-    --- and `done` is still called. One that is stopped is no longer waited on.
+    --- `done` is not called. A render the worker is busy with may still finish (see `mupdf`), and is then kept in
+    --- the render cache. One that is stopped is no longer waited on.
     kill = function()
-      if job:kill(15) and s.rendering[key] == entry then
-        s.rendering[key] = nil -- nobody else may wait on it now
-      end
+      entry.leave(done)
     end,
   }
 end
@@ -522,8 +556,9 @@ end
 local NEIGHBOURS = { { 1, 0 }, { -1, 1 } }
 
 --- Render the pages next to the one on screen into the render cache, one after the other, so that turning to them
---- shows them at once. A newer `show()` stops this before it asks for anything (`s.prefetch.stopped`); what is being
---- rendered then is still finished and kept, and `show()` waits for it when it wants that page.
+--- shows them at once. A newer `show()` stops this before it asks for anything (`s.prefetch.stopped`) and lets go of
+--- what is being rendered then; that is still finished and kept when `show()` waits for it, wanting that page, and
+--- stopped like any render nobody waits for otherwise.
 ---@param s PdfView.Session
 ---@param stamp string
 ---@param cols integer
@@ -542,6 +577,7 @@ local function prefetch(s, stamp, cols, rows, cell)
   local content = s.mode == "content"
 
   local function step()
+    run.job = nil
     local next_page = table.remove(todo, 1)
     if run.stopped or s.closed or not next_page then
       if s.prefetch == run then
@@ -565,7 +601,7 @@ local function prefetch(s, stamp, cols, rows, cell)
         session.touch(s, key)
         return step()
       end
-      start_render(s, key, render, function()
+      run.job = start_render(s, key, render, function()
         step()
       end)
     end)
@@ -641,6 +677,7 @@ local function show_text_instead(s, win, page, reason)
     end
     display_message(s, win, reason)
   end
+  session.use_layout(s)
   s.job = mupdf.info(s.path, page or s.target or s.page, function(err, info)
     if gen ~= s.gen then
       return
@@ -649,6 +686,7 @@ local function show_text_instead(s, win, page, reason)
     if err or not info then
       return fail(err)
     end
+    session.use_layout(s)
     s.job = mupdf.text(s.path, info.page, function(text_err, text)
       if gen ~= s.gen then
         return
@@ -665,6 +703,7 @@ local function show_text_instead(s, win, page, reason)
       s.page_text = reason
       s.page, s.count, s.target = info.page, info.count, nil
       update_winbar(s, win)
+      session.announce_page(s)
     end)
   end)
 end
@@ -737,9 +776,18 @@ local function show(s, page, opts)
     s.job:kill(15)
     s.job = nil
   end
-  if s.prefetch then
-    s.prefetch.stopped = true -- what it is rendering now is kept; it asks for nothing more
+  local run = s.prefetch
+  if run then
+    run.stopped = true -- it asks for nothing more
     s.prefetch = nil
+    local job = run.job
+    if job then
+      -- what it is rendering now is let go of once this `show()` has had the chance to wait for it, which it does
+      -- at once when it wants that page and knows its geometry
+      vim.schedule(function()
+        job:kill(15)
+      end)
+    end
   end
 
   local cols, rows = text_area(win)
@@ -748,6 +796,7 @@ local function show(s, page, opts)
   -- a reflowable document is laid out to fill the window; other documents ignore this
   local reflow = layout.reflow(cols, rows, cell.w, cell.h, config.options.text_scale)
   local reflow_key = table.concat(reflow, "x")
+  s.reflow = reflow
   mupdf.set_layout(s.path, reflow)
 
   local function fail(message)
@@ -778,12 +827,12 @@ local function show(s, page, opts)
   if not stat then
     return fail("file not found: " .. s.path)
   end
-  -- what the page geometry and the renders are kept under: the file, and the layout of a reflowable one
-  local stamp = stamp_of(stat)
-  s.requested_key, s.requested_stamp = key, stamp
-  if s.reflowable then
-    stamp = stamp .. "@" .. reflow_key
-  end
+  -- what the page geometry and the renders are kept under: the file, the layout of a reflowable one, and how far the
+  -- pages are turned
+  local file_stamp = stamp_of(stat)
+  s.requested_key, s.requested_stamp = key, file_stamp
+  local turned = s.rotation ~= 0 and ("@r%d"):format(s.rotation) or ""
+  local stamp = file_stamp .. (s.reflowable and "@" .. reflow_key or "") .. turned
 
   local draw
 
@@ -800,7 +849,7 @@ local function show(s, page, opts)
     if info.reflowable then
       if not s.reflowable then
         s.reflowable = true
-        stamp = stamp .. "@" .. reflow_key
+        stamp = file_stamp .. "@" .. reflow_key .. turned
       end
       info.layout = reflow
     end
@@ -880,16 +929,10 @@ local function show(s, page, opts)
     local pending = s.rendering[cache_key]
     if pending then
       -- the page is being drawn ahead of time: wait for that
-      local waiters = pending.waiters
-      waiters[#waiters + 1] = rendered
+      pending.waiters[#pending.waiters + 1] = rendered
       s.job = {
         kill = function()
-          for index, waiter in ipairs(waiters) do
-            if waiter == rendered then
-              table.remove(waiters, index)
-              break
-            end
-          end
+          pending.leave(rendered)
         end,
       }
       return
@@ -906,14 +949,14 @@ local function show(s, page, opts)
   local laid_out = s.laid_out
   if s.reflowable and not page and laid_out and laid_out.key ~= reflow_key then
     M.on_reflow(s)
-    s.job = mupdf.info(s.path, wanted, on_info, content, laid_out.size)
+    s.job = mupdf.info(s.path, wanted, on_info, content, laid_out.size, s.rotation)
     return
   end
   local known = known_info(s, stamp, wanted)
   if known and (known.content or not content) then
     return on_info(nil, known)
   end
-  s.job = mupdf.info(s.path, wanted, on_info, content)
+  s.job = mupdf.info(s.path, wanted, on_info, content, nil, s.rotation)
 end
 
 --- Show the page again if the window changed size or the file changed on disk since it was last rendered.

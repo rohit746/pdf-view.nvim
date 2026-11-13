@@ -19,7 +19,12 @@
 //
 // Commands:
 //
-//   ["info", <page>, <content>, <of>]
+// <rotation> is how far the view turns every page clockwise, in degrees: 0, 90, 180 or 270 (missing is 0). It turns
+// the page as displayed (after the page's own /Rotate), so "info" gives the turned size and content, and "draw",
+// "render" and "sheet" draw the page turned, highlights included. Rectangles in page points (<highlights>) are always
+// in the unturned page's space: the worker turns them with the page.
+//
+//   ["info", <page>, <content>, <of>, <rotation>]
 //     "<page count> <resolved page> <width> <height> <reflowable>", followed by " <x0> <y0> <x1> <y1>" when <content>
 //     is true. <reflowable> is 1 for a reflowable document, else 0. <page> is 1-based and clamped to the document, so
 //     a huge number means "the last page". When <of> is a layout ([<width>, <height>, <em>]), <page> is a page of the
@@ -28,21 +33,23 @@
 //     have been applied. (<x0>, <y0>, <x1>, <y1>) is the rectangle, in points from the page's top-left corner, that
 //     holds everything drawn on the page that is not white: text, images and vector graphics alike. It is found by
 //     rendering the page small and scanning for non-white pixels, so a white rectangle laid over the whole page does
-//     not count as content. A blank page gives the whole page.
+//     not count as content. A blank page gives the whole page. Width, height and content are of the page turned by
+//     <rotation>.
 //
-//   ["draw", <page>, <width>, <height>, <out.png>, <recolor>]
+//   ["draw", <page>, <width>, <height>, <out.png>, <recolor>, <rotation>]
 //     Renders a whole page to a PNG of exactly <width> x <height> pixels, stretched to it.
 //
-//   ["render", <page>, <scale_x>, <scale_y>, <x>, <y>, <width>, <height>, <out.png>, <highlights>, <recolor>]
+//   ["render", <page>, <scale_x>, <scale_y>, <x>, <y>, <width>, <height>, <out.png>, <highlights>, <recolor>,
+//    <rotation>]
 //     Renders a rectangle of a page, at a given scale, to a PNG, optionally with highlighted rectangles on top. Only
 //     the pixels inside the rectangle are rasterised, so zooming deep into a page costs the same as rendering a
 //     window-sized image. <scale_x> and <scale_y> are device pixels per point (equal for a zoomed view, different
 //     when a whole page is stretched to a whole number of terminal cells). (<x>, <y>, <width>, <height>) is the
 //     rectangle in device pixels, measured from the top-left corner of the page as it is displayed (rotation, crop
-//     box and /UserUnit applied).
+//     box and /UserUnit applied, then turned by <rotation>).
 //
-//     <highlights> is "x0,y0,x1,y1,rrggbb;..." with rectangles in page points in that same displayed-page space (this
-//     is what Page.search() returns), or "". They are multiplied onto the page, so dark text stays readable. MuPDF
+//     <highlights> is "x0,y0,x1,y1,rrggbb;..." with rectangles in page points in the displayed page's space before
+//     <rotation> turns it (this is what Page.search() returns), or "". They are multiplied onto the page, so dark text stays readable. MuPDF
 //     before 1.27 cannot draw that (its JavaScript blend groups draw nothing), so there they are laid over the page as
 //     a translucent fill instead. The result says which was used: "highlights: multiply" or "highlights: translucent",
 //     and is empty without highlights.
@@ -54,7 +61,8 @@
 //
 //   ["sheet", <width>, <height>, <out.png>, <recolor>, <parts>]
 //     Renders several pages into one PNG of <width> x <height> pixels, on grey: two facing pages side by side, say.
-//     <parts> is a list of [<page>, <scale_x>, <scale_y>, <dx>, <dy>, <x0>, <y0>, <x1>, <y1>, <highlights>]: page
+//     <parts> is a list of [<page>, <scale_x>, <scale_y>, <dx>, <dy>, <x0>, <y0>, <x1>, <y1>, <highlights>,
+//     <rotation>]: page
 //     <page> is drawn at that scale with its top-left corner at (<dx>, <dy>) of the image, and only inside the
 //     rectangle (<x0>, <y0>)-(<x1>, <y1>) of it, so that a page does not paint over its neighbours. <highlights> and
 //     <recolor> are as for "render"; the result is its notes for the first part with highlights.
@@ -75,6 +83,11 @@
 //     the document is {"text": <text>, "page": <1-based page>}, any other (a web address, an e-mail) is
 //     {"text": <text>, "uri": <uri>}. <text> is the text under the link, "" for an image. Links that lead nowhere
 //     are left out. <page> is 1-based and clamped to the document.
+//
+//   ["dest", <fragment>]
+//     Where the fragment of a link from another document leads in this one ("#page=3&view=Fit",
+//     "#nameddest=intro"), as JSON: {"page": <1-based page>, "x": <x>, "y": <y>}, with <x> and <y> as for "links" and
+//     either left out when the destination does not say; null when it leads to no page of the document.
 var path = scriptArgs[0];
 
 // Longer than any stdio buffer (glibc and macOS use the pipe's block size: 4 KiB to 64 KiB).
@@ -153,15 +166,46 @@ function load(number) {
   return entry;
 }
 
-function contentBox(entry, width, height) {
+// The matrix that turns page <entry> clockwise by <rotation> degrees (0, 90, 180 or 270) with its top-left corner,
+// as displayed, at the origin, in points.
+function turn(entry, rotation) {
   var bounds = entry.bounds;
+  var w = bounds[2] - bounds[0];
+  var h = bounds[3] - bounds[1];
+  var turned;
+  // written out rather than Matrix.rotate(), whose sines and cosines are not exact everywhere
+  if (rotation === 90) {
+    turned = [0, 1, -1, 0, h, 0];
+  } else if (rotation === 180) {
+    turned = [-1, 0, 0, -1, w, h];
+  } else if (rotation === 270) {
+    turned = [0, -1, 1, 0, 0, w];
+  } else if (!rotation) {
+    turned = [1, 0, 0, 1, 0, 0];
+  } else {
+    throw new Error("unknown rotation: " + rotation);
+  }
+  return Matrix.concat(Matrix.translate(-bounds[0], -bounds[1]), turned);
+}
+
+// The size of page <entry> turned by <rotation>: [width, height] in points.
+function turnedSize(entry, rotation) {
+  if (rotation && rotation !== 90 && rotation !== 180 && rotation !== 270) {
+    throw new Error("unknown rotation: " + rotation);
+  }
+  var w = entry.bounds[2] - entry.bounds[0];
+  var h = entry.bounds[3] - entry.bounds[1];
+  return rotation === 90 || rotation === 270 ? [h, w] : [w, h];
+}
+
+function contentBox(entry, width, height, rotation) {
   var scale = Math.min(1, SCAN / Math.max(width, height));
   var pw = Math.max(1, Math.ceil(width * scale));
   var ph = Math.max(1, Math.ceil(height * scale));
   var pixmap = new Pixmap(ColorSpace.DeviceGray, [0, 0, pw, ph], false);
   pixmap.clear(255);
   var device = new DrawDevice(Matrix.identity, pixmap);
-  entry.list.run(device, Matrix.concat(Matrix.translate(-bounds[0], -bounds[1]), Matrix.scale(scale, scale)));
+  entry.list.run(device, Matrix.concat(turn(entry, rotation), Matrix.scale(scale, scale)));
   device.close();
 
   function inked(x, y) {
@@ -194,15 +238,15 @@ function contentBox(entry, width, height) {
   return [left / scale, top / scale, Math.min(width, (right + 1) / scale), Math.min(height, (bottom + 1) / scale)];
 }
 
-function info(number, content) {
+function info(number, content, rotation) {
   var entry = load(number);
-  var bounds = entry.bounds;
-  var width = bounds[2] - bounds[0];
-  var height = bounds[3] - bounds[1];
+  var size = turnedSize(entry, rotation);
+  var width = size[0];
+  var height = size[1];
   var reflowable = doc.isReflowable() ? 1 : 0;
   var line = entry.count + " " + entry.number + " " + width + " " + height + " " + reflowable;
   if (content) {
-    line += " " + contentBox(entry, width, height).join(" ");
+    line += " " + contentBox(entry, width, height, rotation).join(" ");
   }
   return line;
 }
@@ -246,9 +290,9 @@ function recolor(pixmap, how) {
   }
 }
 
-// Draw page <number> onto <device> with <ctm> applied after its top-left corner is moved to the origin, with
-// <highlights> on top. Returns the notes "render" answers with.
-function drawPage(device, number, scaleX, scaleY, offset, highlights) {
+// Draw page <number> onto <device>, turned by <rotation> with its top-left corner at the origin, then scaled and moved
+// by <offset>, with <highlights> on top. Returns the notes "render" answers with.
+function drawPage(device, number, scaleX, scaleY, offset, highlights, rotation) {
   var count = openDocument().countPages();
   if (!(number >= 1 && number <= count)) {
     throw new Error("page " + number + " does not exist (the document has " + count + ")");
@@ -256,7 +300,7 @@ function drawPage(device, number, scaleX, scaleY, offset, highlights) {
   var entry = load(number);
   var bounds = entry.bounds;
   var ctm = Matrix.concat(
-    Matrix.concat(Matrix.translate(-bounds[0], -bounds[1]), Matrix.scale(scaleX, scaleY)),
+    Matrix.concat(turn(entry, rotation), Matrix.scale(scaleX, scaleY)),
     Matrix.translate(offset[0], offset[1])
   );
   entry.list.run(device, ctm);
@@ -287,11 +331,11 @@ function drawPage(device, number, scaleX, scaleY, offset, highlights) {
   return notes;
 }
 
-function render(number, scaleX, scaleY, x, y, width, height, out, highlights, how) {
+function render(number, scaleX, scaleY, x, y, width, height, out, highlights, how, rotation) {
   var pixmap = new Pixmap(ColorSpace.DeviceRGB, [x, y, x + width, y + height], false);
   pixmap.clear(255);
   var device = new DrawDevice(Matrix.identity, pixmap);
-  var notes = drawPage(device, number, scaleX, scaleY, [0, 0], highlights);
+  var notes = drawPage(device, number, scaleX, scaleY, [0, 0], highlights, rotation);
   device.close();
   recolor(pixmap, how);
   pixmap.saveAsPNG(out);
@@ -308,7 +352,7 @@ function sheet(width, height, out, how, parts) {
     var area = rectangle(p[5], p[6], p[7], p[8]);
     device.clipPath(area, false, Matrix.identity);
     device.fillPath(area, false, Matrix.identity, ColorSpace.DeviceRGB, [1, 1, 1], 1); // the paper
-    var drawn = drawPage(device, p[0], p[1], p[2], [p[3], p[4]], p[9]);
+    var drawn = drawPage(device, p[0], p[1], p[2], [p[3], p[4]], p[9], p[10]);
     device.popClip();
     notes = notes || drawn;
   }
@@ -495,6 +539,28 @@ function pageLinks(number) {
   );
 }
 
+function linkDestination(fragment) {
+  var count = openDocument().countPages();
+  var target = -1;
+  try {
+    target = doc.resolveLink(String(fragment));
+  } catch (e) {
+    target = -1;
+  }
+  if (!(target >= 0 && target < count)) {
+    return "null";
+  }
+  var at = destination(target, String(fragment));
+  var out = { page: target + 1 };
+  if (at.x !== undefined) {
+    out.x = at.x;
+  }
+  if (at.y !== undefined) {
+    out.y = at.y;
+  }
+  return JSON.stringify(out);
+}
+
 function answer(request) {
   if (request[3] === "crop") {
     // needs no document, so it works the same whatever the document's password and layout
@@ -505,17 +571,17 @@ function answer(request) {
   request = [request[0]].concat(request.slice(3));
   if (request[1] === "info" && size && Array.isArray(request[4])) {
     // the page is found in the old layout first, which the document most likely still has
-    return info(samePoint(request[2], request[4], size), request[3]);
+    return info(samePoint(request[2], request[4], size), request[3], request[5]);
   }
   layout(size);
   switch (request[1]) {
     case "info":
-      return info(request[2], request[3]);
+      return info(request[2], request[3], request[5]);
     case "draw":
-      var bounds = load(request[2]).bounds;
-      var sx = request[3] / (bounds[2] - bounds[0]);
-      var sy = request[4] / (bounds[3] - bounds[1]);
-      return render(request[2], sx, sy, 0, 0, request[3], request[4], request[5], "", request[6]);
+      var turned = turnedSize(load(request[2]), request[7]);
+      var sx = request[3] / turned[0];
+      var sy = request[4] / turned[1];
+      return render(request[2], sx, sy, 0, 0, request[3], request[4], request[5], "", request[6], request[7]);
     case "render":
       return render(
         request[2],
@@ -527,7 +593,8 @@ function answer(request) {
         request[8],
         request[9],
         request[10],
-        request[11]
+        request[11],
+        request[12]
       );
     case "sheet":
       return sheet(request[2], request[3], request[4], request[5], request[6]);
@@ -535,6 +602,8 @@ function answer(request) {
       return JSON.stringify(plainText(request[2]));
     case "links":
       return pageLinks(request[2]);
+    case "dest":
+      return linkDestination(request[2]);
   }
   throw new Error("unknown command: " + request[1]);
 }
