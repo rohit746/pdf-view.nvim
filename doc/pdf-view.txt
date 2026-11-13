@@ -322,6 +322,56 @@ require("pdf-view").status({buf})                    *pdf-view.status()*
     90°" while fitted to the width, zoomed and turned), "" otherwise. Handy
     in a statusline: `%{v:lua.require'pdf-view'.status()}`.
 
+require("pdf-view").action({name}, {opts})                 *pdf-view.action()*
+    Run the action {name}, any name of `keymaps` ("next", "zoom_in",
+    "search", ...), in a viewer, as its key does. {opts}:
+      buf    the viewer's buffer, default: the current buffer. It runs in
+             the viewer's window; the cursor stays where it is.
+      count  the count typed before the key, default: |v:count|, so a
+             mapping that calls this passes its count on.
+    Returns false, with a warning, when the buffer is not a viewer. An
+    unknown {name} or a bad count is an error. With `keymaps = false`,
+    map this (or the |pdf-view-<Plug>| mappings) yourself.
+
+require("pdf-view").goto_page({page}, {opts})           *pdf-view.goto_page()*
+    Go to {page}, clamped to the document, at its top. A jump, as
+    `{count}G`: `<C-o>` comes back. {opts}.buf as for |pdf-view.action()|.
+
+require("pdf-view").set_zoom({zoom}, {opts})             *pdf-view.set_zoom()*
+    Zoom to {zoom} times the fitted size, between 1 and `max_zoom`,
+    keeping the fit.
+
+require("pdf-view").set_fit({fit}, {opts})                *pdf-view.set_fit()*
+    Fit the "page", its "width", its "height", or its "content" to the
+    window, at zoom 1.
+
+require("pdf-view").search({text}, {opts})                 *pdf-view.search()*
+    Search for {text} and go to the first match after the page on screen,
+    as |/| does; before it with `backward = true`, as |?|. `n` and `N`
+    step on.
+
+require("pdf-view").get({buf})                                *pdf-view.get()*
+    Where the viewer in {buf} (default: current buffer) is, nil for any
+    other buffer: `{ buf, path, page, last, count, fit, zoom }`. `page` is
+    the page on screen, or the one it is going to; `last` the right page
+    of facing pages, else `page`; `count` is nil until the document was
+    read. `fit` and `zoom` are as |pdf-view.set_fit()| and
+    |pdf-view.set_zoom()| take them.
+
+<Plug>(pdf-view-{name})                                      *pdf-view-<Plug>*
+    A normal mode mapping for every action, for mappings made from Vim
+    script or with `keymaps = false`. It passes its count on: >vim
+        autocmd FileType pdf-view nmap <buffer> J <Plug>(pdf-view-next)
+<
+User PdfViewPage                                                 *PdfViewPage*
+    An autocommand that runs when another page is on screen, with `data`
+    `{ buf, page, last, count }`: >lua
+        vim.api.nvim_create_autocmd("User", {
+          pattern = "PdfViewPage",
+          callback = function(args) print(args.data.page) end,
+        })
+<
+
 ==============================================================================
 CONFIGURATION                                              *pdf-view-config*
 
@@ -354,7 +404,8 @@ CONFIGURATION                                              *pdf-view-config*
                                -- |pdf-view-continuous|
       spread = "off",          -- "off" | "on" | "cover", see |pdf-view-spread|
       cell_size = nil,         -- { width, height } px if undetectable
-      keymaps = { ... },       -- see README; `false` disables all
+      keymaps = { ... },       -- see README; `false` for none, then map
+                               -- |pdf-view.action()| yourself
     })
 <
 

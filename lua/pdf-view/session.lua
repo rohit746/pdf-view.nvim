@@ -119,6 +119,8 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field own_view? boolean the buffer is a window's own view of a PDF that another window shows (`viewer.separate`)
 ---@field home? integer the window that an own view belongs to: it is wiped once that window closes
 ---@field entered integer when the buffer was last entered, to tell which of the viewers of a PDF was used last
+---@field announced? string the pages on screen that the `User PdfViewPage` autocommand last told of, "page-last"
+---@field announcing? boolean the `User PdfViewPage` autocommand is about to run
 ---@field closed boolean
 
 ---@type table<integer, PdfView.Session>
@@ -593,6 +595,32 @@ local function use_layout(s)
   if s.reflow then
     mupdf.set_layout(s.path, s.reflow)
   end
+end
+
+--- Tell other code, with the `User PdfViewPage` autocommand, that another page is on screen in `s` (or other facing
+--- pages): `data` holds the viewer's `buf`, the `page` and `last` page on screen, and the document's page `count`.
+--- Called whenever a page was put on screen, which is often the same one; run from the event loop, once for pages
+--- shown one after the other at once, and so that an error in an autocommand cannot stop the viewer.
+---@param s PdfView.Session
+function M.announce_page(s)
+  if s.announcing then
+    return
+  end
+  s.announcing = true
+  vim.schedule(function()
+    s.announcing = nil
+    local page, last = s.page, s.last or s.page
+    local key = page .. "-" .. last
+    if s.closed or s.announced == key then
+      return
+    end
+    s.announced = key
+    vim.api.nvim_exec_autocmds("User", {
+      pattern = "PdfViewPage",
+      modeline = false,
+      data = { buf = s.buf, page = page, last = last, count = s.count },
+    })
+  end)
 end
 
 --- "3" for the page on screen, "3-4" for two facing pages.
