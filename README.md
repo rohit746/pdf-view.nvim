@@ -518,7 +518,8 @@ Set `placement = "placeholders"` once your zellij supports Unicode placeholders
 
 1. A `mutool run` worker, one per open PDF, reports the page count and the exact size of the page (rotation, crop box
    and `UserUnit` applied). It keeps the document open between requests, so a page turn does not start mutool and
-   parse the document again; it is restarted when the file changes on disk.
+   parse the document again; it is restarted when the file changes on disk, and stopped once the viewer has been in
+   no window for 30 seconds (the pages it drew stay in the render cache).
 2. The page is fitted to the window in whole terminal cells and rendered by the worker to a PNG of exactly
    `cols × cell_width` by `rows × cell_height` pixels, so the terminal maps pixels to cells one to one.
 3. The PNG is uploaded to the terminal (`a=t`) and a virtual placement is created (`a=p,U=1`).

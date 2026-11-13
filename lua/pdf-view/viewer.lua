@@ -5,6 +5,7 @@ local actions = require("pdf-view.actions")
 local config = require("pdf-view.config")
 local cursor = require("pdf-view.cursor")
 local kitty = require("pdf-view.kitty")
+local mupdf = require("pdf-view.mupdf")
 local positions = require("pdf-view.positions")
 local render = require("pdf-view.render")
 local session = require("pdf-view.session")
@@ -56,6 +57,48 @@ end
 
 M.sessions = sessions
 M.reload = actions.reload
+
+--- Milliseconds a viewer may be in no window before its mutool worker is stopped, which frees the parsed document.
+--- Long enough that flipping between buffers does not start it again and again. The next request starts another.
+M.stop_worker_after = 30000
+
+--- Forget the pending stop of the worker of `s`.
+---@param s PdfView.Session
+local function keep_worker(s)
+  if s.worker_timer then
+    s.worker_timer:stop()
+    s.worker_timer:close()
+    s.worker_timer = nil
+  end
+end
+
+--- Stop the worker of `s` once it has been in no window for `M.stop_worker_after` milliseconds. A worker still busy
+--- then (a page drawn ahead of time) is given as long again.
+---@param s PdfView.Session
+local function stop_worker_later(s)
+  keep_worker(s)
+  local timer = uv.new_timer()
+  if not timer then
+    return
+  end
+  s.worker_timer = timer
+  timer:start(
+    M.stop_worker_after,
+    0,
+    vim.schedule_wrap(function()
+      if s.worker_timer ~= timer then
+        return -- shown again, or closed, meanwhile
+      end
+      keep_worker(s)
+      if s.closed or #vim.fn.win_findbuf(s.buf) > 0 then
+        return
+      end
+      if mupdf.stop_idle(s.path) then
+        stop_worker_later(s)
+      end
+    end)
+  )
+end
 
 --- Show the new version of the file of `s`, which live reload or a re-fit of the page (whichever comes first) found
 --- changed on disk.
@@ -214,6 +257,7 @@ function M.attach(buf)
     buffer = buf,
     desc = "Show the PDF page in the entered window",
     callback = function()
+      keep_worker(s)
       apply_window_options(s, vim.api.nvim_get_current_win())
       relayout(s)
       if s.search_stale then
@@ -223,13 +267,18 @@ function M.attach(buf)
   })
   -- The terminal drops the oldest images once it holds too many (kitty and Ghostty keep about 320 MB), and says
   -- nothing about it: a viewer in no window frees its images, and sends its page again when a window shows it.
+  -- Its mutool worker is stopped a while later; the render cache keeps the pages it drew.
   vim.api.nvim_create_autocmd("BufHidden", {
     group = augroup,
     buffer = buf,
-    desc = "Free the images of a PDF viewer in no window",
+    desc = "Free the images and the mutool worker of a PDF viewer in no window",
     callback = function()
       vim.schedule(function() -- the buffer is still in its last window while this runs
-        if s.closed or #vim.fn.win_findbuf(buf) > 0 or terminal.placement() == "positioned" then
+        if s.closed or #vim.fn.win_findbuf(buf) > 0 then
+          return
+        end
+        stop_worker_later(s)
+        if terminal.placement() == "positioned" then
           return -- `positioned` takes a page away from a window that no longer shows it
         end
         for _, id in ipairs(s.ids) do
