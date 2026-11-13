@@ -30,6 +30,16 @@ describe("positions", function()
     end
   end)
 
+  it("keeps the layout of an e-book, and drops a malformed one", function()
+    use("layout")
+    positions.set("/a.fb2", { page = 25, mode = "page", zoom = 1, cx = 0.5, cy = 0.5, layout = { 400, 600.5, 12 } })
+    eq({ 400, 600.5, 12 }, positions.get("/a.fb2").layout)
+    positions.set("/b.fb2", { page = 3, mode = "page", zoom = 1, cx = 0.5, cy = 0.5, layout = { 400, "x", 12 } })
+    eq({ 3, nil }, { positions.get("/b.fb2").page, positions.get("/b.fb2").layout })
+    positions.set("/c.fb2", { page = 3, mode = "page", zoom = 1, cx = 0.5, cy = 0.5, layout = { 400, 0, 12 } })
+    eq(nil, positions.get("/c.fb2").layout)
+  end)
+
   it("keeps a content fit", function()
     use("content")
     positions.set("/a.pdf", { page = 2, mode = "content", zoom = 1, cx = 0.5, cy = 0 })

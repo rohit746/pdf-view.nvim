@@ -430,8 +430,9 @@ and `:PdfView {file}` take any file MuPDF can open, whatever its extension.
 
 E-books (EPUB, FB2, MOBI) have no pages of their own: they are laid out on pages as large as the window, with text
 about the size of the terminal's (`text_scale = 1.5` makes it half as large again). When the window changes size the
-book is laid out again and the viewer stays at the same point of the text. Page numbers change with the layout, so
-marks and the jump list, which remember page numbers, may point elsewhere afterwards.
+book is laid out again and the viewer stays at the same point of the text, and a book reopened in a window of another
+size opens at the point of the text it was left at. Page numbers change with the layout, so marks and the jump list,
+which remember page numbers, may point elsewhere afterwards.
 
 ## Live reload
 
