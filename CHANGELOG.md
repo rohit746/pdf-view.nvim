@@ -9,6 +9,13 @@ All notable changes to this project are documented here. The format follows
 
 - `g/` lists the matches of the search through `vim.ui.select`, each with its page and the line of text it is on, and
   goes to the chosen one as `n` would (a jump, so `<C-o>` comes back). The key is the `search_list` action.
+- `<C-d>` and `<C-u>` scroll a zoomed or fitted page by half a window, turning the page at its edge as `j` and `k` do
+  (and going on into the next page with `continuous`). A count is the number of half windows. The actions are
+  `half_down` and `half_up` in `keymaps`. In a terminal that cannot show pages they still scroll the page's text.
+- `f` opens a link to another PDF (a `/GoToR` action, as in document sets and papers that link to a supplement), or
+  to any file with one of the `extensions`, in a viewer in the same window, at the page or named destination it leads
+  to. A relative name is found next to the PDF with the link, and `<C-o>` comes back to it. The picker shows such a
+  link as `other.pdf, p. 3`. Before, the address went to `vim.ui.open()` and the system's PDF viewer.
 
 ### Fixed
 
@@ -56,13 +63,6 @@ All notable changes to this project are documented here. The format follows
 - A GUI (Neovide, nvim-qt) started from a shell in kitty or Ghostty was taken for that terminal: the buffer was
   filled with placeholder characters it cannot draw. A GUI now gets the page's text, and `:checkhealth pdf-view` says
   that it cannot show pages.
-
-### Added
-
-- `f` opens a link to another PDF (a `/GoToR` action, as in document sets and papers that link to a supplement), or
-  to any file with one of the `extensions`, in a viewer in the same window, at the page or named destination it leads
-  to. A relative name is found next to the PDF with the link, and `<C-o>` comes back to it. The picker shows such a
-  link as `other.pdf, p. 3`. Before, the address went to `vim.ui.open()` and the system's PDF viewer.
 
 ### Security
 
