@@ -38,6 +38,9 @@ All notable changes to this project are documented here. The format follows
 - Text shown in place of a page (and other messages in the viewer) ran past the window's right edge when a word of
   double-width characters (Chinese, Japanese, Korean) was wider than the window. Such a word is now cut by its width
   on screen.
+- A session (`:mksession`) brought a viewer's window back as an empty buffer named after the PDF, and `:w!` there
+  emptied the PDF. The window is a viewer again now. Sessions saved without `blank` in `'sessionoptions'` leave the
+  window out, as the README now says.
 
 ### Security
 

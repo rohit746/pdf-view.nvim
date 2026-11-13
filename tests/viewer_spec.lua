@@ -2978,6 +2978,56 @@ describe("viewer robustness", function()
     setup()
   end)
 
+  it("comes back as a viewer from a session, and :w! there leaves the PDF alone", function()
+    local sessionoptions = vim.o.sessionoptions
+    for _, auto_open in ipairs({ true, false }) do
+      reset()
+      setup({ auto_open = auto_open })
+      local path = make("session", pages(4))
+      local original = slurp(path)
+      local notes = dir .. "/session-notes.txt"
+      vim.cmd.edit(vim.fn.fnameescape(notes))
+      vim.cmd("vsplit")
+      local buf = pdf_view.open(path)
+      local s = viewer.sessions[buf]
+      wait_for(function()
+        return s.slot ~= 0
+      end, "first render")
+      press("3G")
+      on_page(s, 3)
+      -- with `blank`, a `nofile` window is saved as `enew | file {pdf}`: an empty buffer, no BufReadCmd
+      vim.o.sessionoptions = "blank,buffers,curdir,folds,help,tabpages,winsize"
+      local file = dir .. "/Session.vim"
+      vim.cmd("mksession! " .. vim.fn.fnameescape(file))
+      vim.cmd("silent! only")
+      vim.cmd("silent! %bwipeout!")
+      vim.o.number = true -- the windows the session makes have it, until the viewer takes its window
+      vim.cmd("silent source " .. vim.fn.fnameescape(file))
+      vim.o.sessionoptions = sessionoptions
+
+      eq(2, #vim.api.nvim_tabpage_list_wins(0))
+      local again = viewer.sessions[vim.fn.bufnr(path)]
+      truthy(again, "the PDF's window is a viewer again (auto_open " .. tostring(auto_open) .. ")")
+      local win = vim.fn.bufwinid(again.buf)
+      eq("nofile", vim.bo[again.buf].buftype)
+      eq(false, vim.wo[win].number, "the viewer's window options")
+      eq(true, vim.wo[vim.fn.bufwinid(notes)].number)
+      wait_for(function()
+        return again.slot ~= 0 and again.job == nil
+      end, "the render of the restored viewer")
+      eq({ 3, 4 }, { again.page, again.count })
+      eq(nil, viewer.sessions[vim.fn.bufnr(notes)], "the other window is left alone")
+
+      vim.api.nvim_set_current_win(win)
+      local ok, err = pcall(vim.cmd, "silent write!")
+      eq(false, ok)
+      truthy(tostring(err):find("E382", 1, true), tostring(err))
+      eq(original, slurp(path), "the PDF is untouched")
+      vim.o.number = false
+    end
+    setup()
+  end)
+
   it("saves a copy of the PDF with :w {file}, never the placeholder text", function()
     reset()
     local path = make("write-copy", pages(2))

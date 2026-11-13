@@ -112,6 +112,10 @@ The viewer is a regular buffer named after the file, so buffer lists, `:bdelete`
 as usual. Its winbar shows `paper.pdf   3 / 11`; for a statusline use `require("pdf-view").status()` (`3 / 11`, with
 `width` and `x1.25` added while fitted to the width or zoomed).
 
+A session (`:mksession`, or a session plugin) brings the viewer back only when `'sessionoptions'` has `blank`, as it
+does by default. Without it the session leaves the viewer's window out; persistence.nvim with LazyVim's settings saves
+sessions this way. Add it with `vim.opt.sessionoptions:append("blank")`.
+
 A PDF opens where you left it: the page, fit and zoom of the last 100 PDFs are kept in
 `stdpath("state")/pdf-view/positions.json`, so this survives restarting Neovim. `remember_position = false` turns it
 off.

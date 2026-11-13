@@ -59,6 +59,25 @@ local function sync_handler()
   })
 end
 
+--- After `:source Session.vim`: a viewer's window comes back as an empty buffer named after the PDF (see
+--- `viewer.restore`). Make every such buffer shown in a window a viewer again.
+local function restore_session()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local path = vim.api.nvim_buf_get_name(buf)
+    if
+      path ~= ""
+      and vim.bo[buf].buftype == "" -- a viewer is `nofile`
+      and not vim.bo[buf].modified
+      and supported(path)
+      and vim.api.nvim_buf_line_count(buf) == 1
+      and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == ""
+    then
+      require("pdf-view.viewer").restore(buf)
+    end
+  end
+end
+
 --- Configure the plugin. Optional: the defaults are used when this is never called.
 ---@param opts? table see `PdfView.Config` in lua/pdf-view/config.lua
 function M.setup(opts)
@@ -121,6 +140,12 @@ function M._init()
   vim.api.nvim_create_user_command("PdfViewForward", function(args)
     M.forward_search({ pdf = args.fargs[1] })
   end, { nargs = "?", complete = "file", desc = "Show the cursor's line of the TeX source in its PDF (SyncTeX)" })
+  vim.api.nvim_clear_autocmds({ group = group, event = "SessionLoadPost" })
+  vim.api.nvim_create_autocmd("SessionLoadPost", {
+    group = group,
+    desc = "Bring back the PDF viewers of a session",
+    callback = restore_session,
+  })
   sync_handler()
 end
 
