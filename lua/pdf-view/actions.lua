@@ -1486,14 +1486,14 @@ ACTIONS.fit_content = {
 ACTIONS.rotate = {
   desc = "turn the pages clockwise ({count} quarter turns)",
   run = function(s)
-    rotate(s, 90 * vim.v.count1)
+    rotate(s, 90 * action_count1())
   end,
 }
 
 ACTIONS.rotate_back = {
   desc = "turn the pages counter-clockwise",
   run = function(s)
-    rotate(s, -90 * vim.v.count1)
+    rotate(s, -90 * action_count1())
   end,
 }
 
