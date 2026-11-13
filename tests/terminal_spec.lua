@@ -728,6 +728,69 @@ describe("terminal.check", function()
   end)
 end)
 
+--- Run `body` with `nvim_list_uis()` answering `uis`.
+---@param uis table[]
+---@param body fun()
+local function with_uis(uis, body)
+  local saved = vim.api.nvim_list_uis
+  vim.api.nvim_list_uis = function()
+    return uis
+  end
+  local ok, err = pcall(body)
+  vim.api.nvim_list_uis = saved
+  if not ok then
+    error(err, 0)
+  end
+end
+
+-- what a GUI attached with nvim_ui_attach() reports (Neovide, nvim-qt), and what the TUI does
+local GUI = { stdout_tty = false, stdin_tty = false, term_name = "" }
+local TUI = { stdout_tty = true, stdin_tty = true, term_name = "xterm-kitty" }
+
+describe("terminal.gui_only", function()
+  it("tells a GUI from the TUI by whether its stdout is a terminal", function()
+    with_uis({ GUI }, function()
+      eq(true, terminal.gui_only())
+      eq(nil, terminal.terminal_ui())
+    end)
+    with_uis({ TUI }, function()
+      eq(false, terminal.gui_only())
+      eq(TUI, terminal.terminal_ui())
+    end)
+    with_uis({ GUI, TUI }, function()
+      eq(false, terminal.gui_only(), "the terminal attached next to the GUI shows the pages")
+    end)
+    with_uis({}, function()
+      eq(false, terminal.gui_only(), "the TUI has not attached yet")
+    end)
+  end)
+
+  it("shows the page's text in a GUI started from kitty or Ghostty, whose environment it inherited", function()
+    with_terminal(function(written)
+      for _, vars in ipairs({
+        { TERM = "xterm-kitty", KITTY_WINDOW_ID = "1" },
+        { TERM = "xterm-ghostty", TERM_PROGRAM = "ghostty", GHOSTTY_RESOURCES_DIR = "/usr/share/ghostty" },
+      }) do
+        with_env(vars, function()
+          with_uis({ TUI }, function()
+            eq(true, (terminal.check()), "in the terminal itself")
+          end)
+          with_uis({ GUI }, function()
+            local ok, reason = terminal.check()
+            eq(false, ok)
+            eq(terminal.GUI_ONLY, reason)
+            truthy(reason:find("is not a terminal", 1, true), reason)
+            config.setup({ force = true })
+            eq(true, (terminal.check()), "`force = true` skips the check")
+            config.setup({})
+          end)
+        end)
+      end
+      eq({}, written, "nothing is sent to a GUI")
+    end)
+  end)
+end)
+
 describe("terminal.pane_offset", function()
   it("is 0, 0 outside tmux", function()
     local saved = vim.env.TMUX

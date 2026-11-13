@@ -292,13 +292,14 @@ local function set_zoom(s, zoom)
   show(s)
 end
 
---- Scroll a zoomed page by `steps` of `config.pan_step` windows. Returns whether the view moved.
+--- Scroll a zoomed page by `steps` of `fraction` windows. Returns whether the view moved.
 ---@param s PdfView.Session
 ---@param dx -1|0|1
 ---@param dy -1|0|1
 ---@param steps integer
+---@param fraction number of the window, per step
 ---@return boolean
-local function pan(s, dx, dy, steps)
+local function pan(s, dx, dy, steps, fraction)
   local win = uses_viewport(s) and s.geom and window_for(s)
   if not win then
     return false
@@ -323,7 +324,7 @@ local function pan(s, dx, dy, steps)
 
   local moved = false
   if dx ~= 0 and view.scroll_x then
-    local x = math.min(math.max(view.vx + dx * steps * config.options.pan_step * view.view_w, view.min_x), view.max_x)
+    local x = math.min(math.max(view.vx + dx * steps * fraction * view.view_w, view.min_x), view.max_x)
     if math.abs(x - view.vx) > 0.5 then
       s.cx, moved = (x + view.view_w / 2) / view.full_w, true
     end
@@ -335,7 +336,7 @@ local function pan(s, dx, dy, steps)
       top = s.page > 1 and -math.huge or top
       bottom = (s.last or s.page) < (s.count or 0) and math.huge or bottom
     end
-    local y = math.min(math.max(view.vy + dy * steps * config.options.pan_step * view.view_h, top), bottom)
+    local y = math.min(math.max(view.vy + dy * steps * fraction * view.view_h, top), bottom)
     if math.abs(y - view.vy) > 0.5 then
       s.cy, moved = (y + view.view_h / 2) / view.full_h, true
       s.scrolled = continuous or nil
@@ -349,9 +350,10 @@ end
 ---@param s PdfView.Session
 ---@param dx -1|0|1
 ---@param dy -1|0|1
-local function move(s, dx, dy)
+---@param fraction? number of the window per key press, `config.pan_step` by default
+local function move(s, dx, dy, fraction)
   local count = vim.v.count1
-  if pan(s, dx, dy, count) then
+  if pan(s, dx, dy, count, fraction or config.options.pan_step) then
     return show(s)
   end
   local forward = dx + dy > 0
@@ -381,6 +383,18 @@ local function wheel(s, dx, dy, lhs)
     return move(over, dx, dy)
   end
   vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+end
+
+--- Half a window down or up, as `move` does. The text shown instead of a page (a terminal that cannot show pages)
+--- scrolls as any text does with `<C-d>` and `<C-u>`.
+---@param s PdfView.Session
+---@param dy -1|1
+local function half(s, dy)
+  if s.page_text then
+    local count = vim.v.count > 0 and vim.v.count or ""
+    return vim.cmd("normal! " .. count .. vim.keycode(dy > 0 and "<C-d>" or "<C-u>"))
+  end
+  move(s, 0, dy, 0.5)
 end
 
 ---@param message string
@@ -520,6 +534,40 @@ local function step_match(s, reverse)
   if index then
     goto_match(s, index)
   end
+end
+
+--- Pick one of the matches of the search from a list of them, each with its page and line of text, and go to it as
+--- `n` would.
+---@param s PdfView.Session
+local function pick_match(s)
+  local found = s.search
+  if s.searching then
+    return notify(("still searching for `%s`"):format(s.searching))
+  end
+  if not found then
+    return notify("no search yet: press / to search")
+  end
+  local indices = {}
+  for index = 1, #found.matches do
+    indices[index] = index
+  end
+  local count = #found.matches .. (found.truncated and "+" or "")
+  vim.ui.select(indices, {
+    prompt = ("Matches for `%s` (%s)"):format(found.needle, count),
+    kind = "pdf-view.matches",
+    format_item = function(index)
+      return search.describe(found, index)
+    end,
+  }, function(index)
+    -- a picker that answers later leaves time to close the viewer, or to search again (or the file to change)
+    if not index or s.closed then
+      return
+    end
+    if s.search ~= found then
+      return notify("the search has changed since the list was shown: list its matches again")
+    end
+    goto_match(s, index)
+  end)
 end
 
 ---@param s PdfView.Session
@@ -925,9 +973,126 @@ local function open_address(uri)
   end
 end
 
---- Pick one of the links on the page on screen and follow it: a link into the document jumps to where it leads, any
---- other opens with `vim.ui.open()`, a web address or an e-mail right away, another address once the user agrees.
---- Facing pages offer the links of both.
+---@class PdfView.DocumentLink
+---@field name string the file as the link names it, decoded ("other.pdf")
+---@field path string the file, absolute: a relative name is resolved against the directory of the linking document
+---@field fragment? string where in the file it leads, with its `#` ("#page=3&view=Fit", "#nameddest=intro")
+---@field page? integer the page of `#page=N`
+---@field dest? string the name of `#nameddest=...`, decoded
+
+--- `%20` and the like decoded.
+---@param text string
+---@return string
+local function percent_decode(text)
+  return (text:gsub("%%(%x%x)", function(hex)
+    return string.char(tonumber(hex, 16))
+  end))
+end
+
+--- The document that the address `uri` of a link in the viewer `s` leads to, when the viewer can open it: a `file:`
+--- address, or one without a scheme, of a local file with one of the `extensions`. A link to another PDF (`/GoToR`)
+--- reaches here as `file:other.pdf#page=3&view=Fit`. Nil for any other address.
+---@param s PdfView.Session
+---@param uri string
+---@return PdfView.DocumentLink?
+local function document_link(s, uri)
+  local scheme = scheme_of(uri)
+  local rest = uri
+  if scheme == "file" then
+    rest = uri:sub(#"file:" + 1)
+    local host = rest:match("^//([^/]*)")
+    if host then
+      if host ~= "" and host:lower() ~= "localhost" then
+        return nil -- a file on another machine
+      end
+      rest = rest:sub(#host + 3)
+    end
+  elseif scheme then
+    return nil
+  end
+  local file, fragment = rest:match("^([^#]*)(#?.*)$")
+  local name = percent_decode(file)
+  if
+    name == ""
+    or not vim.tbl_contains(config.options.extensions, function(extension)
+      return extension:lower() == vim.fn.fnamemodify(name, ":e"):lower()
+    end, { predicate = true })
+  then
+    return nil
+  end
+  local base = vim.fn.fnamemodify(s.path, ":p:h")
+  local path = name:sub(1, 1) == "/" and name or vim.fs.joinpath(base, name)
+  ---@type PdfView.DocumentLink
+  local link = { name = name, path = vim.fs.normalize(path), fragment = #fragment > 1 and fragment or nil }
+  for param in fragment:sub(2):gmatch("[^&]+") do
+    local key, value = param:match("^([^=]*)=(.*)$")
+    if key == "page" then
+      link.page = tonumber(value:match("^%d+$"))
+    elseif key == "nameddest" then
+      link.dest = percent_decode(value)
+    end
+  end
+  return link
+end
+
+--- How the picker shows where a link to another document leads: "other.pdf, p. 3".
+---@param link PdfView.DocumentLink
+---@return string
+local function document_label(link)
+  if link.page then
+    return ("%s, p. %d"):format(link.name, link.page)
+  end
+  return link.dest and ("%s, %s"):format(link.name, link.dest) or link.name
+end
+
+--- Follow a link from the viewer `s` to another document: open it in a viewer in the same window, at the page it leads
+--- to. `<C-o>` past the start of the new viewer's jump list comes back to `s`, through Vim's jump list.
+---@param s PdfView.Session
+---@param link PdfView.DocumentLink
+local function open_document(s, link)
+  local real = vim.uv.fs_realpath(link.path)
+  local stat = real and vim.uv.fs_stat(real)
+  if not stat or stat.type ~= "file" then
+    return notify(("cannot read %s"):format(vim.fn.fnamemodify(link.path, ":~:.")), vim.log.levels.WARN)
+  end
+  local target = s
+  if real ~= (vim.uv.fs_realpath(s.path) or s.path) then
+    local win = window_for(s)
+    if win and win ~= vim.api.nvim_get_current_win() then
+      vim.api.nvim_set_current_win(win)
+    end
+    vim.cmd("normal! m'") -- `<C-o>` comes back here
+    local ok, buf = pcall(require("pdf-view.viewer").open, link.path)
+    if not ok then
+      return notify(tostring(buf), vim.log.levels.WARN)
+    end
+    target = session.sessions[buf]
+  end
+  if not link.fragment or not target then
+    return
+  end
+  mupdf.destination(target.path, link.fragment, function(err, dest)
+    if target.closed then
+      return
+    end
+    if err then
+      if not mupdf.password_error(err) then -- the viewer asks for the password itself
+        notify(("cannot follow the link to %s: %s"):format(link.name, err), vim.log.levels.WARN)
+      end
+      return
+    end
+    if not dest then
+      return notify(("%s has no %s"):format(link.name, link.fragment), vim.log.levels.WARN)
+    end
+    -- in the same document a jump, so `<C-o>` comes back; a new viewer's first page is not one
+    go(target, dest.page, anchor_at(target, dest.page, dest.x, dest.y), target == s)
+  end)
+end
+
+--- Pick one of the links on the page on screen and follow it: a link into the document jumps to where it leads, a link
+--- to another document that the viewer opens (a PDF) opens it in this window at the page it leads to, any other opens
+--- with `vim.ui.open()`, a web address or an e-mail right away, another address once the user agrees. Facing pages
+--- offer the links of both.
 ---@param s PdfView.Session
 local function follow_link(s)
   local label = pages_on_screen(s)
@@ -945,7 +1110,8 @@ local function follow_link(s)
     vim.ui.select(links, {
       prompt = "Links",
       format_item = function(link)
-        local target = link.page and ("p. %d"):format(link.page) or link.uri
+        local document = link.uri and document_link(s, link.uri)
+        local target = link.page and ("p. %d"):format(link.page) or document and document_label(document) or link.uri
         return link.text ~= "" and ("%s  (%s)"):format(link.text, target) or target
       end,
     }, function(link)
@@ -954,6 +1120,11 @@ local function follow_link(s)
       end
       if link.page then
         return go(s, link.page, anchor_at(s, link.page, link.x, link.y), true)
+      end
+      -- before `link_schemes`: a document the viewer opens itself starts no program, so it needs no question
+      local document = document_link(s, link.uri)
+      if document then
+        return open_document(s, document)
       end
       open_address(link.uri)
     end)
@@ -1082,6 +1253,8 @@ end
 local ACTION_ORDER = {
   "down",
   "up",
+  "half_down",
+  "half_up",
   "right",
   "left",
   "scroll_down",
@@ -1103,6 +1276,7 @@ local ACTION_ORDER = {
   "search_next",
   "search_prev",
   "search_clear",
+  "search_list",
   "outline",
   "follow_link",
   "yank_text",
@@ -1133,6 +1307,20 @@ ACTIONS.up = {
   desc = "scroll up, or previous page",
   run = function(s)
     move(s, 0, -1)
+  end,
+}
+
+ACTIONS.half_down = {
+  desc = "scroll down half a window, or next page ({count} halves)",
+  run = function(s)
+    half(s, 1)
+  end,
+}
+
+ACTIONS.half_up = {
+  desc = "scroll up half a window, or previous page",
+  run = function(s)
+    half(s, -1)
   end,
 }
 
@@ -1279,6 +1467,11 @@ ACTIONS.search_prev = {
 ACTIONS.search_clear = {
   desc = "remove the search highlights",
   run = clear_search,
+}
+
+ACTIONS.search_list = {
+  desc = "list the matches of the search, with their text, and go to one",
+  run = pick_match,
 }
 
 ACTIONS.outline = {

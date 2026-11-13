@@ -85,6 +85,30 @@ function M.ui_attached()
   return #vim.api.nvim_list_uis() > 0
 end
 
+--- The attached UI that draws on a terminal: the built-in TUI, or `nvim --remote-ui`. Nil when none does, as when only
+--- a GUI (Neovide, nvim-qt, any front end attached over RPC) or no UI at all is attached. Neovim tells them apart the
+--- same way: a terminal UI says its stdout is a tty.
+---@return table?
+function M.terminal_ui()
+  for _, ui in ipairs(vim.api.nvim_list_uis()) do
+    if ui.stdout_tty then
+      return ui
+    end
+  end
+  return nil
+end
+
+--- Whether the UIs attached are all GUIs. A GUI started from a shell in kitty or Ghostty inherits its $TERM and the
+--- variables `detect()` reads, but draws neither the images nor the placeholder text. False when no UI is attached:
+--- then the TUI has not attached yet.
+---@return boolean
+function M.gui_only()
+  return #vim.api.nvim_list_uis() > 0 and M.terminal_ui() == nil
+end
+
+M.GUI_ONLY = "pdf-view: this Neovim UI is not a terminal, so it cannot show pages. "
+  .. "Open the PDF in Neovim running in a terminal that shows images (kitty, Ghostty, WezTerm, ...)."
+
 ---@param cmd string[]
 ---@return string?
 local function capture(cmd)
@@ -480,11 +504,14 @@ end
 --- A terminal without Unicode placeholders gets positioned placements, which need nothing but Kitty graphics: it is
 --- asked whether it has them, as is an unrecognised terminal when `placement = "positioned"` is set. A terminal that
 --- draws sixel images is asked whether it does (xterm does only as a VT340), and so is an unrecognised one, which then
---- gets sixel.
+--- gets sixel. A GUI is not a terminal, whatever the environment it inherited says (see `gui_only()`).
 ---@return boolean?, string?
 function M.check()
   if config.options.force then
     return true
+  end
+  if M.gui_only() then
+    return false, M.GUI_ONLY -- the environment may name a terminal, but it is the one the GUI was started from
   end
   local found = M.detect()
   if M.needs_da1() then

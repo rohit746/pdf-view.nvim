@@ -405,6 +405,22 @@ function M.release(path)
   end
 end
 
+--- Stop the worker process of `path` if it is idle, freeing the parsed document. Unlike `release()`, the layout is
+--- kept, and the next request starts another process.
+---@param path string
+---@return boolean busy the worker is working on a request or has some waiting, so it was left running
+function M.stop_idle(path)
+  local w = workers[path]
+  if not w then
+    return false
+  end
+  if #w.queue > 0 or (w.process and w.process.current) then
+    return true
+  end
+  stop(w, "mutool was killed (signal 15)")
+  return false
+end
+
 --- Unlock `path` with `password` from the next request on; nil forgets it. It is kept until Neovim exits, also after
 --- `release()`, so that the document opens again without asking.
 ---@param path string
@@ -652,7 +668,7 @@ end
 ---@field page? integer 1-based page of the document it leads to
 ---@field x? number where on that page it leads, as a fraction of the page's width from its left edge, when it says
 ---@field y? number the same as a fraction of the page's height from its top edge
----@field uri? string where it leads otherwise: a web address, an e-mail
+---@field uri? string where it leads otherwise: a web address, an e-mail, another document (`file:other.pdf#page=3`)
 
 --- The links on one page, top to bottom, then left to right. Links that lead nowhere are left out.
 ---@param path string
@@ -669,6 +685,30 @@ function M.links(path, page, cb)
       return cb("could not read the links of the page")
     end
     cb(nil, links)
+  end)
+end
+
+---@class PdfView.Destination
+---@field page integer 1-based page of the document
+---@field x? number where on that page, as a fraction of the page's width from its left edge, when it says
+---@field y? number the same as a fraction of the page's height from its top edge
+
+--- Where the fragment of a link from another document leads in `path`: `#page=3&view=Fit`, `#nameddest=intro`. Nil
+--- (without an error) when it leads to no page of the document.
+---@param path string
+---@param fragment string with its `#`
+---@param cb fun(err?: string, dest?: PdfView.Destination)
+---@return PdfView.Job
+function M.destination(path, fragment, cb)
+  return ask(path, { "dest", fragment }, function(err, result)
+    if err then
+      return cb(err)
+    end
+    local ok, dest = pcall(vim.json.decode, result or "")
+    if not ok or (dest ~= vim.NIL and type(dest) ~= "table") then
+      return cb("could not read where the link leads")
+    end
+    cb(nil, dest ~= vim.NIL and dest or nil)
   end)
 end
 

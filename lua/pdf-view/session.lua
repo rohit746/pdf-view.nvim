@@ -112,6 +112,7 @@ local NO_HIGHLIGHT = "PdfViewNone"
 --- edges, into the pages next to it; a jump or a change of fit or zoom keeps it inside the page again
 ---@field last? integer the last page on screen: `page` + 1 when two facing pages are, else `page`
 ---@field parts? PdfView.SheetLayout[] where the pages on screen lie in `geom`, when there are two side by side
+---@field worker_timer? uv.uv_timer_t stops the mutool worker once the viewer has been in no window for a while
 ---@field closed boolean
 
 ---@type table<integer, PdfView.Session>
@@ -535,6 +536,11 @@ local function destroy(s)
   end
   if s.search_job then
     s.search_job:kill(15)
+  end
+  if s.worker_timer then
+    s.worker_timer:stop()
+    s.worker_timer:close()
+    s.worker_timer = nil
   end
   mupdf.release(s.path)
   if s.watcher then

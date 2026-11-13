@@ -274,6 +274,42 @@ describe("viewer", function()
     truthy(next(s.images), "the images kept")
   end)
 
+  it("stops the mutool worker of a viewer that has been in no window for a while", function()
+    reset()
+    local stop_worker_after = viewer.stop_worker_after
+    viewer.stop_worker_after = 1000
+    local first = open(make("idle-1", pages(3)))
+    local second = open(make("idle-2", pages(2)))
+    truthy(mupdf.has_worker(first.path) and mupdf.has_worker(second.path), "both workers running")
+
+    -- `first` is shown again before the delay, and `second` is hidden after it was
+    vim.cmd.buffer(first.buf)
+    wait_for(function()
+      return not mupdf.has_worker(second.path)
+    end, "the worker of the hidden viewer stopped")
+    truthy(mupdf.has_worker(first.path), "the worker of a viewer hidden only briefly is kept")
+
+    vim.cmd.enew()
+    vim.wait(100)
+    truthy(mupdf.has_worker(first.path), "not stopped right away")
+    wait_for(function()
+      return not mupdf.has_worker(first.path)
+    end, "the worker stopped")
+
+    -- shown again: the page comes from the render cache, and the next page starts another worker
+    writes = {}
+    vim.cmd.buffer(first.buf)
+    wait_for(function()
+      return #transmitted() == 1
+    end, "the page sent again")
+    vim.wait(100)
+    eq(false, mupdf.has_worker(first.path), "the page on screen needed no worker")
+    viewer.stop_worker_after = stop_worker_after
+    press("G") -- page 2 was drawn ahead of time, page 3 was not
+    on_page(first, 3)
+    truthy(mupdf.has_worker(first.path), "a page not drawn yet started another worker")
+  end)
+
   it("follows the file when it changes on disk and keeps the current page", function()
     reset()
     local path = make("live", pages(2))
@@ -638,6 +674,48 @@ describe("viewer zoom", function()
     eq(2, s.page)
     truthy(steps >= 4, "reaching the bottom took several scrolls, not one: " .. steps)
     truthy(s.cy < 0.3, "the next page starts at its top, cy = " .. s.cy)
+  end)
+
+  it("scrolls half a window with <C-d> and <C-u>, and turns the page at the edge", function()
+    reset()
+    local s = open(make("half-window", pages(3)))
+    press(vim.keycode("<C-d>")) -- not zoomed: a page turn
+    on_page(s, 2)
+    press(vim.keycode("<C-u>"))
+    on_page(s, 1)
+
+    press("w")
+    settle(s)
+    local top = s.cy
+    press("j")
+    settle(s)
+    local step = s.cy - top
+    truthy(step > 0, "j scrolled, cy = " .. s.cy)
+    press("k")
+    settle(s)
+    harness.near(top, s.cy, 1e-9)
+    press(vim.keycode("<C-d>"))
+    settle(s)
+    eq(1, s.page)
+    harness.near(2.5 * step, s.cy - top, 1e-6, "half a window is 2.5 pan steps")
+    press(vim.keycode("<C-u>"))
+    settle(s)
+    harness.near(top, s.cy, 1e-9)
+    press(vim.keycode("2<C-d>"))
+    settle(s)
+    harness.near(5 * step, s.cy - top, 1e-6, "a count of halves")
+
+    local presses = 1
+    while s.page == 1 and presses < 20 do
+      press(vim.keycode("<C-d>"))
+      settle(s)
+      presses = presses + 1
+    end
+    eq(2, s.page)
+    truthy(s.cy < 0.3, "the next page starts at its top, cy = " .. s.cy)
+    press(vim.keycode("<C-u>"))
+    on_page(s, 1)
+    truthy(s.cy > 0.7, "the previous page is shown from its bottom, cy = " .. s.cy)
   end)
 
   it("keeps the worker when a zoomed page is scrolled faster than it renders", function()
@@ -1338,6 +1416,69 @@ describe("viewer search", function()
     eq(nil, s.search)
     truthy(notes[1] and notes[1]:find("no matches for `zzzz`", 1, true), vim.inspect(notes))
     eq("white", classify(colour_at({ rects = { { 20, 395, 0, 0 } }, width = 612, height = 792 })), "no highlight left")
+  end)
+
+  it("lists the matches with their page and text with g/, and goes to the chosen one as a jump", function()
+    reset()
+    local s = open(search_doc("list"))
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    eq(1, s.page)
+    local offered
+    with_stub(vim.ui, "select", function(items, opts, callback)
+      offered = { items = items, opts = opts }
+      callback(items[3])
+    end, function()
+      press("g/")
+    end)
+    searched(s)
+    eq(3, #offered.items)
+    eq("Matches for `alpha` (3)", offered.opts.prompt)
+    eq("p. 1  alpha beta alpha", offered.opts.format_item(offered.items[1]))
+    eq("p. 3  gamma alpha", offered.opts.format_item(offered.items[3]))
+    eq({ 3, 3 }, { s.search.current, s.page })
+    truthy(vim.wo.winbar:find("/alpha 3/3", 1, true), vim.wo.winbar)
+    press(vim.api.nvim_replace_termcodes("<C-o>", true, false, true))
+    on_page(s, 1)
+  end)
+
+  it("explains g/ without a search, and ignores a cancelled or outdated choice", function()
+    reset()
+    local s = open(search_doc("list-none"))
+    local notes = {}
+    with_stub(vim, "notify", function(message)
+      notes[#notes + 1] = message
+    end, function()
+      press("g/")
+    end)
+    truthy(notes[1] and notes[1]:find("press /", 1, true), vim.inspect(notes))
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    with_stub(vim.ui, "select", function(_, _, callback)
+      callback(nil)
+    end, function()
+      press("g/")
+    end)
+    eq({ 1, 1 }, { s.search.current, s.page }, "a cancelled pick goes nowhere")
+    local pick
+    with_stub(vim.ui, "select", function(items, _, callback)
+      pick = function()
+        callback(items[3])
+      end
+    end, function()
+      press("g/")
+    end)
+    press(vim.api.nvim_replace_termcodes("<Esc>", true, false, true))
+    notes = {}
+    with_stub(vim, "notify", function(message)
+      notes[#notes + 1] = message
+    end, pick)
+    eq({ nil, 1 }, { s.search, s.page }, "the search was cleared before the choice")
+    truthy(notes[1] and notes[1]:find("search has changed", 1, true), vim.inspect(notes))
   end)
 
   it("explains n without a search", function()
@@ -2108,6 +2249,165 @@ describe("viewer links", function()
     if not ok then
       error(err, 0)
     end
+  end)
+
+  --- A PDF in `docs/` with three pages and the named destination `intro` (page 2, 400 points from its bottom), and a
+  --- page that links to it: to its page 3 (a /GoToR action), to `intro`, to the file alone, to a page it does not
+  --- have; then to a file that is not there, to a PDF on another machine, and to its own page 2 by its file name.
+  ---@return string source, string other
+  local function documents(name)
+    vim.fn.mkdir(dir .. "/docs", "p")
+    local relative = "docs/" .. name .. " other.pdf"
+    local other = dir .. "/" .. relative
+    fixture.write(other, pages(3), { dests = { intro = { title = "", page = 2, top = 400 } } })
+    local encoded = relative:gsub(" ", "%%20")
+    local source = make(name, {
+      vim.tbl_extend("force", LETTER, {
+        links = {
+          { rect = { 70, 740, 250, 760 }, action = ("<< /S /GoToR /F (%s) /D [2 /Fit] >>"):format(relative) },
+          { rect = { 70, 640, 250, 660 }, action = ("<< /S /GoToR /F (%s) /D (intro) >>"):format(relative) },
+          { rect = { 70, 540, 250, 560 }, uri = "file:" .. encoded },
+          { rect = { 70, 440, 250, 460 }, uri = "file:" .. encoded .. "#page=9" },
+          { rect = { 70, 340, 250, 360 }, uri = "file:docs/missing.pdf#page=2" },
+          { rect = { 70, 240, 250, 260 }, uri = "file://example.com/" .. encoded },
+          { rect = { 70, 140, 250, 160 }, action = ("<< /S /GoToR /F (%s.pdf) /D [1 /Fit] >>"):format(name) },
+        },
+      }),
+      LETTER,
+    })
+    return source, other
+  end
+
+  --- Follow the link the picker offers first that `choose` accepts, as `follow_answering` does, and wait for a
+  --- notification.
+  ---@return string[] asked, string[] opened, string[] notes
+  local function follow_noting(choose)
+    local notes = {}
+    local asked, opened
+    with_stub(vim, "notify", function(message)
+      notes[#notes + 1] = message
+    end, function()
+      asked, opened = follow_answering(2, choose)
+      wait_for(function()
+        return #notes > 0
+      end, "the notification")
+    end)
+    return asked, opened, notes
+  end
+
+  it("shows a link to another PDF as the file and the page or name it leads to", function()
+    reset()
+    local source = documents("links-labels")
+    open(source)
+    local offered = follow(function()
+      return nil
+    end)
+    local labels = vim.tbl_map(offered.opts.format_item, offered.items)
+    eq("docs/links-labels other.pdf, p. 3", labels[1])
+    eq("docs/links-labels other.pdf, intro", labels[2])
+    eq("docs/links-labels other.pdf", labels[3])
+    eq("docs/links-labels other.pdf, p. 9", labels[4])
+  end)
+
+  it("opens a link to another PDF in a viewer in this window, at its page, and <C-o> comes back", function()
+    reset()
+    local source, other = documents("links-other")
+    local s = open(source)
+    local win = vim.api.nvim_get_current_win()
+    local asked, opened = follow_answering(2, by_uri("#page=3"))
+    eq({}, asked, "no question for a document the viewer opens")
+    eq({}, opened)
+    eq(win, vim.api.nvim_get_current_win())
+    local buf = vim.api.nvim_get_current_buf()
+    eq(vim.fn.resolve(other), vim.fn.resolve(vim.api.nvim_buf_get_name(buf)), "resolved against the PDF's directory")
+    local t = viewer.sessions[buf]
+    truthy(t, "the other PDF is in a viewer")
+    truthy(vim.bo[buf].buflisted, "listed, as :edit lists it")
+    on_page(t, 3)
+    press(vim.keycode("<C-o>"))
+    eq(s.buf, vim.api.nvim_get_current_buf(), "<C-o> goes back to the PDF with the link")
+    eq(s, viewer.sessions[s.buf])
+    eq(1, s.page)
+    press(vim.keycode("<C-i>"))
+    eq(buf, vim.api.nvim_get_current_buf(), "<C-i> goes forward to the other PDF again")
+    on_page(t, 3)
+  end)
+
+  it("opens a link to a named destination of another PDF at its page", function()
+    reset()
+    local source = documents("links-named")
+    local s = open(source)
+    local asked = follow_answering(2, by_uri("#nameddest=intro"))
+    eq({}, asked)
+    local t = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(t and t ~= s, "the other PDF is in a viewer")
+    on_page(t, 2)
+  end)
+
+  it("opens a link to another PDF without a page where its viewer starts", function()
+    reset()
+    local source, other = documents("links-whole")
+    open(source)
+    local asked, opened = follow_answering(2, function(items)
+      for _, item in ipairs(items) do
+        if item.uri and item.uri:find("other%.pdf$") then
+          return item
+        end
+      end
+    end)
+    eq({}, asked)
+    eq({}, opened)
+    local t = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(t, "the other PDF is in a viewer")
+    eq(vim.fn.resolve(other), vim.fn.resolve(t.path))
+    on_page(t, 1)
+  end)
+
+  it("says so when the other PDF has no such page, and keeps it open", function()
+    reset()
+    local source = documents("links-nowhere")
+    open(source)
+    local asked, opened, notes = follow_noting(by_uri("#page=9"))
+    eq({}, asked)
+    eq({}, opened)
+    local t = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(t, "the other PDF is in a viewer")
+    truthy(notes[1]:find("has no #page=9", 1, true), vim.inspect(notes))
+    on_page(t, 1)
+  end)
+
+  it("says so when the other PDF is not there, without asking or opening anything", function()
+    reset()
+    local source = documents("links-missing")
+    local s = open(source)
+    local asked, opened, notes = follow_noting(by_uri("missing%.pdf"))
+    eq({}, asked)
+    eq({}, opened)
+    eq(s.buf, vim.api.nvim_get_current_buf())
+    truthy(notes[1] and notes[1]:find("cannot read", 1, true), vim.inspect(notes))
+  end)
+
+  it("still asks before opening a PDF on another machine", function()
+    reset()
+    local source = documents("links-remote")
+    local s = open(source)
+    local asked, opened = follow_answering(2, by_uri("^file://example%.com/"))
+    eq(1, #asked)
+    eq({}, opened)
+    eq(s.buf, vim.api.nvim_get_current_buf())
+  end)
+
+  it("follows a link to its own file name as a jump in the same viewer", function()
+    reset()
+    local source = documents("links-self")
+    local s = open(source)
+    local asked, opened = follow_answering(2, by_uri("links%-self%.pdf"))
+    eq({}, asked)
+    eq({}, opened)
+    eq(s.buf, vim.api.nvim_get_current_buf())
+    on_page(s, 2)
+    press(vim.keycode("<C-o>"))
+    on_page(s, 1)
   end)
 
   it("does nothing when the picker is cancelled", function()
@@ -5086,6 +5386,22 @@ describe("viewer continuous scrolling", function()
     settle(s)
     eq(1, s.page)
     eq({ RGB[1], RGB[1] }, ends(s))
+    setup()
+  end)
+
+  it("scrolls half windows on into the next page", function()
+    setup({ continuous = true })
+    reset()
+    local s = open(coloured("continuous-half"))
+    press("w")
+    settle(s)
+    until_done(s, vim.keycode("<C-d>"), function()
+      return s.page == 2
+    end, 20)
+    truthy(s.scrolled, "scrolled into the page, not turned to it")
+    until_done(s, vim.keycode("<C-u>"), function()
+      return s.page == 1
+    end, 20)
     setup()
   end)
 
