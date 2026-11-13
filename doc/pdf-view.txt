@@ -179,12 +179,20 @@ with the point the bookmark leads to at the top of the window.
 under each and where it leads, through |vim.ui.select()|. A link to a page
 of the document goes there (a jump, so `<C-o>` comes back), with the point
 it leads to at the top of the window when the page is zoomed or fitted to
-its width; a web address or an e-mail opens with |vim.ui.open()|. Any
-other address, such as a `file:` address or a PDF's Launch action, could
-start a program, so `f` shows it in full and asks before opening it. The
-`link_schemes` option lists the schemes that open without asking
-(`http`, `https` and `mailto` by default, matched ignoring case). A page
-without links says so.
+its width; a web address or an e-mail opens with |vim.ui.open()|.
+
+A link to another PDF (a `/GoToR` action), or to any file with one of the
+`extensions`, opens it in a viewer in the same window, at the page or the
+named destination it leads to. A relative name is found in the directory
+of the PDF with the link. The picker shows such a link as
+`other.pdf, p. 3`, and `<C-o>` comes back through Vim's |jumplist|. A file
+that is not there only says so.
+
+Any other address, such as another `file:` address or a PDF's Launch
+action, could start a program, so `f` shows it in full and asks before
+opening it. The `link_schemes` option lists the schemes that open without
+asking (`http`, `https` and `mailto` by default, matched ignoring case). A
+page without links says so.
 
                                                               *pdf-view-text*
 `y` yanks the text of the page on screen into the register given (`"+y` for
@@ -396,6 +404,11 @@ In a terminal that can show no images, the viewer says why at the top of the
 window and shows the text of the page under it. The page keys turn the pages,
 and `<C-e>`, `<C-y>`, `<C-d>` and `<C-u>` scroll a page's text that is taller
 than the window.
+
+A GUI (Neovide, nvim-qt, any front end that attaches over RPC) draws no
+images either, and it gets the text too, even when it was started from a shell
+in kitty or Ghostty and inherited that terminal's `$TERM`. Neovim with the
+TUI, or `nvim --remote-ui`, in such a terminal shows the pages.
 
 ==============================================================================
 ZELLIJ                                                     *pdf-view-zellij*
