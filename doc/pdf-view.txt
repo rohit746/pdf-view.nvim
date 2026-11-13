@@ -63,8 +63,8 @@ has "blank", as it does by default. Without it the session leaves the
 viewer's window out.
 
                                                               *pdf-view-keys*
-All keys are buffer-local and normal mode. The keys that move, zoom or step
-between matches accept a count.
+All keys are buffer-local and normal mode, except the mouse wheel (below).
+The keys that move, zoom or step between matches accept a count.
 
   j <Down>                scroll down; at the bottom edge, or when not zoomed,
                           next page ({count} times)
@@ -74,8 +74,8 @@ between matches accept a count.
                           zoomed, next page
   h <Left>                scroll left; at the left edge, or when not zoomed,
                           previous page
-  <ScrollWheelDown> etc.  like j k l h, while a viewer has focus: moves the
-                          viewer under the mouse (keymaps `scroll_down`,
+  <ScrollWheelDown> etc.  like j k l h in the viewer under the mouse,
+                          wherever the cursor is (keymaps `scroll_down`,
                           `scroll_up`, `scroll_right`, `scroll_left`)
   <PageDown> <C-f>        next page, always ({count} pages ahead)
   <PageUp> <BS> <C-b>     previous page, always
@@ -112,6 +112,12 @@ between matches accept a count.
   r                       re-render the current page
   q                       close the viewer
   g?                      show the keys
+
+While a viewer is open, the wheel keys are also mapped globally in normal and
+insert mode, so the wheel moves the PDF next to the source without leaving it.
+Over any other window the wheel scrolls that window as before. A wheel key
+mapped by the user is left alone, an empty list (`scroll_down = {}`) leaves
+that key to Neovim, and the mappings are removed when the last viewer closes.
 
                                                               *pdf-view-zoom*
 Zoom 1 is the whole page fitted to the window; each `+` (see |pdf-view-keys|)
