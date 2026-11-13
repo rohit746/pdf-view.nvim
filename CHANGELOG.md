@@ -32,6 +32,12 @@ All notable changes to this project are documented here. The format follows
   live reload does it: the search is repeated, an old forward search highlight is dropped, and a file still being
   written keeps the old page on screen and is tried again instead of showing an error.
 
+### Security
+
+- `f` opened every link that does not lead into the document with `vim.ui.open()`, including `file:` addresses and
+  PDF Launch actions, which can start a program on the reader's machine. It now asks first, showing the whole address,
+  for any address whose scheme is not in the new `link_schemes` option (`http`, `https` and `mailto` by default).
+
 ## [0.7.0] - 2026-11-09
 
 ### Fixed

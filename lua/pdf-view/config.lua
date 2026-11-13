@@ -67,6 +67,8 @@ local M = {}
 ---@field max_zoom number largest zoom, relative to the fit-to-window size
 ---@field pan_step number how far one scroll key moves, as a fraction of the window (0 to 1]
 ---@field search_limit integer stop collecting matches after this many
+---@field link_schemes string[] the schemes of the addresses that `f` opens with `vim.ui.open()` without asking, matched
+--- ignoring case. Any other address (a `file:` address, a PDF's Launch action) can start a program, so `f` asks first
 ---@field text_scale number size of the text of reflowable documents (EPUB, FB2, MOBI), which are laid out to fit the
 --- window, relative to the terminal's text
 ---@field highlight { match: string, current: string } `#rrggbb` colours multiplied onto search matches
@@ -100,6 +102,7 @@ local defaults = {
   max_zoom = 8,
   pan_step = 0.2,
   search_limit = 5000,
+  link_schemes = { "http", "https", "mailto" },
   text_scale = 1,
   highlight = { match = "#ffe14d", current = "#ff8c1a" },
   recolor = "off",
@@ -235,6 +238,14 @@ local function validate(opts)
     for _, extension in ipairs(opts.extensions) do
       if not extension:match("^%w+$") then
         fail("extensions", 'extensions without the dot, like { "pdf", "cbz" }', extension)
+      end
+    end
+  end
+  if opts.link_schemes ~= nil then
+    check_string_list("link_schemes", opts.link_schemes)
+    for _, scheme in ipairs(opts.link_schemes) do
+      if not scheme:match("^%a[%w+.-]*$") then
+        fail("link_schemes", 'schemes without the colon, like { "https", "mailto" }', scheme)
       end
     end
   end

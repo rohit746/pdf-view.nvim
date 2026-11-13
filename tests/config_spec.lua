@@ -113,6 +113,18 @@ describe("config", function()
     rejects({ extensions = { "p*" } }, "`extensions`")
   end)
 
+  it("opens web addresses and e-mails without asking by default and replaces the list", function()
+    eq({ "http", "https", "mailto" }, config.setup().link_schemes)
+    eq({ "https", "file" }, config.setup({ link_schemes = { "https", "file" } }).link_schemes)
+    eq({}, config.setup({ link_schemes = {} }).link_schemes)
+  end)
+
+  it("rejects bad link schemes", function()
+    rejects({ link_schemes = "https" }, "`link_schemes`")
+    rejects({ link_schemes = { "https:" } }, "`link_schemes`")
+    rejects({ link_schemes = { "" } }, "`link_schemes`")
+  end)
+
   it("rejects an unknown transmission mode", function()
     rejects({ transmission = "carrier-pigeon" }, "`transmission`")
   end)
