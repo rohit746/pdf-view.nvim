@@ -335,6 +335,7 @@ local function sheet_of(s, stamp, first, last, content, track, cb)
       infos[#infos + 1] = known
       return step(page + 1)
     end
+    session.use_layout(s)
     track(mupdf.info(s.path, page, function(err, info)
       if err or not info then
         return cb(err or "mutool returned no page information")
@@ -388,6 +389,7 @@ local function start_render(s, key, render, done)
     end,
   }
   s.rendering[key] = entry
+  session.use_layout(s)
   entry.job = render(out, function(err)
     if s.rendering[key] == entry then
       s.rendering[key] = nil
@@ -674,6 +676,7 @@ local function show_text_instead(s, win, page, reason)
     end
     display_message(s, win, reason)
   end
+  session.use_layout(s)
   s.job = mupdf.info(s.path, page or s.target or s.page, function(err, info)
     if gen ~= s.gen then
       return
@@ -682,6 +685,7 @@ local function show_text_instead(s, win, page, reason)
     if err or not info then
       return fail(err)
     end
+    session.use_layout(s)
     s.job = mupdf.text(s.path, info.page, function(text_err, text)
       if gen ~= s.gen then
         return
@@ -790,6 +794,7 @@ local function show(s, page, opts)
   -- a reflowable document is laid out to fill the window; other documents ignore this
   local reflow = layout.reflow(cols, rows, cell.w, cell.h, config.options.text_scale)
   local reflow_key = table.concat(reflow, "x")
+  s.reflow = reflow
   mupdf.set_layout(s.path, reflow)
 
   local function fail(message)

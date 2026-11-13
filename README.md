@@ -116,6 +116,13 @@ A session (`:mksession`, or a session plugin) brings the viewer back only when `
 does by default. Without it the session leaves the viewer's window out; persistence.nvim with LazyVim's settings saves
 sessions this way. Add it with `vim.opt.sessionoptions:append("blank")`.
 
+Split a viewer (`:split`, `:vsplit`, `<C-w>v`) to read two pages of one PDF at once, such as a figure and the text
+about it: each window turns its pages, fits and zooms on its own. The new window starts where the viewer was, with its
+search, jump list and marks, in a view of its own: an unlisted buffer named `pdf-view://2//path/to/paper.pdf`, which
+goes away with its window. A window that switches to a PDF already on screen in another (`:b`, `:PdfView`) gets one
+too. The window that showed the PDF first keeps the viewer's own buffer. Floating windows, such as a picker's preview,
+show the same page as the viewer.
+
 A PDF opens where you left it: the page, fit, zoom and rotation of the last 100 PDFs are kept in
 `stdpath("state")/pdf-view/positions.json`, so this survives restarting Neovim. `remember_position = false` turns it
 off.
@@ -310,6 +317,7 @@ opened from.
 
 `m{a-z}` marks where the viewer is: the page, its fit, zoom, rotation and the centre of the view. `'{a-z}` or
 `` `{a-z} `` goes back to it, as it was. Marks and the jump list belong to the viewer, and they stay through `:edit`.
+A split's view of its own starts with a copy of them.
 
 ### SyncTeX
 
@@ -319,7 +327,8 @@ TeX Live and MiKTeX install:
 
 - `:PdfViewForward` in a `.tex` buffer (forward search) shows where the cursor's line is typeset: the page, with the
   line highlighted and, on a zoomed or width-fitted page, in the middle of the window. The cursor stays in the
-  source, and a PDF that is in no window opens in a split next to it. The PDF is vimtex's, else one open in a viewer
+  source, and a PDF that is in no window opens in a split next to it. Of several windows on the PDF, the one used last
+  moves. The PDF is vimtex's, else one open in a viewer
   whose SyncTeX data has the file, else the PDF named after the file; `:PdfViewForward {file.pdf}` names it. `<Esc>`
   in the viewer removes the highlight. It is a jump, so `<C-o>` in the viewer goes back.
 - Double-click a point of a page (inverse search) to open the source at the line it was typeset from: in a window that
@@ -461,7 +470,8 @@ taken away while its window is hidden or in another tab page, and put back after
   `config.enable_kitty_graphics = true` in `wezterm.lua`; without it the viewer says so instead of staying blank.
 - Konsole draws an image under the text only where a cell has the terminal's own background, which Neovim never
   leaves, so there the page is drawn over the text. Konsole cannot read image files, so pages are sent as bytes.
-- When a PDF is shown in several windows of one tab page, only one of them shows the page.
+- A floating window on a viewer's buffer (a picker's preview) shares the page with the viewer's window, and only one
+  of them shows it. Split windows have views of their own, and each shows its page.
 - Inside tmux the page is placed on the outer terminal, at the position of Neovim's pane. tmux does not know about it,
   so it is taken away when Neovim's tmux window is left, which Neovim only learns with `set -g focus-events on`.
 
@@ -542,7 +552,8 @@ Compared with kitty or Ghostty on their own:
 
 - Turning pages is slower: zellij passes every image on to the terminal as raw pixels, about ten times the size of
   the PNG ([zellij#5596](https://github.com/zellij-org/zellij/issues/5596), fixed in zellij's main branch).
-- When a PDF is shown in several windows of one tab page, only one of them shows the page.
+- A floating window on a viewer's buffer (a picker's preview) shares the page with the viewer's window, and only one
+  of them shows it. Split windows have views of their own, and each shows its page.
 - The page is drawn under the text, so text the plugin does not cut the page around shows on top of it.
 - In zellij 0.45.1 the page is sent again whenever a float over it moves or changes size. This works around zellij
   drawing the wrong part of a cropped image.

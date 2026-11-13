@@ -45,6 +45,17 @@ elsewhere afterwards.
 The viewer is a buffer named after the file with 'buftype' `nofile` and
 'filetype' `pdf-view`. Its winbar shows "<file>  <page> / <pages>".
 
+                                                            *pdf-view-windows*
+Split a viewer (|:split|, |:vsplit|, |CTRL-W_v|) to read two pages of one PDF
+at once: each window turns its pages, fits and zooms on its own. The new
+window starts where the viewer was, with its search, jump list and marks,
+in a view of its own: an unlisted buffer named
+`pdf-view://2//path/to/file.pdf`, wiped when its window closes or shows
+another buffer. A window that switches to a PDF already on screen in
+another (|:b|, |:PdfView|) gets one too. The window that showed the PDF
+first keeps the viewer's own buffer, and only its position is remembered.
+Floating windows show the same page as the viewer.
+
 A PDF opens at the page, fit, zoom and rotation it was left at, also after
 Neovim is restarted: the last 100 are kept in
 `stdpath("state")/pdf-view/positions.json`. Set `remember_position = false`
@@ -228,8 +239,9 @@ it, `<C-i>` forward, and `''` swaps with the position before the latest jump.
 Past either end of that list, `<C-o>` and `<C-i>` go on through Vim's own
 |jumplist|, back to the file the document was opened from. Page turns and
 scrolling are not jumps. `m{a-z}` marks the page with its fit, zoom,
-rotation and view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and
-the jump list belong to the viewer and stay through |:edit|.
+rotation and view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and the jump list
+belong to the viewer and stay through |:edit|. A split's view of its own
+(|pdf-view-windows|) starts with a copy of them.
 
                                                              *pdf-view-spread*
 `d` shows two facing pages side by side, and `d` again one page at a time.
@@ -262,8 +274,9 @@ TeX Live and MiKTeX (the `synctex` option names it).
                         is shown with the line highlighted and, zoomed or
                         fitted to the width, in the middle of the window. The
                         cursor stays in the source; a PDF that is in no
-                        window opens in a vertical split. The PDF is {file},
-                        else vimtex's, else one open in a viewer whose
+                        window opens in a vertical split. Of several windows
+                        on the PDF, the one used last moves. The PDF is
+                        {file}, else vimtex's, else one open in a viewer whose
                         SyncTeX data has the line, else the PDF named after
                         the TeX file. `<Esc>` in the viewer removes the
                         highlight, and `<C-o>` there goes back.
@@ -440,9 +453,9 @@ page that zellij forgot (scrolled away by a long message, say) is sent again.
 'termguicolors' is not needed.
 
 Differences: page turns are slower, because zellij forwards images as raw
-pixels; only one window shows the page when the same PDF is in several
-windows of a tab page; and text that the page is not cut around shows on top
-of it. In zellij 0.45.1 the page is sent again whenever a float over it moves
+pixels; a floating window on a viewer's buffer shares the page with the
+viewer's window, and only one of them shows it; and text that the page is
+not cut around shows on top of it. In zellij 0.45.1 the page is sent again whenever a float over it moves
 or changes size.
 
 `placement` chooses explicitly: "placeholders" (the default in kitty and
