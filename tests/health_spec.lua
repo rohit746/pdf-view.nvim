@@ -82,6 +82,60 @@ describe("health", function()
     terminal.probe, vim.env.SSH_CONNECTION, vim.env.SSH_TTY = saved.probe, saved.conn, saved.tty
   end)
 
+  it("reports the name a terminal the environment does not name gave when asked (XTVERSION)", function()
+    if vim.fn.has("nvim-0.12") == 0 then
+      return -- Neovim 0.11 cannot read the answer, so it is not asked
+    end
+    local kitty = require("pdf-view.kitty")
+    local vars = { "TERM", "TERM_PROGRAM", "KITTY_WINDOW_ID", "GHOSTTY_RESOURCES_DIR", "WEZTERM_EXECUTABLE" }
+    vim.list_extend(vars, { "KONSOLE_VERSION", "LC_TERMINAL", "TERMINAL_NAME", "MLTERM", "WT_SESSION" })
+    vim.list_extend(vars, { "XTERM_VERSION", "TMUX", "ZELLIJ" })
+    local saved_env = {}
+    for _, name in ipairs(vars) do
+      saved_env[name] = vim.env[name]
+      vim.env[name] = nil
+    end
+    vim.env.TERM = "xterm-256color" -- kitty over SSH, without its terminfo on the host
+    local saved = { ui_attached = terminal.ui_attached, write = kitty.write }
+    ---@param name string? what the terminal answers to XTVERSION; nil when it does not know the question
+    local function report_for(name)
+      terminal.forget()
+      ---@diagnostic disable-next-line: duplicate-set-field
+      terminal.ui_attached = function()
+        return true
+      end
+      ---@diagnostic disable-next-line: duplicate-set-field
+      kitty.write = function(data)
+        if data:find("\27[>q", 1, true) then
+          vim.schedule(function()
+            if name then
+              vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = "\27P>|" .. name .. "\27\\" } })
+            end
+            for _ = 1, 2 do
+              vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = "\27[?62;22c" } })
+            end
+          end)
+        end
+      end
+      local ok, report = pcall(checkhealth)
+      terminal.ui_attached, kitty.write = saved.ui_attached, saved.write
+      return ok, report
+    end
+    config.setup()
+    local ok, named = report_for("kitty(0.36.4)")
+    local ok_silent, silent = report_for(nil)
+    for _, name in ipairs(vars) do
+      vim.env[name] = saved_env[name]
+    end
+    terminal.forget()
+    assert(ok, named)
+    assert(ok_silent, silent)
+    truthy(named:find("it named itself `kitty(0.36.4)` when asked (XTVERSION)", 1, true), named)
+    truthy(named:find("OK terminal: kitty", 1, true), named)
+    truthy(silent:find("it did not give its name when asked (XTVERSION)", 1, true), silent)
+    truthy(silent:find("terminal not recognised", 1, true), silent)
+  end)
+
   it("says that a GUI cannot show pages, whatever terminal it was started from", function()
     config.setup()
     local saved = { uis = vim.api.nvim_list_uis, term = vim.env.TERM, kitty = vim.env.KITTY_WINDOW_ID }

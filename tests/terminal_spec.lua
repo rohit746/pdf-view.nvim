@@ -57,6 +57,8 @@ end)
 
 local ESC = "\27"
 local PROBE = ESC .. "_Gi=16777214"
+-- what an unrecognised terminal is asked first: its name (XTVERSION), then DA1 twice (see `terminal.ask_sixel()`)
+local NAME_QUESTION = ESC .. "[>q" .. ESC .. "[c" .. ESC .. "[c"
 
 --- Run `body` with the terminal stubbed: a UI attached, no SSH, graphics output captured, the probe not made yet.
 ---@param body fun(written: string[])
@@ -388,6 +390,14 @@ describe("terminal.detect", function()
     eq(nil, terminal.da1_attributes(ESC .. "_Gi=1;OK" .. ESC .. "\\"))
   end)
 
+  it("reads the name and version in an XTVERSION reply", function()
+    eq("kitty(0.36.4)", terminal.xtversion_reply(ESC .. "P>|kitty(0.36.4)" .. ESC .. "\\"))
+    eq("WezTerm 20240203-110809-5046fc22", terminal.xtversion_reply(ESC .. "P>|WezTerm 20240203-110809-5046fc22"))
+    eq(nil, terminal.xtversion_reply(ESC .. "P>|" .. ESC .. "\\"), "an empty name")
+    eq(nil, terminal.xtversion_reply(ESC .. "[?62;22c"))
+    eq(nil, terminal.xtversion_reply(ESC .. "P1$r0m" .. ESC .. "\\"), "another DCS reply")
+  end)
+
   it("recognises iTerm2 behind tmux by the name the client gave", function()
     config.setup()
     with_env({ TERM = "tmux-256color", TERM_PROGRAM = "tmux" }, function()
@@ -424,6 +434,25 @@ describe("terminal.detect", function()
     config.setup()
   end)
 end)
+
+--- Run `body` with `nvim_list_uis()` answering `uis`.
+---@param uis table[]
+---@param body fun()
+local function with_uis(uis, body)
+  local saved = vim.api.nvim_list_uis
+  vim.api.nvim_list_uis = function()
+    return uis
+  end
+  local ok, err = pcall(body)
+  vim.api.nvim_list_uis = saved
+  if not ok then
+    error(err, 0)
+  end
+end
+
+-- what a GUI attached with nvim_ui_attach() reports (Neovide, nvim-qt), and what the TUI does
+local GUI = { stdout_tty = false, stdin_tty = false, term_name = "" }
+local TUI = { stdout_tty = true, stdin_tty = true, term_name = "xterm-kitty" }
 
 describe("terminal.check", function()
   local QUERY = "a=q,f=100,i=16777213,t=d;"
@@ -545,12 +574,14 @@ describe("terminal.check", function()
           terminal.ask(function()
             done = true
           end)
-          eq({ ESC .. "[c" }, written, "only whether it draws sixel: placeholders are not set to positioned")
+          eq({ NAME_QUESTION }, written, "its name and whether it draws sixel: placeholders are not set to positioned")
+          reply(ESC .. "[?62;22c")
           reply(ESC .. "[?62;22c")
           harness.wait_for(function()
             return done
           end, "the answer")
           eq(false, terminal.sixel())
+          eq(false, terminal.xtversion(), "it did not give its name")
         end
         local ok, reason = terminal.check()
         eq(false, ok)
@@ -627,6 +658,7 @@ describe("terminal.check", function()
           done = true
         end)
         reply(ESC .. "[?65;4;6;18;22c")
+        reply(ESC .. "[?65;4;6;18;22c")
         harness.wait_for(function()
           return done
         end, "the answer")
@@ -634,7 +666,7 @@ describe("terminal.check", function()
         eq("sixel", terminal.protocol())
         eq("positioned", terminal.placement())
         eq(true, (terminal.check()))
-        eq({ ESC .. "[c" }, written)
+        eq({ NAME_QUESTION }, written)
       end)
     end)
   end)
@@ -716,6 +748,7 @@ describe("terminal.check", function()
         end)
         reply(ESC .. "_Gi=16777213;OK" .. ESC .. "\\")
         reply(ESC .. "[?62;22c")
+        reply(ESC .. "[?62;22c")
         harness.wait_for(function()
           return done
         end, "both answers")
@@ -726,26 +759,114 @@ describe("terminal.check", function()
       end)
     end)
   end)
+
+  it("names a terminal the environment does not name by the name it gives (kitty or Ghostty over SSH)", function()
+    for _, case in ipairs({ { "kitty(0.36.4)", "kitty" }, { "ghostty 1.1.3", "ghostty" } }) do
+      with_terminal(function(written)
+        with_env({ TERM = "xterm-256color" }, function()
+          eq(nil, terminal.detect().name)
+          eq(nil, (terminal.check()), "it is asked first")
+          local done = false
+          terminal.ask(function()
+            done = true
+          end)
+          eq({ NAME_QUESTION }, written)
+          reply(ESC .. "P>|" .. case[1] .. ESC .. "\\")
+          reply(ESC .. "[?62;22c")
+          harness.wait_for(function()
+            return done
+          end, "the answers")
+          eq(case[1], terminal.xtversion())
+          eq({ name = case[2], term = "xterm-256color", placeholders = true, xtversion = case[1] }, terminal.detect())
+          eq(true, (terminal.check()))
+          eq(1, #written, "nothing more is asked: it has Unicode placeholders")
+        end)
+      end)
+    end
+  end)
+
+  it("waits for the name when the reply to Neovim's own DA1 comes in before it", function()
+    with_terminal(function()
+      with_env({ TERM = "xterm-256color" }, function()
+        local done = false
+        terminal.ask(function()
+          done = true
+        end)
+        reply(ESC .. "[?62;22c") -- asked by Neovim as it started, before the name was
+        vim.wait(20, function()
+          return done
+        end, 5)
+        eq(false, done, "the name may still come")
+        reply(ESC .. "P>|kitty(0.36.4)" .. ESC .. "\\")
+        reply(ESC .. "[?62;22c")
+        harness.wait_for(function()
+          return done
+        end, "the answers")
+        eq("kitty", terminal.detect().name)
+      end)
+    end)
+  end)
+
+  it("asks a terminal named by its answer whether it has Kitty graphics (WezTerm over SSH)", function()
+    with_terminal(function(written)
+      with_env({ TERM = "xterm-256color" }, function()
+        local done = false
+        terminal.ask(function()
+          done = true
+        end)
+        eq({ NAME_QUESTION }, written, "not asked about Kitty graphics before it is named")
+        reply(ESC .. "P>|WezTerm 20240203-110809-5046fc22" .. ESC .. "\\")
+        reply(ESC .. "[?62;22c")
+        harness.wait_for(function()
+          return queries(written) == 1
+        end, "the Kitty graphics query")
+        eq(false, done)
+        reply(ESC .. "_Gi=16777213;OK" .. ESC .. "\\")
+        harness.wait_for(function()
+          return done
+        end, "the answer")
+        eq("wezterm", terminal.detect().name)
+        eq("positioned", terminal.placement())
+        eq(true, (terminal.check()))
+      end)
+    end)
+  end)
+
+  it("asks its name only where the environment does not give it, outside tmux, zellij and a GUI", function()
+    with_terminal(function()
+      with_env({ TERM = "xterm-256color" }, function()
+        eq(true, terminal.name_askable())
+      end)
+      with_env({ TERM = "xterm-256color", TERM_PROGRAM = "WezTerm" }, function()
+        eq(false, terminal.name_askable(), "named by the environment")
+      end)
+      with_env({ TERM = "xterm-256color", ZELLIJ = "0" }, function()
+        eq(false, terminal.name_askable(), "zellij draws Kitty graphics itself")
+      end)
+      with_env({ TERM = "tmux-256color" }, function()
+        in_tmux("xterm-256color \n", function()
+          eq(false, terminal.name_askable(), "tmux answers for itself, and tells the client's name")
+        end)
+      end)
+      with_env({ TERM = "xterm-256color" }, function()
+        with_uis({ GUI }, function()
+          eq(false, terminal.name_askable(), "a GUI is not a terminal")
+        end)
+      end)
+      with_env({ TERM = "foot" }, function()
+        local done = false
+        terminal.ask(function()
+          done = true
+        end)
+        reply(ESC .. "[?62;4;22c")
+        harness.wait_for(function()
+          return done
+        end, "the answer")
+        eq(nil, terminal.xtversion(), "not asked")
+      end)
+    end)
+  end)
 end)
-
---- Run `body` with `nvim_list_uis()` answering `uis`.
----@param uis table[]
----@param body fun()
-local function with_uis(uis, body)
-  local saved = vim.api.nvim_list_uis
-  vim.api.nvim_list_uis = function()
-    return uis
-  end
-  local ok, err = pcall(body)
-  vim.api.nvim_list_uis = saved
-  if not ok then
-    error(err, 0)
-  end
-end
-
--- what a GUI attached with nvim_ui_attach() reports (Neovide, nvim-qt), and what the TUI does
-local GUI = { stdout_tty = false, stdin_tty = false, term_name = "" }
-local TUI = { stdout_tty = true, stdin_tty = true, term_name = "xterm-kitty" }
 
 describe("terminal.gui_only", function()
   it("tells a GUI from the TUI by whether its stdout is a terminal", function()

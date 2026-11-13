@@ -572,6 +572,17 @@ plugin encodes it once, in Lua, with a fixed palette of greys and colours (no ot
 `protocol = "sixel"` uses sixel in another terminal. WezTerm draws it well; Konsole draws an image over the row below
 it, and both keep Kitty graphics by default.
 
+## Over SSH, under sudo and in containers
+
+The terminal is recognised by the variables it sets (`$TERM`, `$TERM_PROGRAM`, `$KITTY_WINDOW_ID`, ...). ssh does not
+pass most of them on, and `sudo`, `su` and `docker exec` reset them. When they name no terminal, Neovim 0.12 asks the
+terminal its name (XTVERSION), once, together with its device attributes before the first page is shown. kitty,
+Ghostty, WezTerm, Konsole, iTerm2, foot, Contour and xterm answer, so kitty or Ghostty with `TERM=xterm-256color` show
+their pages, and WezTerm and Konsole get Kitty graphics instead of sixel. A name the environment gives is kept, and
+inside tmux (which knows the name of the terminal attached to it) and zellij the terminal is not asked.
+`:checkhealth pdf-view` reports the name it gave. On Neovim 0.11, which cannot read the answer, `force = true` shows
+pages in kitty or Ghostty, and `placement = "positioned"` in WezTerm or Konsole.
+
 ## Terminals without images
 
 In a terminal that can show none of these, over a plain SSH session for instance, the viewer says why at the top of
