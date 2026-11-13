@@ -12,6 +12,11 @@ All notable changes to this project are documented here. The format follows
   every action also has a `<Plug>(pdf-view-{name})` mapping that passes its count on. `goto_page()`, `set_zoom()`,
   `set_fit()` and `search()` take an argument, `get()` returns `{ buf, path, page, last, count, fit, zoom }`, and a
   `User PdfViewPage` autocommand tells other code when another page is on screen.
+- A terminal the environment does not name (over SSH, under `sudo` or `su`, in `docker exec`) is asked its name with
+  XTVERSION on Neovim 0.12, together with its device attributes before the first page. kitty or Ghostty with
+  `TERM=xterm-256color` show their pages now instead of the text, and WezTerm and Konsole get Kitty graphics instead
+  of sixel. A name from the environment is kept, and the terminal is not asked inside tmux or zellij, nor where its
+  reply could not be read. `:checkhealth pdf-view` reports the name it gave.
 - `g/` lists the matches of the search through `vim.ui.select`, each with its page and the line of text it is on, and
   goes to the chosen one as `n` would (a jump, so `<C-o>` comes back). The key is the `search_list` action.
 - `<C-d>` and `<C-u>` scroll a zoomed or fitted page by half a window, turning the page at its edge as `j` and `k` do

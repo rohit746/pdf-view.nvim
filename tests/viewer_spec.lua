@@ -374,15 +374,17 @@ describe("viewer", function()
     terminal.forget()
     local asked = vim.fn.has("nvim-0.12") == 1
     if asked then
-      -- it is asked whether it draws sixel, and says it does not
+      -- it is asked its name, which it does not give, and whether it draws sixel, which it says it does not (to DA1,
+      -- asked twice when the name is)
       vim.defer_fn(function()
+        vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = "\27[?62;22c" } })
         vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = "\27[?62;22c" } })
       end, 20)
     end
     open(make("unsupported", pages(1)))
     local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
     truthy(text:find("Unicode placeholder", 1, true), text)
-    eq(asked and { "\27[c" } or {}, writes, "no image is sent to an unsupported terminal")
+    eq(asked and { "\27[>q\27[c\27[c" } or {}, writes, "no image is sent to an unsupported terminal")
     terminal.forget()
     terminal.detect = detect
     setup()
