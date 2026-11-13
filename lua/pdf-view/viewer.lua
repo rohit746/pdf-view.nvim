@@ -370,6 +370,20 @@ function M.read(buf)
   M.attach(buf)
 end
 
+--- `SessionLoadPost` handler for a buffer that a session brought back in place of a viewer. `:mksession` does not
+--- save a `nofile` buffer as a file: with `blank` in 'sessionoptions' it saves `enew | file {pdf}`, which brings back
+--- an empty buffer named after the PDF, without `BufReadCmd`. Make it a viewer again.
+---@param buf integer
+function M.restore(buf)
+  M.read(buf)
+  local s = sessions[buf]
+  if s then -- no BufWinEnter follows: the buffer is in its windows already
+    for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+      apply_window_options(s, win)
+    end
+  end
+end
+
 --- Open a PDF in the current window.
 ---@param path string
 ---@return integer buf

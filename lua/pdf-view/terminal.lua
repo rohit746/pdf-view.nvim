@@ -274,10 +274,11 @@ local waiting
 ---@type boolean? whether the terminal can be asked at all
 local askable
 
---- Whether the terminal can be asked a question whose answer comes back as a TermResponse: Neovim 0.11 cannot read
---- it, and behind tmux with extended keys it would arrive as typed keys (see `replies_arrive_as_keys()`).
+--- Whether the terminal's replies (to a question, or to a graphics command) can be read: they come back as a
+--- TermResponse, which Neovim 0.11 cannot read, and behind tmux with extended keys they would arrive as typed keys (see
+--- `replies_arrive_as_keys()`). Known until `forget()`.
 ---@return boolean
-local function can_ask()
+function M.replies_readable()
   if not M.ui_attached() then
     return false
   end
@@ -299,7 +300,7 @@ end
 --- at once when it is known already or the terminal cannot be asked.
 ---@param callback fun()
 function M.ask_graphics(callback)
-  if graphics ~= nil or not can_ask() then
+  if graphics ~= nil or not M.replies_readable() then
     return callback()
   end
   if waiting then
@@ -359,7 +360,7 @@ end
 --- Whether `ask_sixel()` can find out whether the terminal draws sixel images: by asking it, or from tmux.
 ---@return boolean
 function M.sixel_askable()
-  return M.in_tmux() or can_ask()
+  return M.in_tmux() or M.replies_readable()
 end
 
 --- The attributes of a DA1 reply (`CSI ? 65 ; 4 ; 6 c`), or nil when `sequence` is not one.
@@ -479,7 +480,7 @@ end
 --- and that addon answers DA1 with sixel graphics listed. Inside tmux, which answers DA1 itself, it is not asked.
 ---@return boolean
 function M.vscode_images_askable()
-  return M.detect().name == "vscode" and M.protocol() == "iterm2" and not M.in_tmux() and can_ask()
+  return M.detect().name == "vscode" and M.protocol() == "iterm2" and not M.in_tmux() and M.replies_readable()
 end
 
 --- Whether VS Code said it shows no images (see `vscode_images_askable()`).
@@ -548,7 +549,7 @@ function M.check()
   end
   local positioned = M.placement() == "positioned"
   if positioned and (found.name or config.options.placement == "positioned") then
-    if graphics == nil and can_ask() then
+    if graphics == nil and M.replies_readable() then
       return nil
     end
     if graphics ~= false then
