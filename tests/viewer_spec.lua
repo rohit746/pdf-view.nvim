@@ -845,6 +845,92 @@ local function with_stub(owner, key, replacement, body)
   end
 end
 
+describe("viewer mouse wheel", function()
+  setup()
+
+  --- Press `keys` with the mouse over window `win`.
+  local function over(win, keys)
+    with_stub(vim.fn, "getmousepos", function()
+      return { winid = win, winrow = 1, wincol = 1, line = 1, column = 1, screenrow = 1, screencol = 1 }
+    end, function()
+      press(vim.keycode(keys))
+    end)
+  end
+
+  it("moves a viewer the cursor is not in, and scrolls other windows as before", function()
+    reset()
+    local s = open(make("wheel-unfocused", pages(4)))
+    local pdf_win = vim.api.nvim_get_current_win()
+    vim.cmd("leftabove vnew") -- the source beside its PDF, at the top left where Neovim's own wheel scrolls
+    local text_win = vim.api.nvim_get_current_win()
+    local text = {}
+    for line = 1, 200 do
+      text[line] = "line " .. line
+    end
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, text)
+
+    over(pdf_win, "<ScrollWheelDown>")
+    on_page(s, 2)
+    over(pdf_win, "i<ScrollWheelDown><Esc>") -- in insert mode too
+    on_page(s, 3)
+    over(pdf_win, "<ScrollWheelUp>")
+    on_page(s, 2)
+    eq(text_win, vim.api.nvim_get_current_win(), "the cursor stays in the source")
+    eq(text, vim.api.nvim_buf_get_lines(0, 0, -1, false), "the wheel typed nothing")
+    eq(1, vim.fn.line("w0"))
+
+    over(text_win, "<ScrollWheelDown>")
+    truthy(vim.fn.line("w0") > 1, "the wheel over the source scrolls it, top line " .. vim.fn.line("w0"))
+    eq(2, s.page)
+  end)
+
+  it("maps the wheel globally only while a viewer is open, and keeps the user's own wheel mappings", function()
+    reset()
+    eq("", vim.fn.maparg("<ScrollWheelDown>", "n"), "no viewer, no mapping")
+    vim.keymap.set("n", "<ScrollWheelUp>", "<C-y>", { desc = "mine" })
+    vim.keymap.set("i", "<ScrollWheelLeft>", "<Nop>", { desc = "mine" })
+    local ok, err = pcall(function()
+      local a = open(make("wheel-a", pages(2)))
+      vim.cmd("vsplit")
+      local b = open(make("wheel-b", pages(2)))
+      vim.cmd("vnew") -- maparg() in a buffer that is not a viewer sees the global mappings
+      truthy(vim.fn.maparg("<ScrollWheelDown>", "n") ~= "", "normal mode")
+      truthy(vim.fn.maparg("<ScrollWheelDown>", "i") ~= "", "insert mode")
+      truthy(vim.fn.maparg("<ScrollWheelRight>", "i") ~= "")
+      truthy(vim.fn.maparg("<ScrollWheelUp>", "i") ~= "")
+      eq("mine", vim.fn.maparg("<ScrollWheelUp>", "n", false, true).desc, "the user's own mapping")
+      eq("mine", vim.fn.maparg("<ScrollWheelLeft>", "i", false, true).desc)
+
+      vim.api.nvim_buf_delete(a.buf, { force = true })
+      truthy(vim.fn.maparg("<ScrollWheelDown>", "n") ~= "", "a viewer is still open")
+      vim.api.nvim_buf_delete(b.buf, { force = true })
+      for _, mode in ipairs({ "n", "i" }) do
+        for _, key in ipairs({ "Down", "Right" }) do
+          eq("", vim.fn.maparg("<ScrollWheel" .. key .. ">", mode), "removed with the last viewer")
+        end
+      end
+      eq("", vim.fn.maparg("<ScrollWheelUp>", "i"))
+      eq("mine", vim.fn.maparg("<ScrollWheelUp>", "n", false, true).desc, "the user's mapping stays")
+      eq("mine", vim.fn.maparg("<ScrollWheelLeft>", "i", false, true).desc)
+
+      setup({ keymaps = { scroll_down = {} } })
+      open(make("wheel-off", pages(2)))
+      vim.cmd("vnew")
+      eq("", vim.fn.maparg("<ScrollWheelDown>", "n"), "an empty list leaves the wheel to Neovim")
+      eq("", vim.fn.maparg("j", "n"), "only the wheel actions are mapped globally")
+      truthy(vim.fn.maparg("<ScrollWheelRight>", "n") ~= "", "scroll_right is still mapped")
+      setup({ keymaps = false })
+      eq("", vim.fn.maparg("<ScrollWheelRight>", "n"), "no mappings at all")
+    end)
+    setup()
+    pcall(vim.keymap.del, "n", "<ScrollWheelUp>")
+    pcall(vim.keymap.del, "i", "<ScrollWheelLeft>")
+    if not ok then
+      error(err, 0)
+    end
+  end)
+end)
+
 describe("viewer fit modes", function()
   setup()
 
