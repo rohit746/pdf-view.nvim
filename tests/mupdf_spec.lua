@@ -3,6 +3,7 @@ local eq, truthy, wait_for = harness.eq, harness.truthy, harness.wait_for
 local fixture = require("tests.fixture")
 local config = require("pdf-view.config")
 local mupdf = require("pdf-view.mupdf")
+local rotation = require("pdf-view.rotation")
 
 --- Run an async mupdf call and return its callback arguments.
 local function await(start)
@@ -84,6 +85,130 @@ describe("mupdf", function()
       mupdf.info(sparse, 3, cb, true)
     end)
     eq({ 0, 0, 400, 300 }, coloured.content, "so is a page with a coloured background")
+  end)
+
+  describe("turned", function()
+    local sparse = dir .. "/turned.pdf"
+    -- "Middle" in the lower left of the middle of a page, so that each quarter turn puts it somewhere else
+    fixture.write(sparse, {
+      { w = 612, h = 792, color = { 1, 1, 1 }, label = "", texts = { { x = 120, y = 250, text = "Middle" } } },
+    })
+    local unturned
+    local function info_of(degrees)
+      local err, info = await(function(cb)
+        mupdf.info(sparse, 1, cb, true, nil, degrees)
+      end)
+      eq(nil, err)
+      return info
+    end
+
+    --- The smallest rectangle around the pixels of `png` (`width` x `height`) that are not white, sampled every
+    --- `step` pixels.
+    local function ink(png, width, height, step)
+      local points = {}
+      for y = 0, height - 1, step do
+        for x = 0, width - 1, step do
+          points[#points + 1] = { x, y }
+        end
+      end
+      local box = { math.huge, math.huge, -math.huge, -math.huge }
+      for index, rgb in ipairs(fixture.pixels(png, points)) do
+        if rgb[1] + rgb[2] + rgb[3] < 750 then
+          local x, y = points[index][1], points[index][2]
+          box = { math.min(box[1], x), math.min(box[2], y), math.max(box[3], x), math.max(box[4], y) }
+        end
+      end
+      return box
+    end
+
+    it("measures the page and its content turned", function()
+      unturned = info_of(0)
+      eq({ 612, 792 }, { unturned.width, unturned.height })
+      for _, degrees in ipairs({ 90, 180, 270 }) do
+        local info = info_of(degrees)
+        eq({ rotation.size(degrees, 612, 792) }, { info.width, info.height }, degrees .. " degrees")
+        local expected = rotation.rect(degrees, 612, 792, unturned.content)
+        for index = 1, 4 do
+          harness.near(expected[index], info.content[index], 3, ("%d degrees, side %d"):format(degrees, index))
+        end
+      end
+    end)
+
+    it("draws the page turned, where its content is measured", function()
+      unturned = unturned or info_of(0)
+      for _, degrees in ipairs({ 0, 90, 180, 270 }) do
+        local info = info_of(degrees)
+        local scale = 0.25
+        local width, height = math.floor(info.width * scale), math.floor(info.height * scale)
+        local out = ("%s/turned-%d.png"):format(dir, degrees)
+        local err = await(function(cb)
+          mupdf.render(sparse, 1, width, height, out, cb, nil, degrees)
+        end)
+        eq(nil, err)
+        eq({ width, height }, { png_size(out) })
+        local box = ink(out, width, height, 2)
+        -- the ink, inside the content's margin of 8 points; the image is sampled every 2 pixels
+        local c = info.content
+        local inner = { c[1] + 8, c[2] + 8, c[3] - 8, c[4] - 8 }
+        for index = 1, 4 do
+          harness.near(inner[index] * scale, box[index], 4, ("%d degrees, side %d"):format(degrees, index))
+        end
+      end
+    end)
+
+    it("draws highlights in the page's own points, turned with it", function()
+      local white = dir .. "/turned-white.pdf"
+      fixture.write(white, { { w = 600, h = 400, color = { 1, 1, 1 }, label = "" } })
+      -- a highlight in the top-left corner of the page before it is turned
+      local highlights = "0.00,0.00,100.00,50.00,ffe14d"
+      for _, degrees in ipairs({ 90, 180, 270 }) do
+        local w, h = rotation.size(degrees, 600, 400)
+        local rect = rotation.rect(degrees, 600, 400, { 0, 0, 100, 50 })
+        local centre = { math.floor((rect[1] + rect[3]) / 4), math.floor((rect[2] + rect[4]) / 4) }
+        local out = ("%s/turned-highlight-%d.png"):format(dir, degrees)
+        local clip = {
+          scale_x = 0.5,
+          scale_y = 0.5,
+          x = 0,
+          y = 0,
+          width = w / 2,
+          height = h / 2,
+          highlights = highlights,
+          rotation = degrees,
+        }
+        eq(nil, (await(function(cb)
+          mupdf.render_clip(white, 1, clip, out, cb)
+        end)))
+        local at, corner = unpack(fixture.pixels(out, { centre, { 10, 10 } }))
+        eq("yellow", fixture.classify(at), degrees .. " degrees: the highlight turned with the page")
+        eq("white", fixture.classify(corner), degrees .. " degrees: not where it is on the unturned page")
+
+        -- the same in a sheet, next to another page
+        local sheet = ("%s/turned-sheet-%d.png"):format(dir, degrees)
+        local part = {
+          page = 1,
+          scale_x = 0.5,
+          scale_y = 0.5,
+          dx = 20,
+          dy = 0,
+          clip = { 20, 0, 20 + w / 2, h / 2 },
+          highlights = highlights,
+          rotation = degrees,
+        }
+        eq(nil, (await(function(cb)
+          mupdf.render_sheet(white, 20 + w / 2, h / 2, { part }, sheet, cb)
+        end)))
+        local in_sheet = fixture.pixels(sheet, { { centre[1] + 20, centre[2] } })[1]
+        eq("yellow", fixture.classify(in_sheet), degrees .. " degrees, in a sheet")
+      end
+    end)
+
+    it("refuses a rotation that is not a quarter turn", function()
+      local err = await(function(cb)
+        mupdf.info(sparse, 1, cb, false, nil, 45)
+      end)
+      truthy(tostring(err):find("unknown rotation: 45", 1, true), tostring(err))
+    end)
   end)
 
   it("renders a PNG of exactly the requested size", function()

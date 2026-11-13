@@ -5,6 +5,7 @@ local cursor = require("pdf-view.cursor")
 local layout = require("pdf-view.layout")
 local mupdf = require("pdf-view.mupdf")
 local render = require("pdf-view.render")
+local rotation = require("pdf-view.rotation")
 local search = require("pdf-view.search")
 local session = require("pdf-view.session")
 local synctex = require("pdf-view.synctex")
@@ -96,18 +97,19 @@ local function rescan(s)
   end)
 end
 
---- Where a viewer is: its page, fit, zoom and the centre of the view. The jump list and the marks hold these.
----@alias PdfView.Position { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }
+--- Where a viewer is: its page, fit, zoom, the centre of the view and how far the pages are turned. The jump list and
+--- the marks hold these.
+---@alias PdfView.Position { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number, rotation?: PdfView.Rotation }
 
 local JUMP_LIMIT = 100 -- as in Vim
 
 ---@param s PdfView.Session
 ---@return PdfView.Position
 local function here(s)
-  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy, rotation = s.rotation }
 end
 
---- Go back to `where`, with the fit and zoom it had.
+--- Go back to `where`, with the fit, zoom and rotation it had.
 ---@param s PdfView.Session
 ---@param where PdfView.Position
 local function restore(s, where)
@@ -115,6 +117,7 @@ local function restore(s, where)
     return
   end
   s.mode, s.zoom, s.cx, s.cy = where.mode, where.zoom, where.cx, where.cy
+  s.rotation = where.rotation or s.rotation
   s.scrolled = nil
   s.target = math.max(1, math.min(where.page, s.count or where.page))
   show(s, s.target)
@@ -208,26 +211,27 @@ local function go(s, page, anchor, jump)
   show(s, page)
 end
 
---- The anchor that brings the point (`x`, `y`) of page `page`, as fractions of it, to the top left of the window,
---- where a link or a bookmark leads: the top of the page when it says nothing more, or when the whole page is on
---- screen. The window is measured with the page on screen, which is the size of the other pages of almost every
---- document.
+--- The anchor that brings the point (`x`, `y`) of page `page`, as fractions of it before it is turned, to the top left
+--- of the window, where a link or a bookmark leads: the top of the page when it says nothing more, or when the whole
+--- page is on screen. The window is measured with the page on screen, which is the size of the other pages of almost
+--- every document.
 ---@param s PdfView.Session
 ---@param page integer
 ---@param x? number
 ---@param y? number
 ---@return PdfView.Anchor
 local function anchor_at(s, page, x, y)
-  local win = y and uses_viewport(s) and s.geom and window_for(s)
+  x, y = rotation.destination(s.rotation, x, y) -- on the page as it is shown
+  local win = (x or y) and uses_viewport(s) and s.geom and window_for(s)
   if not win then
     return TOP
   end
-  local sheet_x, sheet_y = session.sheet_point(s, page, x or 0, y --[[@as number]]) -- facing pages are one sheet
-  x, y = x and sheet_x, sheet_y
+  local sheet_x, sheet_y = session.sheet_point(s, page, x or 0, y or 0) -- facing pages are one sheet
+  x, y = x and sheet_x, y and sheet_y
   local cols, rows = text_area(win)
   local cell = terminal.cell_size()
   local view = layout.viewport(s.geom.w, s.geom.h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, s.geom.box)
-  local anchor = { cy = view.scroll_y and y + view.view_h / 2 / view.full_h or 0 }
+  local anchor = { cy = y and view.scroll_y and y + view.view_h / 2 / view.full_h or 0 }
   if x and view.scroll_x then
     anchor.cx = x + view.view_w / 2 / view.full_w
   end
@@ -264,6 +268,21 @@ local function set_mode(s, mode)
   show(s)
 end
 
+--- Turn every page `degrees` further clockwise (a multiple of 90; negative turns counter-clockwise). The point in the
+--- middle of the window stays there, turned with the page.
+---@param s PdfView.Session
+---@param degrees integer
+local function rotate(s, degrees)
+  local turn = rotation.normalize(degrees)
+  if turn == 0 then
+    return
+  end
+  s.rotation = rotation.normalize(s.rotation + turn)
+  s.cx, s.cy = rotation.fraction(turn, s.cx, s.cy)
+  s.scrolled = nil -- the page scrolled into lies elsewhere now: back inside the page
+  show(s)
+end
+
 ---@param s PdfView.Session
 ---@param zoom number multiplies the fitted size; below 1 steps back from a width/height fit to the whole page
 local function set_zoom(s, zoom)
@@ -283,7 +302,7 @@ local function set_zoom(s, zoom)
     local found = s.search
     local match = found and found.current and found.matches[found.current]
     if match and session.on_screen(s, match.page) then
-      s.cx, s.cy = session.sheet_point(s, match.page, match.cx, match.cy)
+      s.cx, s.cy = session.sheet_point(s, match.page, rotation.fraction(s.rotation, match.cx, match.cy))
     else
       s.cx, s.cy = 0.5, 0.5
     end
@@ -426,7 +445,8 @@ local function match_visible(s, match)
       ox, oy = part.x, part.y
     end
   end
-  for _, rect in ipairs(match.rects) do
+  for _, unturned in ipairs(match.rects) do
+    local rect = rotation.rect(s.rotation, match.width, match.height, unturned)
     local inside = (ox + rect[1]) * view.scale >= view.vx
       and (ox + rect[3]) * view.scale <= view.vx + view.view_w
       and (oy + rect[2]) * view.scale >= view.vy
@@ -446,7 +466,7 @@ local function goto_match(s, index)
   record_jump(s)
   s.search.current = index
   if not match_visible(s, match) then
-    s.cx, s.cy = session.sheet_point(s, match.page, match.cx, match.cy)
+    s.cx, s.cy = session.sheet_point(s, match.page, rotation.fraction(s.rotation, match.cx, match.cy))
     s.scrolled = nil
   end
   s.target = match.page
@@ -605,12 +625,9 @@ local function show_synced(s, boxes)
     s.synced = { id = next_sync, page = info.page, rects = rects }
     local first = rects[1]
     if uses_viewport(s) then
-      local cx, cy = session.sheet_point(
-        s,
-        info.page,
-        (first[1] + first[3]) / 2 / info.width,
-        (first[2] + first[4]) / 2 / info.height
-      )
+      -- the boxes are in the points of the page before it is turned, as `info` measures it
+      local x, y = (first[1] + first[3]) / 2 / info.width, (first[2] + first[4]) / 2 / info.height
+      local cx, cy = session.sheet_point(s, info.page, rotation.fraction(s.rotation, x, y))
       s.cy = cy
       local win = window_for(s)
       if win then
@@ -618,7 +635,8 @@ local function show_synced(s, boxes)
         local cell = terminal.cell_size()
         -- facing pages are measured with the sheet on screen
         local spread = session.spread_mode(s) ~= "off" and s.geom
-        local w, h = spread and s.geom.w or info.width, spread and s.geom.h or info.height
+        local turned_w, turned_h = rotation.size(s.rotation, info.width, info.height)
+        local w, h = spread and s.geom.w or turned_w, spread and s.geom.h or turned_h
         local view = layout.viewport(w, h, cols, rows, cell.w, cell.h, s.zoom, s.cx, s.cy, s.mode, nil)
         if view.scroll_x then
           s.cx = cx
@@ -751,11 +769,12 @@ function M.forward_search(opts)
 end
 
 --- The page under the cell at `row`, `col` (0-based, in the window's text area) of the viewer `s`, and the point of
---- it there, in points from the page's top-left corner. Nil off the page.
+--- it there, in points from the top-left corner of the page as it is shown (turned), with the size of that page. Nil
+--- off the page.
 ---@param s PdfView.Session
 ---@param row integer
 ---@param col integer
----@return integer? page, number? x, number? y
+---@return integer? page, number? x, number? y, number? width, number? height
 local function point_at(s, row, col)
   local fit, geom = s.fit, s.geom
   if not (fit and geom) then
@@ -770,7 +789,7 @@ local function point_at(s, row, col)
     for _, part in ipairs(fit.parts) do
       local clip = part.clip
       if px >= clip[1] and px <= clip[3] and py >= clip[2] and py <= clip[4] then
-        return part.page, (px - part.dx) / part.scale_x, (py - part.dy) / part.scale_y
+        return part.page, (px - part.dx) / part.scale_x, (py - part.dy) / part.scale_y, part.width, part.height
       end
     end
     return nil -- between the pages
@@ -783,13 +802,13 @@ local function point_at(s, row, col)
   end
   for _, part in ipairs(s.parts or {}) do -- facing pages: the one under the cell
     if x >= part.x and x <= part.x + part.width and y >= part.y and y <= part.y + part.height then
-      return part.page, x - part.x, y - part.y
+      return part.page, x - part.x, y - part.y, part.width, part.height
     end
   end
   if s.parts then
     return nil -- between the pages
   end
-  return s.page, x, y
+  return s.page, x, y, geom.w, geom.h
 end
 
 --- Open `source` at its line: in a window of the current tab that shows it, else in the previous window when that is
@@ -849,11 +868,12 @@ local function inverse_search(s, lhs)
   end
   s = over
   local info = vim.fn.getwininfo(mouse.winid)[1] -- `winrow` counts the winbar, `wincol` the sign and number columns
-  local page, x, y = point_at(s, mouse.winrow - 1 - info.winbar, mouse.wincol - 1 - info.textoff)
-  if not page then
+  local page, x, y, width, height = point_at(s, mouse.winrow - 1 - info.winbar, mouse.wincol - 1 - info.textoff)
+  if not (page and x and y and width and height) then
     return
   end
-  synctex.edit(s.path, page, x --[[@as number]], y --[[@as number]], function(err, source)
+  x, y = rotation.unpoint(s.rotation, width, height, x, y) -- SyncTeX knows the page before it is turned
+  synctex.edit(s.path, page, x, y, function(err, source)
     if s.closed then
       return
     end
@@ -1271,6 +1291,8 @@ local ACTION_ORDER = {
   "fit_width",
   "fit_height",
   "fit_content",
+  "rotate",
+  "rotate_back",
   "search",
   "search_back",
   "search_next",
@@ -1433,6 +1455,20 @@ ACTIONS.fit_content = {
   desc = "fit the page's content to the window, without its margins",
   run = function(s)
     set_mode(s, "content")
+  end,
+}
+
+ACTIONS.rotate = {
+  desc = "turn the pages clockwise ({count} quarter turns)",
+  run = function(s)
+    rotate(s, 90 * vim.v.count1)
+  end,
+}
+
+ACTIONS.rotate_back = {
+  desc = "turn the pages counter-clockwise",
+  run = function(s)
+    rotate(s, -90 * vim.v.count1)
   end,
 }
 
