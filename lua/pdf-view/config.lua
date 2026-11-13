@@ -24,6 +24,7 @@ local M = {}
 ---@field search_next string[] next match, in the direction of the search
 ---@field search_prev string[] previous match
 ---@field search_clear string[] remove the highlights
+---@field search_list string[] pick one of the matches of the search, listed with their pages and lines of text
 ---@field outline string[] pick a bookmark to jump to
 ---@field follow_link string[] pick a link on the page: go to its page, open another PDF in the viewer, or open its
 --- address with `vim.ui.open()`
@@ -135,6 +136,7 @@ local defaults = {
     search_next = { "n" },
     search_prev = { "N" },
     search_clear = { "<Esc>" },
+    search_list = { "g/" },
     outline = { "gO" },
     follow_link = { "f" },
     yank_text = { "y" },

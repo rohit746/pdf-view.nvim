@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `g/` lists the matches of the search through `vim.ui.select`, each with its page and the line of text it is on, and
+  goes to the chosen one as `n` would (a jump, so `<C-o>` comes back). The key is the `search_list` action.
+
 ### Fixed
 
 - The mouse wheel did nothing over a viewer while the cursor was in another window, such as the TeX or Typst source

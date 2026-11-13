@@ -522,6 +522,40 @@ local function step_match(s, reverse)
   end
 end
 
+--- Pick one of the matches of the search from a list of them, each with its page and line of text, and go to it as
+--- `n` would.
+---@param s PdfView.Session
+local function pick_match(s)
+  local found = s.search
+  if s.searching then
+    return notify(("still searching for `%s`"):format(s.searching))
+  end
+  if not found then
+    return notify("no search yet: press / to search")
+  end
+  local indices = {}
+  for index = 1, #found.matches do
+    indices[index] = index
+  end
+  local count = #found.matches .. (found.truncated and "+" or "")
+  vim.ui.select(indices, {
+    prompt = ("Matches for `%s` (%s)"):format(found.needle, count),
+    kind = "pdf-view.matches",
+    format_item = function(index)
+      return search.describe(found, index)
+    end,
+  }, function(index)
+    -- a picker that answers later leaves time to close the viewer, or to search again (or the file to change)
+    if not index or s.closed then
+      return
+    end
+    if s.search ~= found then
+      return notify("the search has changed since the list was shown: list its matches again")
+    end
+    goto_match(s, index)
+  end)
+end
+
 ---@param s PdfView.Session
 local function clear_search(s)
   cancel_search(s)
@@ -1226,6 +1260,7 @@ local ACTION_ORDER = {
   "search_next",
   "search_prev",
   "search_clear",
+  "search_list",
   "outline",
   "follow_link",
   "yank_text",
@@ -1402,6 +1437,11 @@ ACTIONS.search_prev = {
 ACTIONS.search_clear = {
   desc = "remove the search highlights",
   run = clear_search,
+}
+
+ACTIONS.search_list = {
+  desc = "list the matches of the search, with their text, and go to one",
+  run = pick_match,
 }
 
 ACTIONS.outline = {

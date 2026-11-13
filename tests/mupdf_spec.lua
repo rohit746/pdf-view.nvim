@@ -683,6 +683,46 @@ awk 'NR == 1 { sub(/^:/, ":x") } { print; fflush() }' | exec '%s' "$@"
       eq({ 0, false }, { #matches, truncated })
     end)
 
+    it("gives the line of text each match starts on", function()
+      local matches = find("alpha")
+      eq(
+        { "alpha beta alpha", "alpha beta alpha", "ALPHA gamma", "dash -x here alpha" },
+        vim.tbl_map(function(m)
+          return m.text
+        end, matches)
+      )
+    end)
+
+    it("tells the lines of a page apart, and cuts a long line down around the match", function()
+      local lines = dir .. "/search-lines.pdf"
+      local long = {}
+      for index = 1, 60 do
+        long[index] = ("w%02d"):format(index)
+      end
+      long[22] = "needle"
+      fixture.write(lines, {
+        {
+          w = 612,
+          h = 792,
+          label = "first line here",
+          texts = { { x = 30, y = 200, text = "second line with needle" } },
+        },
+        { w = 6000, h = 300, label = table.concat(long, " ") },
+      })
+      local err, matches = await(function(cb)
+        mupdf.search(lines, "needle", 10, cb)
+      end)
+      eq(nil, err)
+      eq(2, #matches)
+      eq("second line with needle", matches[1].text)
+      local text = matches[2].text
+      truthy(text:find("needle", 1, true), text)
+      truthy(vim.startswith(text, "…") and not text:find("w01", 1, true), "cut before the match: " .. text)
+      truthy(vim.endswith(text, "…") and not text:find("w60", 1, true), "cut after the match: " .. text)
+      truthy(vim.fn.strchars(text) <= 82, "about 80 characters: " .. text)
+      truthy(text:match("^…w%d%d ") and text:match(" w%d%d…$"), "cut between words: " .. text)
+    end)
+
     it("reports an unreadable document", function()
       local err = await(function(cb)
         mupdf.search(dir .. "/missing.pdf", "x", 10, cb)

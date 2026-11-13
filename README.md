@@ -150,6 +150,7 @@ take a count.
 | `?`                          | search backward                                                                 |
 | `n` `N`                      | next / previous match (`n` repeats the direction of the search; takes a count)  |
 | `<Esc>`                      | remove the search highlights                                                    |
+| `g/`                         | list the matches of the search with their page and line of text; go to one      |
 | `gO`                         | pick a bookmark from the document's outline and go to its page                  |
 | `f`                          | pick a link on the page: go to its page or another PDF, or open its address     |
 | `y`                          | yank the page's text, linewise (`"+y`: to the clipboard)                        |
@@ -223,6 +224,11 @@ searched in that viewer, as `/<CR>` does in Vim.
 Highlights are drawn into the page image, multiplied onto it so text stays readable (on MuPDF older than 1.27 they are
 a translucent fill instead, which dulls the text under a match a little). The colours are configurable
 (`highlight`), and at most `search_limit` matches are collected (the winbar shows `17/5000+` when that cuts the list).
+
+`g/` lists the matches of the search through `vim.ui.select`, one per match with its page and the line of text it is
+on, cut down around the match when the line is long (`p. 12  …the viewport is a window-sized crop of…`). A picker
+that filters finds the one that matters among many; choosing it goes there as `n` would, a jump that `<C-o>` comes back
+from.
 
 ### Outline
 
@@ -378,6 +384,7 @@ require("pdf-view").setup({
     search_next = { "n" },
     search_prev = { "N" },
     search_clear = { "<Esc>" },
+    search_list = { "g/" },
     outline = { "gO" },
     follow_link = { "f" },
     yank_text = { "y" },
