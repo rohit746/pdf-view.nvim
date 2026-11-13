@@ -21,12 +21,12 @@ All notable changes to this project are documented here. The format follows
   scrolling, the `c` fit, search highlights, SyncTeX, links and bookmarks all follow the turned page, and the rotation
   is kept with the remembered position, in marks and in the jump list. The `rotate` and `rotate_back` keymaps set the
   keys. The file itself is never changed.
-- Two windows on one PDF show different pages (#131). A split of a viewer (`:split`, `:vsplit`) gets a view of its
-  own, an unlisted buffer that starts on the same page, fit, zoom and search and then turns its pages, fits and zooms
-  on its own; a window that switches to a PDF already on screen in another gets one too. Before, turning the page in
-  one window turned it in both, and with positioned placements (zellij, WezTerm, Konsole) only one of them showed the
-  page. Forward search moves the window on the PDF that was used last, and the position remembered for the next time
-  the PDF is opened is that window's.
+- Two windows on one PDF show different pages (#131). A split of a viewer (`:split`, `:vsplit`) gets a view of its own,
+  an unlisted buffer that starts on the same page, fit, zoom, rotation and search and then turns its pages, fits, zooms
+  and rotates them on its own; a window that switches to a PDF already on screen in another gets one too. Before,
+  turning the page in one window turned it in both, and with positioned placements (zellij, WezTerm, Konsole) only one
+  of them showed the page. Forward search moves the window on the PDF that was used last, and the position remembered
+  for the next time the PDF is opened is that window's.
 
 ### Fixed
 

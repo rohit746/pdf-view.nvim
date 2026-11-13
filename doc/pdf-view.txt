@@ -47,16 +47,16 @@ The viewer is a buffer named after the file with 'buftype' `nofile` and
 
                                                             *pdf-view-windows*
 Split a viewer (|:split|, |:vsplit|, |CTRL-W_v|) to read two pages of one PDF
-at once: each window turns its pages, fits and zooms on its own. The new
-window starts where the viewer was, with its search, jump list and marks,
-in a view of its own: an unlisted buffer named
-`pdf-view://2//path/to/file.pdf`, wiped when its window closes. While the
-window shows another buffer the view is kept, so |CTRL-O| there comes back
+at once: each window turns its pages, fits, zooms and rotates them on its own.
+The new window starts where the viewer was (page, fit, zoom and rotation),
+with its search, jump list and marks, in a view of its own: an unlisted buffer
+named `pdf-view://2//path/to/file.pdf`, wiped when its window closes. While
+the window shows another buffer the view is kept, so |CTRL-O| there comes back
 to it. A window that switches to a PDF already on screen in another (|:b|,
 |:PdfView|) gets one too. The window that showed the PDF first keeps the
 viewer's own buffer. The position remembered for the next time the PDF is
-opened is the one of the window used last. Floating windows show the same
-page as the viewer.
+opened is the one of the window used last. Floating windows show the same page
+as the viewer.
 
 A PDF opens at the page, fit, zoom and rotation it was left at, also after
 Neovim is restarted: the last 100 are kept in
@@ -241,9 +241,9 @@ it, `<C-i>` forward, and `''` swaps with the position before the latest jump.
 Past either end of that list, `<C-o>` and `<C-i>` go on through Vim's own
 |jumplist|, back to the file the document was opened from. Page turns and
 scrolling are not jumps. `m{a-z}` marks the page with its fit, zoom,
-rotation and view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and the jump list
-belong to the viewer and stay through |:edit|. A split's view of its own
-(|pdf-view-windows|) starts with a copy of them.
+rotation and view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and
+the jump list belong to the viewer and stay through |:edit|. A split's view
+of its own (|pdf-view-windows|) starts with a copy of them.
 
                                                              *pdf-view-spread*
 `d` shows two facing pages side by side, and `d` again one page at a time.
@@ -456,9 +456,9 @@ page that zellij forgot (scrolled away by a long message, say) is sent again.
 
 Differences: page turns are slower, because zellij forwards images as raw
 pixels; a floating window on a viewer's buffer shares the page with the
-viewer's window, and only one of them shows it; and text that the page is
-not cut around shows on top of it. In zellij 0.45.1 the page is sent again whenever a float over it moves
-or changes size.
+viewer's window, and only one of them shows it; and text that the page is not
+cut around shows on top of it. In zellij 0.45.1 the page is sent again
+whenever a float over it moves or changes size.
 
 `placement` chooses explicitly: "placeholders" (the default in kitty and
 Ghostty outside zellij) or "positioned" (the default inside zellij, and in
