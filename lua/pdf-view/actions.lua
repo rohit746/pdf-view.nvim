@@ -889,8 +889,44 @@ local function pages_on_screen(s)
   return (s.last and s.last ~= s.page and "pages " or "page ") .. session.pages_label(s)
 end
 
+--- The scheme of an address, in lower case ("https" for "HTTPS://example.com"), or nil when it has none.
+---@param uri string
+---@return string?
+local function scheme_of(uri)
+  local scheme = uri:match("^(%a[%w+.-]*):")
+  return scheme and scheme:lower()
+end
+
+--- Open the address of a link with `vim.ui.open()`. An address whose scheme is not in `link_schemes` (a `file:`
+--- address, which a PDF's Launch action becomes too, or a custom scheme) can start a program on this machine, so the
+--- user is asked first, with the whole address.
+---@param uri string
+local function open_address(uri)
+  local scheme = scheme_of(uri)
+  local trusted = scheme ~= nil
+    and vim.tbl_contains(config.options.link_schemes, function(allowed)
+      return allowed:lower() == scheme
+    end, { predicate = true })
+  if not trusted then
+    local answer = vim.fn.confirm(
+      ("pdf-view: this link can start a program. Open it?\n%s"):format(uri),
+      "&Open\n&Cancel",
+      2,
+      "Warning"
+    )
+    if answer ~= 1 then
+      return
+    end
+  end
+  local _, open_err = vim.ui.open(uri)
+  if open_err then
+    notify(("cannot open %s: %s"):format(uri, open_err), vim.log.levels.WARN)
+  end
+end
+
 --- Pick one of the links on the page on screen and follow it: a link into the document jumps to where it leads, any
---- other (a web address, an e-mail) opens with `vim.ui.open()`. Facing pages offer the links of both.
+--- other opens with `vim.ui.open()`, a web address or an e-mail right away, another address once the user agrees.
+--- Facing pages offer the links of both.
 ---@param s PdfView.Session
 local function follow_link(s)
   local label = pages_on_screen(s)
@@ -918,10 +954,7 @@ local function follow_link(s)
       if link.page then
         return go(s, link.page, anchor_at(s, link.page, link.x, link.y), true)
       end
-      local _, open_err = vim.ui.open(link.uri)
-      if open_err then
-        notify(("cannot open %s: %s"):format(link.uri, open_err), vim.log.levels.WARN)
-      end
+      open_address(link.uri)
     end)
   end)
 end
