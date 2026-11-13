@@ -264,14 +264,16 @@ describe("viewer", function()
     eq({ page }, transmitted())
     eq(2, s.page)
 
-    -- still in another window: the images stay
+    -- still in another window: the images stay (the split had a view of its own, which goes with it)
     vim.cmd("split")
     vim.wait(200) -- the page drawn again for the smaller window
     on_page(s, 2)
     writes = {}
     vim.cmd.enew()
     vim.wait(200)
-    eq(false, sent("a=d,d=I"), "no image deleted")
+    for _, id in ipairs(s.ids) do
+      eq(false, sent(("a=d,d=I,i=%d,q=2"):format(id)), "image " .. id .. " deleted")
+    end
     truthy(next(s.images), "the images kept")
   end)
 
@@ -591,6 +593,224 @@ end
 local function text_rows()
   return vim.fn.getwininfo(vim.api.nvim_get_current_win())[1].height
 end
+
+--- The viewer in window `win`, once it is not `other` and has drawn its page.
+---@return PdfView.Session
+local function view_in(win, other)
+  local view
+  wait_for(function()
+    view = viewer.sessions[vim.api.nvim_win_get_buf(win)]
+    return view ~= nil and view ~= other and view.slot ~= 0 and view.job == nil and view.target == nil
+  end, "the window's own view")
+  return view
+end
+
+--- The image id that the placeholders of `buf` are highlighted with.
+local function image_of(buf)
+  local marks = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+  return marks[1] and tonumber((marks[1][4].hl_group or ""):match("^PdfViewImage(%d+)$"))
+end
+
+describe("viewer in several windows", function()
+  setup()
+
+  it("gives a split a view of its own, which turns its pages on its own", function()
+    reset()
+    local s = open(make("windows-split", pages(4)))
+    press("2G")
+    on_page(s, 2)
+    local first = vim.api.nvim_get_current_win()
+    vim.cmd("vsplit")
+    local second = vim.api.nvim_get_current_win()
+    local view = view_in(second, s)
+    eq(s.buf, vim.api.nvim_win_get_buf(first), "the first window keeps the viewer")
+    eq(s.path, view.path)
+    eq(2, view.page, "starts on the page the viewer is on")
+    eq(false, vim.bo[view.buf].buflisted, "not a buffer for :ls and :bnext")
+    eq("pdf-view", vim.bo[view.buf].filetype)
+    eq(vim.fn.fnamemodify(s.path, ":t"), vim.fn.fnamemodify(vim.api.nvim_buf_get_name(view.buf), ":t"))
+
+    press("4G")
+    on_page(view, 4)
+    eq(2, s.page, "the other window stays on its page")
+    vim.api.nvim_set_current_win(first)
+    press("1G")
+    on_page(s, 1)
+    eq(4, view.page)
+    eq(s.ids[s.slot], image_of(s.buf))
+    eq(view.ids[view.slot], image_of(view.buf))
+    truthy(image_of(s.buf) ~= image_of(view.buf), "each window has an image of its own")
+    eq("1 / 4", viewer.status(s.buf))
+    eq("4 / 4", viewer.status(view.buf))
+  end)
+
+  it("starts the view with the fit, zoom, search and marks of the viewer", function()
+    reset()
+    local s = open(make("windows-state", pages(3)))
+    press("w")
+    press("+")
+    settle(s)
+    s.marks.a = { page = 3, mode = "page", zoom = 1, cx = 0.5, cy = 0.5 }
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    eq({ "width", s.zoom }, { view.mode, view.zoom })
+    eq(3, view.marks.a.page)
+    view.marks.b = view.marks.a
+    eq(nil, s.marks.b, "marks set in one window are its own")
+  end)
+
+  it("starts the view with the rotation of the viewer, and turns its pages on its own", function()
+    reset()
+    local s = open(make("windows-rotation", pages(2)))
+    press(">")
+    wait_for(function()
+      return s.rotation == 90 and s.job == nil and s.target == nil
+    end, "the viewer turned")
+    vim.cmd("vsplit")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    eq(90, view.rotation, "starts turned as the viewer is")
+    press(">")
+    wait_for(function()
+      return view.rotation == 180 and view.job == nil and view.target == nil
+    end, "the view turned")
+    eq(90, s.rotation, "the other window stays turned as it was")
+    truthy(viewer.status(view.buf):find("180°", 1, true), viewer.status(view.buf))
+  end)
+
+  it("gives a window that switches to a viewer on screen in another window a view of its own", function()
+    reset()
+    local s = open(make("windows-buffer", pages(3)))
+    local first = vim.api.nvim_get_current_win()
+    vim.cmd("vnew")
+    vim.cmd.buffer(s.buf)
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    eq(s.buf, vim.api.nvim_win_get_buf(first))
+    eq(true, view.own_view)
+  end)
+
+  it("takes the view away with its window, and leaves the viewer and its worker working", function()
+    reset()
+    local s = open(make("windows-close", pages(3)))
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    local buf = view.buf
+    press("3G")
+    on_page(view, 3)
+    vim.cmd("close")
+    wait_for(function()
+      return not vim.api.nvim_buf_is_valid(buf)
+    end, "the view wiped")
+    eq(nil, viewer.sessions[buf])
+    eq(true, view.closed)
+    eq(false, s.closed)
+    press("2G")
+    on_page(s, 2)
+    local position = require("pdf-view.positions").get(s.path)
+    eq(false, position ~= nil and position.page == 3, "the view's page is not the PDF's reading position")
+  end)
+
+  it("reads a window's own view again on :edit, as the same view", function()
+    reset()
+    local s = open(make("windows-edit", pages(3)))
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    press("3G")
+    on_page(view, 3)
+    vim.cmd.edit()
+    local again = view_in(vim.api.nvim_get_current_win(), view)
+    eq(view.buf, again.buf)
+    eq(true, again.own_view)
+    eq(s.path, again.path)
+    eq(3, again.page)
+    eq(1, s.page)
+  end)
+
+  it("keeps the worker that a window's own view shares while the viewer is in no window", function()
+    reset()
+    local stop_worker_after = viewer.stop_worker_after
+    viewer.stop_worker_after = 200
+    local s = open(make("windows-worker", pages(3)))
+    local first = vim.api.nvim_get_current_win()
+    vim.cmd("vsplit")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    vim.api.nvim_win_call(first, function()
+      vim.cmd.enew()
+    end)
+    vim.wait(600)
+    viewer.stop_worker_after = stop_worker_after
+    truthy(mupdf.has_worker(s.path), "the worker kept")
+    press("3G")
+    on_page(view, 3)
+  end)
+
+  it("opens a PDF on screen in another window with a view of its own, and returns its buffer", function()
+    reset()
+    local s = open(make("windows-open", pages(2)))
+    local first = vim.api.nvim_get_current_win()
+    vim.cmd("vnew")
+    local buf = pdf_view.open(s.path)
+    eq(vim.api.nvim_get_current_buf(), buf)
+    truthy(buf ~= s.buf, "not the viewer of the other window")
+    eq(true, viewer.sessions[buf].own_view)
+    eq(s.buf, vim.api.nvim_win_get_buf(first))
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    press("2G")
+    on_page(view, 2)
+    eq(buf, pdf_view.open(s.path), "the window's own view stays")
+    eq(2, view.page)
+  end)
+
+  it("remembers the position of the window on the PDF that was used last", function()
+    reset()
+    local positions = require("pdf-view.positions")
+    local s = open(make("windows-position", pages(5)))
+    press("2G")
+    on_page(s, 2)
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    press("4G")
+    on_page(view, 4)
+    vim.cmd("wincmd p") -- the viewer's window, used last
+    vim.cmd("wincmd p") -- the split again
+    vim.cmd("wincmd o") -- the viewer is in no window now; reading goes on in the split
+    press("5G")
+    on_page(view, 5)
+    vim.cmd.enew() -- the split's view hidden, the window still there
+    vim.cmd("vnew")
+    vim.cmd("wincmd o") -- its window closed: the view goes
+    wait_for(function()
+      return view.closed
+    end, "the view wiped")
+    eq(5, positions.get(s.path).page, "the page of the view that was read last")
+    vim.cmd("silent! %bwipeout!") -- the viewer unloaded too, used before the view: it leaves the position alone
+    eq(5, positions.get(s.path).page)
+  end)
+
+  it("names a view of its own after views that a session brought back", function()
+    reset()
+    local s = open(make("windows-names", pages(2)))
+    vim.cmd("vsplit")
+    local first = view_in(vim.api.nvim_get_current_win(), s)
+    local number = tonumber(vim.api.nvim_buf_get_name(first.buf):match("^pdf%-view://(%d+)/"))
+    vim.cmd("close")
+    -- the name the next view would have, as `:source Session.vim` names a view it brings back
+    local taken = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(taken, ("pdf-view://%d/%s"):format(number + 1, s.path))
+    vim.cmd("vsplit")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    eq(true, view.own_view)
+    truthy(view.buf ~= taken, "a view of its own, under another name")
+  end)
+
+  it("leaves a floating window on a viewer alone", function()
+    reset()
+    local s = open(make("windows-float", pages(2)))
+    local float = vim.api.nvim_open_win(s.buf, false, { relative = "editor", row = 1, col = 1, width = 20, height = 5 })
+    vim.wait(100)
+    eq(s.buf, vim.api.nvim_win_get_buf(float))
+    vim.api.nvim_win_close(float, true)
+  end)
+end)
 
 describe("viewer zoom", function()
   setup()
@@ -1189,7 +1409,7 @@ describe("viewer fit modes", function()
     press("w")
     settle(s)
     local before = s.grid_key
-    vim.cmd("vsplit")
+    vim.cmd("vnew | wincmd p")
     wait_for(function()
       return s.grid_key ~= before and s.job == nil
     end, "re-layout after the split")
@@ -1904,7 +2124,7 @@ describe("viewer reflowable documents", function()
     truthy(before.page > 1, "the match is past the first page")
     local start = bare_text(s, s.page):sub(1, 40)
 
-    vim.cmd("vsplit")
+    vim.cmd("vnew | wincmd p")
     wait_for(function()
       return s.laid_out and s.laid_out.key ~= before.key and s.job == nil and s.search_job == nil
     end, "the new layout")
@@ -2369,6 +2589,28 @@ describe("viewer links", function()
     press(vim.keycode("<C-i>"))
     eq(buf, vim.api.nvim_get_current_buf(), "<C-i> goes forward to the other PDF again")
     on_page(t, 3)
+  end)
+
+  it("follows a link from a split's view of its own, and <C-o> comes back to that view", function()
+    reset()
+    local source = documents("links-view")
+    local s = open(source)
+    vim.cmd("vsplit")
+    local win = vim.api.nvim_get_current_win()
+    local view = view_in(win, s)
+    press("2G")
+    on_page(view, 2)
+    press("1G")
+    on_page(view, 1)
+    follow_answering(2, by_uri("#page=3"))
+    local t = viewer.sessions[vim.api.nvim_get_current_buf()]
+    truthy(t and t ~= view and t ~= s, "the other PDF in the split")
+    on_page(t, 3)
+    eq(true, vim.api.nvim_buf_is_valid(view.buf), "the view is kept while its window shows another buffer")
+    press(vim.keycode("<C-o>"))
+    eq(view.buf, vim.api.nvim_get_current_buf(), "<C-o> goes back to the window's own view")
+    eq(win, vim.api.nvim_get_current_win())
+    eq(s.buf, vim.api.nvim_win_get_buf(vim.fn.win_getid(vim.fn.winnr("#"))), "the other window keeps the viewer")
   end)
 
   it("opens a link to a named destination of another PDF at its page", function()
@@ -3699,6 +3941,21 @@ describe("viewer in zellij", function()
     truthy(writes[#writes]:find("^\0277") and writes[#writes]:find("\0278$"), "the cursor is saved and restored")
   end)
 
+  it("places the page of each window's own view", function()
+    reset()
+    local s = open(make("zellij-views", pages(2)))
+    vim.cmd("vsplit")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    press("2G")
+    on_page(view, 2)
+    vim.cmd.redraw()
+    wait_for(function()
+      return s.placed ~= nil and view.placed ~= nil and s.placed.count > 0 and view.placed.count > 0
+    end, "both pages placed")
+    truthy(s.placed.id ~= view.placed.id, "an image each")
+    eq(1, s.page)
+  end)
+
   it("follows its window when another one opens above it", function()
     reset()
     local s = open(make("zellij-split", pages(1)))
@@ -4776,7 +5033,7 @@ describe("viewer password-protected documents", function()
 
     -- a resized window shows the page again, which keeps the message and does not ask
     local before = s.requested_key
-    vim.cmd("vsplit")
+    vim.cmd("vnew | wincmd p")
     wait_for(function()
       return s.requested_key ~= before and s.job == nil
     end, "re-layout after the split")
@@ -5040,6 +5297,76 @@ describe("viewer SyncTeX", function()
       return s.synced ~= nil and s.page == 2 and s.job == nil and s.target == nil
     end, "the viewer on page 2")
     eq(2, #vim.api.nvim_tabpage_list_wins(0), "no other split opens")
+    setup()
+  end)
+
+  it("forward search moves the view of the PDF that was used last, of the windows that show it", function()
+    setup({ synctex = fake })
+    reset()
+    local pdf, tex = project("sync-views")
+    answer("view", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Page:2",
+      "x:72",
+      "y:400",
+      "h:72",
+      "v:400",
+      "W:300",
+      "H:40",
+      "SyncTeX result end",
+    })
+    vim.cmd.edit(vim.fn.fnameescape(tex))
+    local source = vim.api.nvim_get_current_win()
+    vim.cmd("vertical rightbelow split")
+    local s = open(pdf)
+    vim.cmd("split")
+    local view = view_in(vim.api.nvim_get_current_win(), s)
+    vim.api.nvim_set_current_win(source)
+    vim.cmd("PdfViewForward")
+    wait_for(function()
+      return view.synced ~= nil and view.page == 2 and view.job == nil and view.target == nil
+    end, "the view on page 2")
+    eq(1, s.page, "the other window stays")
+    eq(nil, s.synced)
+    eq(3, #vim.api.nvim_tabpage_list_wins(0), "no other split opens")
+    setup()
+  end)
+
+  it("forward search to a PDF on screen in another tab opens a split with a view of its own", function()
+    setup({ synctex = fake })
+    reset()
+    local pdf, tex = project("sync-tab")
+    answer("view", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Page:2",
+      "x:72",
+      "y:400",
+      "h:72",
+      "v:400",
+      "W:300",
+      "H:40",
+      "SyncTeX result end",
+    })
+    local s = open(pdf)
+    vim.cmd.tabnew()
+    vim.cmd.edit(vim.fn.fnameescape(tex))
+    local source = vim.api.nvim_get_current_win()
+    vim.cmd("PdfViewForward")
+    local view
+    wait_for(function()
+      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        local candidate = viewer.sessions[vim.api.nvim_win_get_buf(win)]
+        if candidate and candidate ~= s then
+          view = candidate
+        end
+      end
+      return view ~= nil and view.synced ~= nil and view.page == 2 and view.job == nil and view.target == nil
+    end, "a view of its own on page 2")
+    eq(source, vim.api.nvim_get_current_win(), "the cursor stays in the source")
+    eq(1, s.page, "the viewer in the other tab stays")
+    vim.cmd("silent! tabonly")
     setup()
   end)
 

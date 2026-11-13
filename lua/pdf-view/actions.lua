@@ -65,6 +65,7 @@ end
 ---@param waited? boolean the user is waiting for it, so the winbar says "searching…" until it finishes
 local function start_search(s, needle, done, waited)
   cancel_search(s)
+  session.use_layout(s)
   local job
   job = mupdf.search(s.path, needle, config.options.search_limit, function(...)
     if s.search_job ~= job then
@@ -634,6 +635,7 @@ local function show_synced(s, boxes)
       rects[#rects + 1] = box.rect
     end
   end
+  session.use_layout(s)
   mupdf.info(s.path, page, function(err, info)
     if s.closed then
       return
@@ -753,24 +755,37 @@ function M.forward_search(opts)
         last_err = err and err:match("^cannot run") and err or last_err
         return try(index + 1)
       end
-      -- by the file, not the name: a symlink and the PDF it points to share the viewer
+      -- by the file, not the name: a symlink and the PDF it points to share the viewer. Of several views of it
+      -- (windows of their own, see `viewer.separate`), one on screen in this tab, and of those the one used last.
       local real = vim.uv.fs_realpath(pdf) or pdf
-      local s
+      local tab = vim.api.nvim_get_current_tabpage()
+      local s, shown
       for _, candidate in pairs(session.sessions) do
         if (vim.uv.fs_realpath(candidate.path) or candidate.path) == real and not candidate.closed then
-          s = candidate
+          local in_tab = false
+          for _, win in ipairs(vim.fn.win_findbuf(candidate.buf)) do
+            in_tab = in_tab or vim.api.nvim_win_get_tabpage(win) == tab
+          end
+          local better = not s
+            or (in_tab and not shown)
+            or (
+              in_tab == shown
+              and (
+                candidate.entered > s.entered
+                or (candidate.entered == s.entered and s.own_view and not candidate.own_view)
+              )
+            )
+          if better then
+            s, shown = candidate, in_tab
+          end
         end
-      end
-      local tab = vim.api.nvim_get_current_tabpage()
-      local shown = false
-      for _, win in ipairs(s and vim.fn.win_findbuf(s.buf) or {}) do
-        shown = shown or vim.api.nvim_win_get_tabpage(win) == tab
       end
       if not shown then
         -- next to the source, and back to it: the cursor stays where the search started
         local from = vim.api.nvim_win_is_valid(source_win) and source_win or 0
         vim.api.nvim_win_call(from, function()
           vim.cmd("vertical rightbelow split")
+          -- a viewer on screen in another tab stays there: this window gets a view of its own
           s = session.sessions[require("pdf-view.viewer").open(pdf)]
         end)
         -- the viewer's BufEnter hid the cursor, and nvim_win_call comes back without the BufLeave that shows it
@@ -936,6 +951,7 @@ local function pick_outline(s)
   if s.outline and s.outline.stamp == stamp then
     return choose(s.outline.entries)
   end
+  session.use_layout(s)
   mupdf.outline(s.path, function(err, entries)
     if s.closed then
       return
@@ -961,6 +977,7 @@ local function for_pages_on_screen(s, fetch, done)
     if page > last then
       return done(nil, results)
     end
+    session.use_layout(s)
     fetch(s.path, page, function(err, result)
       if s.closed then
         return
@@ -1115,6 +1132,7 @@ local function open_document(s, link)
   if not link.fragment or not target then
     return
   end
+  session.use_layout(target)
   mupdf.destination(target.path, link.fragment, function(err, dest)
     if target.closed then
       return

@@ -115,6 +115,10 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field last? integer the last page on screen: `page` + 1 when two facing pages are, else `page`
 ---@field parts? PdfView.SheetLayout[] where the pages on screen lie in `geom`, when there are two side by side
 ---@field worker_timer? uv.uv_timer_t stops the mutool worker once the viewer has been in no window for a while
+---@field reflow? PdfView.Layout the layout a reflowable document was last asked for in this viewer's window
+---@field own_view? boolean the buffer is a window's own view of a PDF that another window shows (`viewer.separate`)
+---@field home? integer the window that an own view belongs to: it is wiped once that window closes
+---@field entered integer when the buffer was last entered, to tell which of the viewers of a PDF was used last
 ---@field announced? string the pages on screen that the `User PdfViewPage` autocommand last told of, "page-last"
 ---@field announcing? boolean the `User PdfViewPage` autocommand is about to run
 ---@field closed boolean
@@ -122,6 +126,22 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@type table<integer, PdfView.Session>
 local sessions = {}
 M.sessions = sessions
+
+--- Whether another open viewer shows the file of `s` (a window's own view of it, see `viewer.separate`), and with
+--- `on_screen`, one in a window. They share the file's mutool worker.
+---@param s PdfView.Session
+---@param on_screen? boolean
+---@return boolean
+function M.shares_file(s, on_screen)
+  for _, other in pairs(sessions) do
+    if other ~= s and not other.closed and other.path == s.path then
+      if not on_screen or #vim.fn.win_findbuf(other.buf) > 0 then
+        return true
+      end
+    end
+  end
+  return false
+end
 
 local next_image_id
 
@@ -549,7 +569,9 @@ local function destroy(s)
     s.worker_timer:close()
     s.worker_timer = nil
   end
-  mupdf.release(s.path)
+  if not M.shares_file(s) then -- the worker is the file's: other windows' views of it still ask it for pages
+    mupdf.release(s.path)
+  end
   if s.watcher then
     s.watcher.stop()
   end
@@ -564,6 +586,15 @@ local function destroy(s)
   sessions[s.buf] = nil
   -- a later :edit! attaches a fresh session to the same buffer; don't leave this one's autocmds behind
   pcall(vim.api.nvim_clear_autocmds, { group = augroup, buffer = s.buf })
+end
+
+--- Lay the document of `s` out for its own window again, before asking mutool about it. The layout of a reflowable
+--- document is kept per file, and the views of one file in windows of other sizes take turns with it.
+---@param s PdfView.Session
+local function use_layout(s)
+  if s.reflow then
+    mupdf.set_layout(s.path, s.reflow)
+  end
 end
 
 --- Tell other code, with the `User PdfViewPage` autocommand, that another page is on screen in `s` (or other facing
@@ -632,5 +663,6 @@ M.wrap_text = wrap_text
 M.display_message = display_message
 M.allocate_ids = allocate_ids
 M.destroy = destroy
+M.use_layout = use_layout
 
 return M
