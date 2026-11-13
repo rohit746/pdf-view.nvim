@@ -151,7 +151,7 @@ take a count.
 | `n` `N`                      | next / previous match (`n` repeats the direction of the search; takes a count)  |
 | `<Esc>`                      | remove the search highlights                                                    |
 | `gO`                         | pick a bookmark from the document's outline and go to its page                  |
-| `f`                          | pick a link on the page: go to its page, or open its address                    |
+| `f`                          | pick a link on the page: go to its page or another PDF, or open its address     |
 | `y`                          | yank the page's text, linewise (`"+y`: to the clipboard)                        |
 | `t`                          | show the page's text in a scratch split                                         |
 | `<C-o>` `<C-i>` `<Tab>`      | back / forward through the jump list (takes a count)                            |
@@ -242,9 +242,11 @@ bookmarks say so.
 `f` lists the links on the page on screen, top to bottom, with the text under each and where it leads, through
 `vim.ui.select`. A link to a page of the document goes there (a jump, so `<C-o>` comes back), with the point it leads to,
 like a figure or a citation, at the top of the window when the page is zoomed or fitted to its width; a web address or
-an e-mail opens with `vim.ui.open()`. Any other address, such as a `file:` address or a PDF's Launch action, could start
-a program, so `f` shows it in full and asks before opening it; `link_schemes` lists the schemes that open without
-asking. A page without links says so.
+an e-mail opens with `vim.ui.open()`. A link to another PDF, or to any file with one of the `extensions`, opens it in a
+viewer in the same window, at the page or named destination it leads to; a relative name is found next to the PDF with
+the link, the picker shows it as `other.pdf, p. 3`, and `<C-o>` comes back. Any other address, such as another `file:`
+address or a PDF's Launch action, could start a program, so `f` shows it in full and asks before opening it;
+`link_schemes` lists the schemes that open without asking. A page without links says so.
 
 ### Page text
 

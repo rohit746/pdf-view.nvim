@@ -49,6 +49,13 @@ All notable changes to this project are documented here. The format follows
   document in memory, until Neovim exited or the buffer was wiped. The process is stopped once the viewer has been
   in no window for 30 seconds, and started again when a page that was not drawn yet is needed.
 
+### Added
+
+- `f` opens a link to another PDF (a `/GoToR` action, as in document sets and papers that link to a supplement), or
+  to any file with one of the `extensions`, in a viewer in the same window, at the page or named destination it leads
+  to. A relative name is found next to the PDF with the link, and `<C-o>` comes back to it. The picker shows such a
+  link as `other.pdf, p. 3`. Before, the address went to `vim.ui.open()` and the system's PDF viewer.
+
 ### Security
 
 - `f` opened every link that does not lead into the document with `vim.ui.open()`, including `file:` addresses and
