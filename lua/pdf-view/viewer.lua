@@ -316,6 +316,7 @@ function M.attach(buf)
         leave(s)
       end
       destroy(s)
+      actions.set_global_wheel() -- removed with the last viewer
     end,
   })
 

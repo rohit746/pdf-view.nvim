@@ -364,19 +364,20 @@ local function move(s, dx, dy)
   go(s, session.spread_step(s, s.target or s.page, forward and count or -count), anchor)
 end
 
---- The mouse wheel moves the viewer it is over, as `move` does. These keys are mapped in the focused viewer only,
---- so over any other window the wheel does what it would do there without the mapping.
----@param s PdfView.Session
+--- The mouse wheel moves the viewer it is over, as `move` does. These keys are mapped in each viewer, and while a
+--- viewer is open also globally (`set_global_wheel`), so the wheel moves a viewer the cursor is not in. Over any other
+--- window the wheel does what it would do there without the mappings.
+---@param s? PdfView.Session the focused viewer; nil for the global mappings
 ---@param dx -1|0|1
 ---@param dy -1|0|1
 ---@param lhs string the key that was pressed
 local function wheel(s, dx, dy, lhs)
   local win = vim.fn.getmousepos().winid
-  if win == 0 then -- no mouse position: the key came from a script or another mapping
+  if win == 0 and s then -- no mouse position: the key came from a script or another mapping
     return move(s, dx, dy)
   end
-  local over = session.sessions[vim.api.nvim_win_get_buf(win)]
-  if over then
+  local over = win ~= 0 and session.sessions[vim.api.nvim_win_get_buf(win)]
+  if over and not over.closed then
     return move(over, dx, dy)
   end
   vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
@@ -1380,8 +1381,62 @@ ACTIONS.help = {
   end,
 }
 
+--- The direction of each wheel action, as `wheel` takes it.
+local WHEEL = { scroll_down = { 0, 1 }, scroll_up = { 0, -1 }, scroll_right = { 1, 0 }, scroll_left = { -1, 0 } }
+
+--- The global wheel mappings that `set_global_wheel` made, to remove them again.
+---@type { mode: string, lhs: string, callback: function }[]
+local global_wheel = {}
+
+--- The global (not buffer-local) mapping of `lhs` in `mode`, if there is one.
+---@param mode string
+---@param lhs string
+---@return table?
+local function global_mapping(mode, lhs)
+  local raw = vim.keycode(lhs)
+  for _, map in ipairs(vim.api.nvim_get_keymap(mode)) do
+    if map.lhsraw == raw or map.lhsrawalt == raw then
+      return map
+    end
+  end
+end
+
+--- While a viewer is open, map the wheel keys of the `scroll_*` actions globally, in normal and insert mode, so the
+--- wheel over a viewer moves it while the cursor is in another window (the TeX or Typst source beside its PDF). Over
+--- other windows the key is passed on unmapped. A key the user has mapped globally is left alone, and only keys of
+--- the wheel itself are mapped. The mappings are removed when the last viewer closes.
+local function set_global_wheel()
+  for _, done in ipairs(global_wheel) do
+    local map = global_mapping(done.mode, done.lhs)
+    if map and map.callback == done.callback then -- not replaced by the user's own mapping since
+      pcall(vim.keymap.del, done.mode, done.lhs)
+    end
+  end
+  global_wheel = {}
+  local keymaps = config.options.keymaps
+  if not keymaps or next(session.sessions) == nil then
+    return
+  end
+  for action, dir in pairs(WHEEL) do
+    for _, lhs in ipairs(keymaps[action] or {}) do
+      if lhs:lower():find("scrollwheel", 1, true) then
+        for _, mode in ipairs({ "n", "i" }) do
+          if not global_mapping(mode, lhs) then
+            local function callback()
+              wheel(nil, dir[1], dir[2], lhs)
+            end
+            local desc = "PDF: " .. ACTIONS[action].desc .. " in the viewer under the mouse"
+            vim.keymap.set(mode, lhs, callback, { silent = true, desc = desc })
+            global_wheel[#global_wheel + 1] = { mode = mode, lhs = lhs, callback = callback }
+          end
+        end
+      end
+    end
+  end
+end
+
 --- Map the keys of `config.options.keymaps` in the viewer's buffer, replacing the ones mapped before (`setup()` may
---- have changed them since).
+--- have changed them since), and the global wheel keys.
 ---@param s PdfView.Session
 local function set_keymaps(s)
   for _, lhs in ipairs(s.mapped or {}) do
@@ -1390,7 +1445,7 @@ local function set_keymaps(s)
   s.mapped = {}
   local keymaps = config.options.keymaps
   if not keymaps then
-    return
+    return set_global_wheel()
   end
   for action, keys in pairs(keymaps) do
     for _, lhs in ipairs(keys) do
@@ -1400,11 +1455,13 @@ local function set_keymaps(s)
       s.mapped[#s.mapped + 1] = lhs
     end
   end
+  set_global_wheel()
 end
 
 M.rescan = rescan
 -- a reflowable document laid out again has its matches on other pages
 render.on_reflow = rescan
 M.set_keymaps = set_keymaps
+M.set_global_wheel = set_global_wheel
 
 return M
