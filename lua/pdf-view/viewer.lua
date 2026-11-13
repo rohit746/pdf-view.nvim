@@ -8,6 +8,7 @@ local kitty = require("pdf-view.kitty")
 local mupdf = require("pdf-view.mupdf")
 local positions = require("pdf-view.positions")
 local render = require("pdf-view.render")
+local rotation = require("pdf-view.rotation")
 local session = require("pdf-view.session")
 local terminal = require("pdf-view.terminal")
 local watch = require("pdf-view.watch")
@@ -36,7 +37,7 @@ local reread = vim.api.nvim_create_augroup("PdfViewReread", { clear = true })
 --- Where the viewer `s` is, for `resume`.
 ---@param s PdfView.Session
 local function position(s)
-  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy, rotation = s.rotation }
 end
 
 --- What `resume` keeps of the viewer `s`: where it is, its jump list and its marks.
@@ -226,6 +227,7 @@ function M.attach(buf)
     page = last.page or 1,
     mode = last.mode or "page",
     zoom = math.max(1, math.min(last.zoom or 1, config.options.max_zoom)),
+    rotation = rotation.valid(last.rotation) and last.rotation or 0,
     cx = math.max(0, math.min(last.cx or 0.5, 1)),
     cy = math.max(0, math.min(last.cy or 0.5, 1)),
     jumps = last.jumps or {},
@@ -451,7 +453,8 @@ function M.open(path)
   return buf
 end
 
---- "page / pages" of the viewer in `buf`, plus "x1.56" while zoomed, for statuslines. Empty for other buffers.
+--- "page / pages" of the viewer in `buf`, plus the fit, "x1.56" while zoomed and "90°" while the pages are turned, for
+--- statuslines. Empty for other buffers.
 ---@param buf? integer
 ---@return string
 function M.status(buf)
@@ -461,7 +464,8 @@ function M.status(buf)
   end
   local mode = s.mode ~= "page" and (" " .. s.mode) or ""
   local zoom = s.zoom > 1 and (" x%.2f"):format(s.zoom) or ""
-  return ("%s / %s%s%s"):format(session.pages_label(s), s.count or "?", mode, zoom)
+  local turned = s.rotation ~= 0 and (" %d°"):format(s.rotation) or ""
+  return ("%s / %s%s%s%s"):format(session.pages_label(s), s.count or "?", mode, zoom, turned)
 end
 
 return M

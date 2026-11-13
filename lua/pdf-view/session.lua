@@ -56,6 +56,8 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field mode PdfView.FitMode what zoom 1 means: the whole page, the page as wide / as tall as the window, or the
 --- part of the page with content on it
 ---@field zoom number multiplies the fitted size: 1 is as fitted, 2 is twice that
+---@field rotation PdfView.Rotation how far every page is turned clockwise, in degrees. `geom`, `fit`, `cx` and `cy` are
+--- of the turned pages; search matches and SyncTeX boxes stay in the unturned page's points
 ---@field search? PdfView.Search the active search, whose matches are highlighted
 ---@field search_job? PdfView.Job in-flight search
 ---@field searching? string the needle of the in-flight search, for the winbar
@@ -418,6 +420,9 @@ local function update_winbar(s, win)
   end
   if s.zoom > 1 then
     label[#label + 1] = ("%d%%"):format(math.floor(s.zoom * 100 + 0.5))
+  end
+  if s.rotation ~= 0 then
+    label[#label + 1] = ("%d°"):format(s.rotation)
   end
 
   local found = ""

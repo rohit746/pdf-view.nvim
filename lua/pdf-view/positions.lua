@@ -1,5 +1,7 @@
 --- Where each PDF was being read, kept across Neovim restarts in a JSON file under `stdpath("state")`. Keyed by the
 --- absolute path of the PDF; only the `LIMIT` most recently left files are kept.
+local rotation = require("pdf-view.rotation")
+
 local M = {}
 
 local uv = vim.uv
@@ -27,9 +29,10 @@ local function load()
   return ok and type(decoded) == "table" and decoded or {}
 end
 
---- A position read from the file, or nil when it is missing or malformed.
+--- A position read from the file, or nil when it is missing or malformed. A rotation that is missing (a position
+--- written before pages could be turned) or not one of the four is 0.
 ---@param entry any
----@return { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }?
+---@return PdfView.Position?
 local function sanitize(entry)
   if type(entry) ~= "table" then
     return nil
@@ -45,7 +48,8 @@ local function sanitize(entry)
   then
     return nil
   end
-  return { page = math.floor(page), mode = mode, zoom = zoom, cx = cx, cy = cy }
+  local turned = rotation.valid(entry.rotation) and entry.rotation or 0
+  return { page = math.floor(page), mode = mode, zoom = zoom, cx = cx, cy = cy, rotation = turned }
 end
 
 --- The position `path` was left at, if it is remembered.
@@ -56,7 +60,7 @@ end
 
 --- Remember `position` for `path`, dropping the oldest entries past `LIMIT`.
 ---@param path string absolute
----@param position { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }
+---@param position PdfView.Position
 function M.set(path, position)
   local entries = load()
   entries[path] = vim.tbl_extend("force", position, { time = os.time() })

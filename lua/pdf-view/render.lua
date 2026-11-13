@@ -207,6 +207,9 @@ local function sheet_parts(s, info, scale_x, scale_y, x, y, width, height, band)
         dy = dy,
         clip = clip,
         highlights = highlights,
+        rotation = s.rotation,
+        width = part.width, -- the size of the turned page, for a click on it (`actions.point_at`)
+        height = part.height,
       }
       keys[#keys + 1] = part.page .. "=" .. highlights_key
     end
@@ -272,6 +275,7 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
           height = view.height,
           highlights = highlights,
           recolor = recolor,
+          rotation = s.rotation,
         }
         return mupdf.render_clip(s.path, info.page, clip, out, cb)
       end
@@ -303,10 +307,11 @@ local function plan(s, info, stamp, cols, rows, cell, cx, cy)
           height = fit.height,
           highlights = highlights,
           recolor = recolor,
+          rotation = s.rotation,
         }
         return mupdf.render_clip(s.path, info.page, clip, out, cb)
       end
-      return mupdf.render(s.path, info.page, fit.width, fit.height, out, cb, recolor)
+      return mupdf.render(s.path, info.page, fit.width, fit.height, out, cb, recolor, s.rotation)
     end
 end
 
@@ -339,7 +344,7 @@ local function sheet_of(s, stamp, first, last, content, track, cb)
       end
       infos[#infos + 1] = info
       step(page + 1)
-    end, content))
+    end, content, nil, s.rotation))
   end
   step(first)
 end
@@ -815,12 +820,12 @@ local function show(s, page, opts)
   if not stat then
     return fail("file not found: " .. s.path)
   end
-  -- what the page geometry and the renders are kept under: the file, and the layout of a reflowable one
-  local stamp = stamp_of(stat)
-  s.requested_key, s.requested_stamp = key, stamp
-  if s.reflowable then
-    stamp = stamp .. "@" .. reflow_key
-  end
+  -- what the page geometry and the renders are kept under: the file, the layout of a reflowable one, and how far the
+  -- pages are turned
+  local file_stamp = stamp_of(stat)
+  s.requested_key, s.requested_stamp = key, file_stamp
+  local turned = s.rotation ~= 0 and ("@r%d"):format(s.rotation) or ""
+  local stamp = file_stamp .. (s.reflowable and "@" .. reflow_key or "") .. turned
 
   local draw
 
@@ -837,7 +842,7 @@ local function show(s, page, opts)
     if info.reflowable then
       if not s.reflowable then
         s.reflowable = true
-        stamp = stamp .. "@" .. reflow_key
+        stamp = file_stamp .. "@" .. reflow_key .. turned
       end
       info.layout = reflow
     end
@@ -937,14 +942,14 @@ local function show(s, page, opts)
   local laid_out = s.laid_out
   if s.reflowable and not page and laid_out and laid_out.key ~= reflow_key then
     M.on_reflow(s)
-    s.job = mupdf.info(s.path, wanted, on_info, content, laid_out.size)
+    s.job = mupdf.info(s.path, wanted, on_info, content, laid_out.size, s.rotation)
     return
   end
   local known = known_info(s, stamp, wanted)
   if known and (known.content or not content) then
     return on_info(nil, known)
   end
-  s.job = mupdf.info(s.path, wanted, on_info, content)
+  s.job = mupdf.info(s.path, wanted, on_info, content, nil, s.rotation)
 end
 
 --- Show the page again if the window changed size or the file changed on disk since it was last rendered.

@@ -43,8 +43,8 @@ the layout, so marks and the jump list may point elsewhere afterwards.
 The viewer is a buffer named after the file with 'buftype' `nofile` and
 'filetype' `pdf-view`. Its winbar shows "<file>  <page> / <pages>".
 
-A PDF opens at the page, fit and zoom it was left at, also after Neovim is
-restarted: the last 100 are kept in
+A PDF opens at the page, fit, zoom and rotation it was left at, also after
+Neovim is restarted: the last 100 are kept in
 `stdpath("state")/pdf-view/positions.json`. Set `remember_position = false`
 to always start on the first page.
 
@@ -92,6 +92,9 @@ The keys that move, zoom or step between matches accept a count.
   W                       fit the page's height to the window
   c                       fit the page's content to the window, cropping
                           the margins
+  > <                     turn the pages a quarter turn clockwise /
+                          counter-clockwise ({count} turns): see
+                          |pdf-view-rotation|
   /                       search forward (prompts for text)
   ?                       search backward
   n N                     next / previous match ({count} matches)
@@ -104,7 +107,8 @@ The keys that move, zoom or step between matches accept a count.
   t                       show the page's text in a scratch split
   <C-o>                   back through the jump list ({count} jumps)
   <C-i> <Tab>             forward through the jump list
-  m{a-z}                  mark the page, with its fit, zoom and view
+  m{a-z}                  mark the page, with its fit, zoom, rotation and
+                          view
   '{a-z} `{a-z}           go to a mark
   '' ``                   back to where the latest jump started
   <2-LeftMouse>           open the TeX source at the line the point under
@@ -151,6 +155,15 @@ plus a few points of paper, so wide margins are cropped away. Each page is
 cropped to its own content, found the first time the page is shown in this
 mode and remembered until the file changes. Zoomed in, the view scrolls over
 the content only. A page with a coloured background is shown whole.
+
+                                                          *pdf-view-rotation*
+`>` turns every page a quarter turn clockwise, `<` a quarter turn back
+(keymaps `rotate` and `rotate_back`; `2>` turns the pages upside down). The
+rotation applies to every page, like the fit, and fitting, zoom and
+scrolling work on the turned page. The point in the middle of the window
+stays there. The winbar shows it ("90°"), and it is kept with the remembered
+position, in marks and in the jump list. Search highlights, SyncTeX, links,
+bookmarks and the `c` fit follow the turned page. The file is never changed.
 
                                                               *pdf-view-search*
 `/` and `?` prompt (via |vim.ui.input()|) for text and search the whole
@@ -212,9 +225,9 @@ viewer keeps a jump list of where they started: `<C-o>` goes back through
 it, `<C-i>` forward, and `''` swaps with the position before the latest jump.
 Past either end of that list, `<C-o>` and `<C-i>` go on through Vim's own
 |jumplist|, back to the file the document was opened from. Page turns and
-scrolling are not jumps. `m{a-z}` marks the page with its fit, zoom and
-view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and the jump list
-belong to the viewer and stay through |:edit|.
+scrolling are not jumps. `m{a-z}` marks the page with its fit, zoom,
+rotation and view, and `'{a-z}` or `` `{a-z} `` goes back to it. Marks and
+the jump list belong to the viewer and stay through |:edit|.
 
                                                              *pdf-view-spread*
 `d` shows two facing pages side by side, and `d` again one page at a time.
@@ -288,9 +301,9 @@ require("pdf-view").forward_search({opts})   *pdf-view.forward_search()*
     the cursor.
 
 require("pdf-view").status({buf})                    *pdf-view.status()*
-    Returns "page / pages" for a viewer buffer ("page / pages width x1.25"
-    while fitted to the width and zoomed), "" otherwise. Handy in a
-    statusline: `%{v:lua.require'pdf-view'.status()}`.
+    Returns "page / pages" for a viewer buffer ("page / pages width x1.25
+    90°" while fitted to the width, zoomed and turned), "" otherwise. Handy
+    in a statusline: `%{v:lua.require'pdf-view'.status()}`.
 
 ==============================================================================
 CONFIGURATION                                              *pdf-view-config*

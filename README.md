@@ -110,13 +110,13 @@ require("pdf-view").open("paper.pdf")
 
 The viewer is a regular buffer named after the file, so buffer lists, `:bdelete`, session plugins and statuslines work
 as usual. Its winbar shows `paper.pdf   3 / 11`; for a statusline use `require("pdf-view").status()` (`3 / 11`, with
-`width` and `x1.25` added while fitted to the width or zoomed).
+`width`, `x1.25` and `90°` added while fitted to the width, zoomed or turned).
 
 A session (`:mksession`, or a session plugin) brings the viewer back only when `'sessionoptions'` has `blank`, as it
 does by default. Without it the session leaves the viewer's window out; persistence.nvim with LazyVim's settings saves
 sessions this way. Add it with `vim.opt.sessionoptions:append("blank")`.
 
-A PDF opens where you left it: the page, fit and zoom of the last 100 PDFs are kept in
+A PDF opens where you left it: the page, fit, zoom and rotation of the last 100 PDFs are kept in
 `stdpath("state")/pdf-view/positions.json`, so this survives restarting Neovim. `remember_position = false` turns it
 off.
 
@@ -147,6 +147,7 @@ take a count.
 | `w`                          | fit the page's width to the window                                              |
 | `W`                          | fit the page's height to the window                                             |
 | `c`                          | fit the page's content to the window, cropping the margins                      |
+| `>` `<`                      | turn the pages a quarter clockwise / counter-clockwise; see [Rotation](#rotation) |
 | `/`                          | search forward: prompts for text, jumps to the first match                      |
 | `?`                          | search backward                                                                 |
 | `n` `N`                      | next / previous match (`n` repeats the direction of the search; takes a count)  |
@@ -157,7 +158,7 @@ take a count.
 | `y`                          | yank the page's text, linewise (`"+y`: to the clipboard)                        |
 | `t`                          | show the page's text in a scratch split                                         |
 | `<C-o>` `<C-i>` `<Tab>`      | back / forward through the jump list (takes a count)                            |
-| `m{a-z}`                     | mark the page, with its fit, zoom and view                                      |
+| `m{a-z}`                     | mark the page, with its fit, zoom, rotation and view                            |
 | `'{a-z}` `` `{a-z} ``        | go to a mark; `''` goes back to where the latest jump started                   |
 | double-click                 | open the TeX source at the line the point was typeset from; see [SyncTeX](#synctex) |
 | `d`                          | show facing pages side by side, or one page at a time; see [Facing pages](#facing-pages) |
@@ -202,6 +203,15 @@ so the text is as large as the window allows. Everything that is not white count
 figures. Each page is cropped to its own content, which is found the first time a page is shown in this mode (one
 extra render of the page) and remembered until the file changes. Zoom scrolls over the content only, leaving the
 margins out. A page with a coloured background has no margins to crop, so it is shown whole.
+
+### Rotation
+
+Scans often have pages lying on their side, and a landscape table in a portrait document reads better turned. `>`
+turns every page a quarter turn clockwise and `<` a quarter turn back (`2>` turns them upside down). The rotation
+applies to every page, like the fit, and the fit, zoom and scrolling work on the turned page: `w` fits the width of the
+turned page. The point in the middle of the window stays there. The winbar shows it (`90°`), and it is kept with the
+position the PDF was left at, in marks and in the jump list. Search highlights, SyncTeX, links and bookmarks follow the
+turned page. Only the view turns: the file is never changed.
 
 ### Search
 
@@ -298,8 +308,8 @@ list of where they started, as Vim does for lines. `<C-o>` goes back through it 
 viewer's list, `<C-o>` and `<C-i>` go on through Vim's own jump list, so `<C-o>` goes back to the file the PDF was
 opened from.
 
-`m{a-z}` marks where the viewer is: the page, its fit, zoom and the centre of the view. `'{a-z}` or `` `{a-z} `` goes
-back to it, as it was. Marks and the jump list belong to the viewer, and they stay through `:edit`.
+`m{a-z}` marks where the viewer is: the page, its fit, zoom, rotation and the centre of the view. `'{a-z}` or
+`` `{a-z} `` goes back to it, as it was. Marks and the jump list belong to the viewer, and they stay through `:edit`.
 
 ### SyncTeX
 
@@ -339,7 +349,7 @@ require("pdf-view").setup({
   reload_delay = 200,      -- ms the file must stay quiet before reloading
   winbar = true,           -- "<file>   <page> / <pages>" in the window's winbar
   hide_cursor = true,      -- hide the cursor while a viewer is focused (it would sit on top of the page)
-  remember_position = true, -- reopen a PDF at its last page, fit and zoom, also after restarting Neovim
+  remember_position = true, -- reopen a PDF at its last page, fit, zoom and rotation, also after restarting Neovim
   mutool = "mutool",       -- executable
   synctex = "synctex",     -- executable, for SyncTeX
   transmission = "auto",   -- "file": the terminal reads the PNG itself; "direct": send the bytes (SSH). auto = SSH-aware
@@ -382,6 +392,8 @@ require("pdf-view").setup({
     fit_width = { "w" },
     fit_height = { "W" },
     fit_content = { "c" },
+    rotate = { ">" },     -- turn the pages clockwise; `2>` turns them upside down
+    rotate_back = { "<" },
     search = { "/" },
     search_back = { "?" },
     search_next = { "n" },
