@@ -11,9 +11,23 @@ describe("positions", function()
   it("reads back what was stored for a path", function()
     use("roundtrip")
     eq(nil, positions.get("/a.pdf"))
-    positions.set("/a.pdf", { page = 7, mode = "width", zoom = 1.5625, cx = 0.25, cy = 0.75 })
-    eq({ page = 7, mode = "width", zoom = 1.5625, cx = 0.25, cy = 0.75 }, positions.get("/a.pdf"))
+    positions.set("/a.pdf", { page = 7, mode = "width", zoom = 1.5625, cx = 0.25, cy = 0.75, rotation = 90 })
+    eq({ page = 7, mode = "width", zoom = 1.5625, cx = 0.25, cy = 0.75, rotation = 90 }, positions.get("/a.pdf"))
     eq(nil, positions.get("/b.pdf"))
+  end)
+
+  it("reads a position without a rotation, or with one that is not a quarter turn, as unturned", function()
+    use("rotation")
+    vim.fn.mkdir(vim.fs.dirname(positions.file), "p")
+    local entries = {
+      ["/old.pdf"] = { page = 2, mode = "page", zoom = 1, cx = 0.5, cy = 0.5 }, -- written before pages could turn
+      ["/odd.pdf"] = { page = 2, mode = "page", zoom = 1, cx = 0.5, cy = 0.5, rotation = 45 },
+      ["/text.pdf"] = { page = 2, mode = "page", zoom = 1, cx = 0.5, cy = 0.5, rotation = "90" },
+    }
+    vim.fn.writefile({ vim.json.encode(entries) }, positions.file)
+    for path in pairs(entries) do
+      eq(0, positions.get(path).rotation, path)
+    end
   end)
 
   it("keeps the layout of an e-book, and drops a malformed one", function()

@@ -21,6 +21,8 @@ local M = {}
 ---@field fit_width string[] fit the page's width to the window
 ---@field fit_height string[] fit the page's height to the window
 ---@field fit_content string[] fit the part of the page with content on it to the window, cropping the margins
+---@field rotate string[] turn every page a quarter turn clockwise (accepts a count: `2>` turns them upside down)
+---@field rotate_back string[] turn every page a quarter turn counter-clockwise
 ---@field search string[] prompt for text and search forward
 ---@field search_back string[] prompt for text and search backward
 ---@field search_next string[] next match, in the direction of the search
@@ -135,6 +137,8 @@ local defaults = {
     fit_width = { "w" },
     fit_height = { "W" },
     fit_content = { "c" },
+    rotate = { ">" },
+    rotate_back = { "<" },
     search = { "/" },
     search_back = { "?" },
     search_next = { "n" },

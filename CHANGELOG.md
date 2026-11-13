@@ -21,6 +21,11 @@ All notable changes to this project are documented here. The format follows
   to any file with one of the `extensions`, in a viewer in the same window, at the page or named destination it leads
   to. A relative name is found next to the PDF with the link, and `<C-o>` comes back to it. The picker shows such a
   link as `other.pdf, p. 3`. Before, the address went to `vim.ui.open()` and the system's PDF viewer.
+- Scans with pages lying on their side, and landscape tables in portrait documents, can be read turned. `>` turns
+  every page a quarter turn clockwise and `<` back (`2>` turns them upside down); the winbar shows `90°`. Fit, zoom,
+  scrolling, the `c` fit, search highlights, SyncTeX, links and bookmarks all follow the turned page, and the rotation
+  is kept with the remembered position, in marks and in the jump list. The `rotate` and `rotate_back` keymaps set the
+  keys. The file itself is never changed.
 
 ### Fixed
 

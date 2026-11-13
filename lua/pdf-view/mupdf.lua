@@ -24,7 +24,7 @@ local CONTENT_MARGIN = 8
 ---@class PdfView.PageInfo
 ---@field count integer pages in the document
 ---@field page integer the requested page, clamped to the document
----@field width number page width in points
+---@field width number page width in points, turned by the rotation it was asked with
 ---@field height number page height in points
 ---@field reflowable boolean the document is laid out to a page size (EPUB, FB2, MOBI), so its pages follow the layout
 ---@field content? number[] `{ x0, y0, x1, y1 }`: the part of the page with something drawn on it, in points from the
@@ -503,9 +503,11 @@ end
 ---@param content? boolean also find the part of the page that has content (`info.content`), which renders the page
 ---@param of? PdfView.Layout `page` is a page of a reflowable document as it was laid out this way: the answer is the
 --- page that now holds the point of the text it starts at
+---@param rotation? PdfView.Rotation measure the page turned clockwise by this many degrees: its size and content
 ---@return PdfView.Job
-function M.info(path, page, cb, content, of)
-  local request = { "info", math.min(math.max(math.floor(page), 1), MAX_PAGE), content == true, of or vim.NIL }
+function M.info(path, page, cb, content, of, rotation)
+  local request =
+    { "info", math.min(math.max(math.floor(page), 1), MAX_PAGE), content == true, of or vim.NIL, rotation or 0 }
   return ask(path, request, function(err, result)
     if err then
       return cb(err)
@@ -542,6 +544,8 @@ end
 ---@field height integer
 ---@field highlights? string rectangles to multiply onto the page, as built by `search.highlights()`
 ---@field recolor? string how to recolour the image, as built by `session.recolor_spec()`: "" (or nil) for not at all
+---@field rotation? PdfView.Rotation the page is drawn turned clockwise by this many degrees; the rectangle is of the
+--- turned page, `highlights` are of the page before it is turned
 
 --- Render a rectangle of a page to a PNG of exactly `clip.width` x `clip.height` pixels. Only that rectangle is
 --- rasterised, so the cost does not grow with the zoom level.
@@ -564,6 +568,7 @@ function M.render_clip(path, page, clip, out, cb)
     out,
     clip.highlights or "",
     clip.recolor or "",
+    clip.rotation or 0,
   }
   return ask(path, request, rendered(out, cb))
 end
@@ -576,6 +581,9 @@ end
 ---@field dy number
 ---@field clip number[] `{ x0, y0, x1, y1 }`: the part of the image the page may draw on, in pixels
 ---@field highlights? string as for `PdfView.Clip`
+---@field rotation? PdfView.Rotation as for `PdfView.Clip`
+---@field width? number the size of the page in points, turned (not sent to mutool: for finding a point on it)
+---@field height? number
 
 --- Render several pages into one PNG of exactly `width` x `height` pixels, such as two facing pages side by side.
 ---@param path string
@@ -600,6 +608,7 @@ function M.render_sheet(path, width, height, parts, out, cb, recolor)
       part.clip[3],
       part.clip[4],
       part.highlights or "",
+      part.rotation or 0,
     }
   end
   local request = { "sheet", math.floor(width), math.floor(height), out, recolor or "", list }
@@ -614,12 +623,14 @@ end
 ---@param out string destination PNG
 ---@param cb fun(err?: string)
 ---@param recolor? string how to recolour the image, as built by `session.recolor_spec()`
+---@param rotation? PdfView.Rotation the page is drawn turned clockwise by this many degrees
 ---@return PdfView.Job
-function M.render(path, page, width, height, out, cb, recolor)
+function M.render(path, page, width, height, out, cb, recolor, rotation)
   local done = rendered(out, function(err)
     cb(err)
   end)
-  return ask(path, { "draw", page, math.floor(width), math.floor(height), out, recolor or "" }, done)
+  local request = { "draw", page, math.floor(width), math.floor(height), out, recolor or "", rotation or 0 }
+  return ask(path, request, done)
 end
 
 --- Copy a rectangle of the PNG `png` (a page rendered before), in its pixels, to the PNG `out`, or stretched to

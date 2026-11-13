@@ -3,6 +3,7 @@ local eq, truthy, wait_for = harness.eq, harness.truthy, harness.wait_for
 local fixture = require("tests.fixture")
 local kitty = require("pdf-view.kitty")
 local mupdf = require("pdf-view.mupdf")
+local rotation = require("pdf-view.rotation")
 local placeholder = require("pdf-view.placeholder")
 local terminal = require("pdf-view.terminal")
 local viewer = require("pdf-view.viewer")
@@ -5097,6 +5098,78 @@ describe("viewer SyncTeX", function()
     setup()
   end)
 
+  it("forward search scrolls to the typeset line on a turned page", function()
+    setup({ synctex = fake })
+    reset()
+    local pdf, tex = project("sync-turned")
+    answer("view", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Page:2",
+      "x:72",
+      "y:400",
+      "h:72",
+      "v:400",
+      "W:300",
+      "H:40",
+      "SyncTeX result end",
+    })
+    vim.cmd.edit(vim.fn.fnameescape(tex))
+    local source = vim.api.nvim_get_current_win()
+    vim.cmd("vertical rightbelow split")
+    local s = open(pdf)
+    press(">w")
+    settle(s)
+    eq({ 90, 792, 612 }, { s.rotation, s.geom.w, s.geom.h })
+    vim.api.nvim_set_current_win(source)
+    vim.cmd("PdfViewForward")
+    wait_for(function()
+      return s.synced ~= nil and s.page == 2 and s.job == nil and s.target == nil
+    end, "the viewer on page 2")
+    eq({ { 72, 360, 372, 400 } }, s.synced.rects, "the box stays in the points SyncTeX gave")
+    -- the middle of the box, 222 points from the left of the 612 point wide page, is that far down the turned page
+    harness.near(222 / 612, s.cy, 0.01, "the line is in the middle of the window")
+    setup()
+  end)
+
+  it("inverse search asks SyncTeX about the point of the page before it was turned", function()
+    setup({ synctex = fake })
+    reset()
+    os.remove(log)
+    local pdf, tex = project("sync-inverse-turned")
+    answer("edit", {
+      "SyncTeX result begin",
+      "Output:" .. pdf,
+      "Input:./sync-inverse-turned.tex",
+      "Line:7",
+      "Column:-1",
+      "SyncTeX result end",
+    })
+    local s = open(pdf)
+    press(">")
+    settle(s)
+    local win = vim.api.nvim_get_current_win()
+    local fit = s.fit
+    -- a quarter of the way down the turned page, in the middle across it
+    local row, col = fit.pad_top + math.floor(fit.rows / 4), fit.pad_left + math.floor(fit.cols / 2)
+    local turned_x = (col - fit.pad_left + 0.5) / fit.cols * 792
+    local turned_y = (row - fit.pad_top + 0.5) / fit.rows * 612
+    with_stub(vim.fn, "getmousepos", function()
+      return { winid = win, winrow = row + 2, wincol = col + 1 }
+    end, function()
+      press(vim.keycode("<2-LeftMouse>"))
+      wait_for(function()
+        return vim.api.nvim_buf_get_name(0) == tex
+      end, "the source")
+    end)
+    local page, x, y = logged()[1]:match("^edit %-o (%d+):([%d.]+):([%d.]+):" .. vim.pesc(pdf) .. "$")
+    eq("1", page)
+    -- turned back: what is down the turned page is across the page, what is across it is up from its bottom
+    harness.near(turned_y, tonumber(x), 612 / fit.rows, "x")
+    harness.near(792 - turned_x, tonumber(y), 792 / fit.cols, "y")
+    setup()
+  end)
+
   it("inverse search opens the source, not another file whose path ends with the source's", function()
     setup({ synctex = fake })
     reset()
@@ -5448,5 +5521,274 @@ describe("viewer continuous scrolling", function()
     on_page(s, 2)
     eq(nil, s.scrolled)
     setup()
+  end)
+end)
+
+describe("viewer rotation", function()
+  setup()
+  local LANDSCAPE = { w = 600, h = 400, color = { 1, 1, 1 } }
+
+  --- How many pages mutool is asked to draw while `body` runs.
+  local function counting_renders(body)
+    local count = 0
+    local render, render_clip, render_sheet = mupdf.render, mupdf.render_clip, mupdf.render_sheet
+    with_stub(mupdf, "render", function(...)
+      count = count + 1
+      return render(...)
+    end, function()
+      with_stub(mupdf, "render_clip", function(...)
+        count = count + 1
+        return render_clip(...)
+      end, function()
+        with_stub(mupdf, "render_sheet", function(...)
+          count = count + 1
+          return render_sheet(...)
+        end, body)
+      end)
+    end)
+    return count
+  end
+
+  it("turns the pages with > and <, a quarter turn each, and says so in the winbar", function()
+    reset()
+    local s = open(make("rotate-keys", { LANDSCAPE, LANDSCAPE }))
+    eq({ 0, 600, 400 }, { s.rotation, s.geom.w, s.geom.h })
+    press(">")
+    settle(s)
+    eq({ 90, 400, 600 }, { s.rotation, s.geom.w, s.geom.h })
+    local paths = transmitted()
+    local width, height = fixture.png_size(paths[#paths])
+    truthy(height > width, ("the page on screen is upright: %dx%d"):format(width, height))
+    truthy(vim.wo.winbar:find("90°", 1, true), vim.wo.winbar)
+    eq("1 / 2 90°", pdf_view.status())
+
+    press("2>")
+    settle(s)
+    eq({ 270, 400, 600 }, { s.rotation, s.geom.w, s.geom.h })
+    press("<")
+    settle(s)
+    eq(180, s.rotation)
+    press("2<")
+    settle(s)
+    eq({ 0, 600, 400 }, { s.rotation, s.geom.w, s.geom.h })
+    eq(false, vim.wo.winbar:find("°", 1, true) ~= nil, vim.wo.winbar)
+
+    -- every page is turned, and a page turn keeps the rotation
+    press(">j")
+    on_page(s, 2)
+    eq({ 90, 400, 600 }, { s.rotation, s.geom.w, s.geom.h })
+  end)
+
+  it("keeps the pages turned each way apart in the render cache", function()
+    reset()
+    local s = open(make("rotate-cache", { LANDSCAPE }))
+    idle(s)
+    eq(
+      1,
+      counting_renders(function()
+        press(">")
+        idle(s)
+      end),
+      "the turned page is drawn"
+    )
+    local turned = 0
+    for key in pairs(s.cache) do
+      turned = turned + (key:find("@r90", 1, true) and 1 or 0)
+    end
+    eq(1, turned, vim.inspect(s.cache))
+    eq(
+      0,
+      counting_renders(function()
+        press("<")
+        idle(s)
+      end),
+      "the page as it was is still in the cache"
+    )
+    eq(0, s.rotation)
+  end)
+
+  it("keeps the rotation where the viewer was left, in the marks and in the jump list", function()
+    reset()
+    local path = make("rotate-remembered", pages(3))
+    local s = open(path)
+    press(">")
+    settle(s)
+    press("ma")
+    press("<")
+    settle(s)
+    eq(0, s.rotation)
+    press("'a")
+    settle(s)
+    eq(90, s.rotation, "the mark turned the pages back")
+    press("G")
+    on_page(s, 3)
+    press("<")
+    settle(s)
+    press(vim.keycode("<C-o>"))
+    on_page(s, 1)
+    eq(90, s.rotation, "the jump came back turned")
+
+    press("3G")
+    on_page(s, 3)
+    vim.cmd("silent! %bwipeout!")
+    eq({ 3, 90 }, {
+      require("pdf-view.positions").get(s.path).page,
+      require("pdf-view.positions").get(s.path).rotation,
+    })
+    reset()
+    s = open(path)
+    settle(s)
+    eq({ 3, 90, 792, 612 }, { s.page, s.rotation, s.geom.w, s.geom.h }, "reopened turned")
+    press(">")
+    settle(s)
+    vim.cmd("silent! %bwipeout!")
+    local again = open(path)
+    settle(again)
+    eq({ 180, 612, 792 }, { again.rotation, again.geom.w, again.geom.h }, "reopened upside down")
+  end)
+
+  it("keeps the point in the middle of the window there when the pages turn", function()
+    reset()
+    local s = open(make("rotate-centre", pages(1)))
+    press("++++++")
+    settle(s)
+    press("jjjll")
+    settle(s)
+    local cx, cy = s.cx, s.cy
+    truthy(cx > 0.55 and cy > 0.55, ("away from the middle of the page: %.2f %.2f"):format(cx, cy))
+    press(">")
+    settle(s)
+    harness.near(1 - cy, s.cx, 0.02, "what was down the page is across it, from the right")
+    harness.near(cx, s.cy, 0.02, "what was across the page is down it")
+  end)
+
+  it("fits the content of a turned page", function()
+    reset()
+    local s = open(make("rotate-content", {
+      { w = 612, h = 792, color = { 1, 1, 1 }, label = "", texts = { { x = 120, y = 250, text = "Middle" } } },
+    }))
+    press("c")
+    settle(s)
+    local box = s.geom.box
+    press(">")
+    settle(s)
+    eq({ 90, "content" }, { s.rotation, s.mode })
+    local expected = rotation.rect(90, 612, 792, box)
+    for index = 1, 4 do
+      harness.near(expected[index], s.geom.box[index], 3, "side " .. index)
+    end
+  end)
+
+  it("scrolls to a search match where it is on the turned page", function()
+    reset()
+    local s = open(make("rotate-search", {
+      {
+        w = 2400,
+        h = 300,
+        color = { 1, 1, 1 },
+        label = "alpha",
+        texts = { { x = 1100, y = 150, text = "alpha" }, { x = 2200, y = 150, text = "alpha" } },
+      },
+    }))
+    press(">w")
+    settle(s)
+    eq({ 300, 2400 }, { s.geom.w, s.geom.h })
+    local function in_view(match)
+      local at = corner(s)
+      local cols, rows = require("pdf-view.session").text_area(vim.api.nvim_get_current_win())
+      local cell = terminal.cell_size()
+      local view = require("pdf-view.layout").viewport(
+        s.geom.w,
+        s.geom.h,
+        cols,
+        rows,
+        cell.w,
+        cell.h,
+        s.zoom,
+        s.cx,
+        s.cy,
+        s.mode,
+        s.geom.box
+      )
+      local rect = rotation.rect(90, match.width, match.height, match.rects[1])
+      local top, bottom = at.y * s.geom.h, at.y * s.geom.h + view.view_h / view.scale
+      return rect[2] >= top - 0.5 and rect[4] <= bottom + 0.5,
+        ("%s lies between %.1f and %.1f"):format(vim.inspect(rect), top, bottom)
+    end
+    answering("alpha", function()
+      press("/")
+      searched(s)
+    end)
+    eq(3, #s.search.matches)
+    for index = 1, 3 do
+      if index > 1 then
+        press("n")
+        searched(s)
+      end
+      eq(index, s.search.current)
+      truthy(in_view(s.search.matches[index]))
+    end
+    truthy(s.cy > 0.8, "the last match is far down the turned page, cy = " .. s.cy)
+  end)
+
+  --- Follow the first link on the page.
+  local function follow_first(s)
+    local chosen = false
+    with_stub(vim.ui, "select", function(items, _, callback)
+      chosen = true
+      callback(items[1])
+    end, function()
+      press("f")
+      wait_for(function()
+        return chosen
+      end, "the link picker")
+    end)
+    settle(s)
+  end
+
+  it("brings the point a link leads to to the top left of the window, turned", function()
+    reset()
+    -- 30% across and 30% down page 3
+    local link = { rect = { 70, 290, 250, 330 }, page = 3, top = 792 * 0.7, left = 612 * 0.3 }
+    local s = open(make("rotate-link", { vim.tbl_extend("force", LETTER, { links = { link } }), LETTER, LETTER }))
+    press(">w++++++")
+    settle(s)
+    follow_first(s)
+    on_page(s, 3)
+    local at = corner(s)
+    truthy(at.scroll_x and at.scroll_y, "a zoomed width fit scrolls both ways")
+    -- turned clockwise, 30% down the page is 70% across it, and 30% across it is 30% down
+    harness.near(0.7, at.x, 0.005, "x")
+    harness.near(0.3, at.y, 0.005, "y")
+  end)
+
+  it("brings the point a bookmark leads to to the top of the window, turned", function()
+    reset()
+    local path = dir .. "/rotate-outline.pdf"
+    fixture.write(path, pages(3), { outline = { { title = "Figure", page = 3, top = 792 * 0.6 } } })
+    local s = open(path)
+    press("<w++++++")
+    settle(s)
+    with_stub(vim.ui, "select", function(items, _, callback)
+      callback(items[1])
+    end, function()
+      press("gO")
+      on_page(s, 3)
+    end)
+    local at = corner(s)
+    -- turned counter-clockwise, 40% down the page is 40% across it; the bookmark says nothing about across the page,
+    -- which is down the turned page: its top
+    harness.near(0.4, at.x, 0.005, "x")
+    harness.near(0, at.y, 0.005, "y")
+  end)
+
+  it("turns each of two facing pages", function()
+    reset()
+    local s = open(make("rotate-spread", { LANDSCAPE, LANDSCAPE }))
+    press("d>")
+    settle(s)
+    eq(2, #s.parts)
+    eq({ 400, 600 }, { s.parts[1].width, s.parts[1].height })
+    eq({ 400 + 400 + 8, 600 }, { s.geom.w, s.geom.h })
   end)
 end)
