@@ -126,7 +126,8 @@ show it. Cancel the prompt to leave the PDF locked, and `:edit` to be asked agai
 
 ### Keys
 
-All are buffer-local and normal mode. The keys that move, zoom or step between matches take a count.
+All are buffer-local and normal mode, except the mouse wheel (below). The keys that move, zoom or step between matches
+take a count.
 
 | Keys                         | Action                                                                          |
 | ---------------------------- | ------------------------------------------------------------------------------- |
@@ -134,7 +135,7 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 | `k` `<Up>`                   | scroll up; at the top edge (or when not zoomed) previous page                   |
 | `l` `<Right>`                | scroll right; at the right edge (or when not zoomed) next page                  |
 | `h` `<Left>`                 | scroll left; at the left edge (or when not zoomed) previous page                |
-| mouse wheel                  | like `j` `k` `l` `h`, while a viewer has focus: moves the viewer under the mouse |
+| mouse wheel                  | like `j` `k` `l` `h` in the viewer under the mouse, wherever the cursor is       |
 | `<PageDown>` `<C-f>`         | next page, always (`3<PageDown>`: three pages ahead)                            |
 | `<PageUp>` `<BS>` `<C-b>`    | previous page, always                                                           |
 | `gg` `<Home>`                | first page; `12gg` goes to page 12                                              |
@@ -165,6 +166,11 @@ All are buffer-local and normal mode. The keys that move, zoom or step between m
 
 > [!NOTE]
 > `<Space>` is deliberately unbound so `<leader>` mappings keep working.
+
+While a viewer is open, the wheel keys are also mapped globally in normal and insert mode, so the wheel moves the PDF
+next to your source without leaving it. Over any other window the wheel scrolls that window as before. A wheel key
+you have mapped yourself is left alone, `scroll_down = {}` (and so on) leaves that key to Neovim, and the mappings are
+removed when the last viewer closes.
 
 ### Zoom
 
