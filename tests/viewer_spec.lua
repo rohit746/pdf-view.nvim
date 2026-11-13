@@ -3313,9 +3313,10 @@ describe("viewer in zellij", function()
 
   it("takes a message that scrolled the screen to have dropped the page, when replies cannot be read", function()
     reset()
-    local positioned = require("pdf-view.positioned")
-    local replies = positioned.replies
-    positioned.replies = false -- as on Neovim 0.11
+    local replies = terminal.replies_readable
+    terminal.replies_readable = function()
+      return false -- as on Neovim 0.11
+    end
     local ok, err = pcall(function()
       local s = open(make("zellij-scrolled", pages(1)))
       local path = transmitted()[1]
@@ -3330,7 +3331,7 @@ describe("viewer in zellij", function()
       eq("", vim.v.scrollstart, "ready for the next scroll")
       eq(false, s.lost)
     end)
-    positioned.replies = replies
+    terminal.replies_readable = replies
     if not ok then
       error(err, 0)
     end
@@ -3433,9 +3434,10 @@ describe("viewer with positioned placements outside zellij (WezTerm, Konsole)", 
 
   it("does not send the page again after a message scrolled the screen, when replies cannot be read", function()
     reset()
-    local positioned = require("pdf-view.positioned")
-    local replies = positioned.replies
-    positioned.replies = false -- as on Neovim 0.11
+    local replies = terminal.replies_readable
+    terminal.replies_readable = function()
+      return false -- as on Neovim 0.11
+    end
     local ok, err = pcall(function()
       open(make("wezterm-scrolled", pages(1)))
       writes = {}
@@ -3446,8 +3448,68 @@ describe("viewer with positioned placements outside zellij (WezTerm, Konsole)", 
       end, "placed again")
       eq({}, transmitted(), "the terminal scrolled the image with the text")
     end)
-    positioned.replies = replies
+    terminal.replies_readable = replies
     vim.v.scrollstart = ""
+    if not ok then
+      error(err, 0)
+    end
+  end)
+
+  it("asks for no replies behind tmux with extended keys, which would type them into the viewer", function()
+    reset()
+    local saved_tmux, saved_system = vim.env.TMUX, vim.system
+    local extended_keys = "on"
+    vim.env.TMUX = "/tmp/tmux-1000/default,1,0"
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.system = function(cmd, opts, on_exit)
+      if cmd[1] ~= "tmux" then
+        return saved_system(cmd, opts, on_exit)
+      end
+      local stdout = ""
+      if cmd[2] == "show-options" then
+        stdout = extended_keys
+      elseif cmd[2] == "display-message" then
+        stdout = "0 0 off bottom" -- the pane fills the window
+      end
+      local result = { code = 0, stdout = stdout .. "\n", stderr = "" }
+      if on_exit then
+        on_exit(result)
+      end
+      return {
+        wait = function()
+          return result
+        end,
+      }
+    end
+    --- The `q` key of the last placement, which says which replies the terminal is asked for.
+    local function quiet()
+      for index = #writes, 1, -1 do
+        local q = writes[index]:match("a=p,[^\27]-q=(%d)")
+        if q then
+          return tonumber(q)
+        end
+      end
+    end
+    terminal.forget()
+    local ok, err = pcall(function()
+      local s = open(make("wezterm-tmux-extended-keys", pages(1)))
+      eq(2, quiet(), "no replies asked for")
+      local reply = ("\27_Gi=%d,p=1;ENOENT:unknown image id\27\\"):format(s.ids[s.slot])
+      writes = {}
+      vim.api.nvim_exec_autocmds("TermResponse", { data = { sequence = reply } })
+      vim.wait(100)
+      eq({}, transmitted(), "a reply that cannot have been read is not taken for one")
+
+      if vim.fn.has("nvim-0.12") == 1 then
+        extended_keys = "off"
+        terminal.forget() -- as when tmux is attached from another terminal
+        s.dirty = true
+        require("pdf-view.positioned").refresh(s)
+        eq(1, quiet(), "asked again when placing: an image the terminal lost is reported")
+      end
+    end)
+    vim.env.TMUX, vim.system = saved_tmux, saved_system
+    terminal.forget()
     if not ok then
       error(err, 0)
     end

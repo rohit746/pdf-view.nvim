@@ -32,9 +32,13 @@ local RESEND_GUARD = 2e9 -- ns
 -- placement ids of a picture are 1.. or PLACEMENT_RANGE + 1.. (see refresh())
 local PLACEMENT_RANGE = 1000
 
---- Whether Neovim passes the terminal's replies to graphics commands on (TermResponse, 0.12). Neovim 0.11 cannot read
---- them, and a reply would arrive as typed keys, so then the terminal is asked for none.
-M.replies = vim.fn.has("nvim-0.12") == 1
+--- Whether the terminal's replies to graphics commands can be read (see `terminal.replies_readable()`). When they
+--- cannot (Neovim 0.11, or tmux with extended keys), a reply would arrive as typed keys, so the terminal is asked for
+--- none. Asked whenever it is needed: `terminal.forget()` drops the answer when tmux is attached from another terminal.
+---@return boolean
+local function replies()
+  return terminal.replies_readable()
+end
 
 ---@class PdfView.Picture
 ---@field id integer image id
@@ -371,7 +375,7 @@ function M.refresh(s)
     s.cut_key = key
   end
 
-  local quiet = M.replies and 1 or 2 -- with replies, an image the terminal has lost is reported and sent again
+  local quiet = replies() and 1 or 2 -- with replies, an image the terminal has lost is reported and sent again
   local over = terminal.hides_images_under_text()
   -- inside tmux the placement goes to the outer terminal, where the pane may not start in the top-left corner
   local top, left = terminal.pane_offset()
@@ -570,7 +574,7 @@ local function check()
   -- Without replies to tell that zellij dropped an image, a message that scrolled the screen (which may scroll the
   -- page out of zellij's screen) is taken to have done so. A terminal scrolls the image with the text, and it is
   -- placed again where it belongs after the redraw. Neovim notes the first scroll in v:scrollstart.
-  if not M.replies and vim.v.scrollstart ~= "" and terminal.in_zellij() then
+  if not replies() and vim.v.scrollstart ~= "" and terminal.in_zellij() then
     vim.v.scrollstart = ""
     all_lost()
   end
@@ -870,7 +874,7 @@ function M.hook()
     desc = "Send a PDF page again when the terminal has lost it",
     callback = function(args)
       local sequence = (args.data and args.data.sequence) or vim.v.termresponse or ""
-      local id = M.replies and M.lost_image(sequence)
+      local id = replies() and M.lost_image(sequence)
       if not id then
         return
       end
