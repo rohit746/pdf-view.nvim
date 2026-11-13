@@ -381,6 +381,22 @@ function M.release(path)
   end
 end
 
+--- Stop the worker process of `path` if it is idle, freeing the parsed document. Unlike `release()`, the layout is
+--- kept, and the next request starts another process.
+---@param path string
+---@return boolean busy the worker is working on a request or has some waiting, so it was left running
+function M.stop_idle(path)
+  local w = workers[path]
+  if not w then
+    return false
+  end
+  if #w.queue > 0 or (w.process and w.process.current) then
+    return true
+  end
+  stop(w, "mutool was killed (signal 15)")
+  return false
+end
+
 --- Unlock `path` with `password` from the next request on; nil forgets it. It is kept until Neovim exits, also after
 --- `release()`, so that the document opens again without asking.
 ---@param path string

@@ -45,6 +45,9 @@ All notable changes to this project are documented here. The format follows
 - A session (`:mksession`) brought a viewer's window back as an empty buffer named after the PDF, and `:w!` there
   emptied the PDF. The window is a viewer again now. Sessions saved without `blank` in `'sessionoptions'` leave the
   window out, as the README now says.
+- A viewer in no window, as after `:edit` of another file, kept its `mutool` process running, with the parsed
+  document in memory, until Neovim exited or the buffer was wiped. The process is stopped once the viewer has been
+  in no window for 30 seconds, and started again when a page that was not drawn yet is needed.
 
 ### Added
 

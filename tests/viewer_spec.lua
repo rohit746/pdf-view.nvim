@@ -274,6 +274,42 @@ describe("viewer", function()
     truthy(next(s.images), "the images kept")
   end)
 
+  it("stops the mutool worker of a viewer that has been in no window for a while", function()
+    reset()
+    local stop_worker_after = viewer.stop_worker_after
+    viewer.stop_worker_after = 1000
+    local first = open(make("idle-1", pages(3)))
+    local second = open(make("idle-2", pages(2)))
+    truthy(mupdf.has_worker(first.path) and mupdf.has_worker(second.path), "both workers running")
+
+    -- `first` is shown again before the delay, and `second` is hidden after it was
+    vim.cmd.buffer(first.buf)
+    wait_for(function()
+      return not mupdf.has_worker(second.path)
+    end, "the worker of the hidden viewer stopped")
+    truthy(mupdf.has_worker(first.path), "the worker of a viewer hidden only briefly is kept")
+
+    vim.cmd.enew()
+    vim.wait(100)
+    truthy(mupdf.has_worker(first.path), "not stopped right away")
+    wait_for(function()
+      return not mupdf.has_worker(first.path)
+    end, "the worker stopped")
+
+    -- shown again: the page comes from the render cache, and the next page starts another worker
+    writes = {}
+    vim.cmd.buffer(first.buf)
+    wait_for(function()
+      return #transmitted() == 1
+    end, "the page sent again")
+    vim.wait(100)
+    eq(false, mupdf.has_worker(first.path), "the page on screen needed no worker")
+    viewer.stop_worker_after = stop_worker_after
+    press("G") -- page 2 was drawn ahead of time, page 3 was not
+    on_page(first, 3)
+    truthy(mupdf.has_worker(first.path), "a page not drawn yet started another worker")
+  end)
+
   it("follows the file when it changes on disk and keeps the current page", function()
     reset()
     local path = make("live", pages(2))

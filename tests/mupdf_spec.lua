@@ -143,6 +143,38 @@ done
     eq(false, mupdf.has_worker(changing))
   end)
 
+  it("stops an idle worker and keeps the layout, but leaves a busy one running", function()
+    local book = dir .. "/idle.fb2"
+    fixture.write_fb2(book, { "One", "Two" }, 30, true)
+    mupdf.set_layout(book, { 300, 200, 12 })
+    local _, before = await(function(cb)
+      mupdf.info(book, 1, cb)
+    end)
+    truthy(mupdf.has_worker(book), "a worker is left running")
+
+    local answered
+    mupdf.info(book, 1, function(err)
+      answered = err or false
+    end)
+    eq(true, mupdf.stop_idle(book), "a worker with a request waiting is busy")
+    vim.wait(0) -- the request is handed to the worker
+    eq(true, mupdf.stop_idle(book), "a worker with a request in progress is busy")
+    wait_for(function()
+      return answered ~= nil
+    end, "the request answered")
+    eq(false, answered, "the busy worker was left to answer")
+
+    eq(false, mupdf.stop_idle(book))
+    eq(false, mupdf.has_worker(book), "the idle worker is stopped")
+    local _, after = await(function(cb)
+      mupdf.info(book, 1, cb)
+    end)
+    truthy(mupdf.has_worker(book), "the next request starts another")
+    eq({ before.count, 300, 200 }, { after.count, after.width, after.height }, "laid out as before")
+    mupdf.release(book)
+    eq(false, mupdf.stop_idle(book), "no worker")
+  end)
+
   --- The text of page `page` of `book` laid out as `size`, without what a layout changes: spaces, line breaks and
   --- the hyphens of words broken across lines.
   ---@return string
