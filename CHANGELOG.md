@@ -42,6 +42,13 @@ All notable changes to this project are documented here. The format follows
   emptied the PDF. The window is a viewer again now. Sessions saved without `blank` in `'sessionoptions'` leave the
   window out, as the README now says.
 
+### Added
+
+- `f` opens a link to another PDF (a `/GoToR` action, as in document sets and papers that link to a supplement), or
+  to any file with one of the `extensions`, in a viewer in the same window, at the page or named destination it leads
+  to. A relative name is found next to the PDF with the link, and `<C-o>` comes back to it. The picker shows such a
+  link as `other.pdf, p. 3`. Before, the address went to `vim.ui.open()` and the system's PDF viewer.
+
 ### Security
 
 - `f` opened every link that does not lead into the document with `vim.ui.open()`, including `file:` addresses and

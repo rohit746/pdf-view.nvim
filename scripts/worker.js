@@ -75,6 +75,11 @@
 //     the document is {"text": <text>, "page": <1-based page>}, any other (a web address, an e-mail) is
 //     {"text": <text>, "uri": <uri>}. <text> is the text under the link, "" for an image. Links that lead nowhere
 //     are left out. <page> is 1-based and clamped to the document.
+//
+//   ["dest", <fragment>]
+//     Where the fragment of a link from another document leads in this one ("#page=3&view=Fit",
+//     "#nameddest=intro"), as JSON: {"page": <1-based page>, "x": <x>, "y": <y>}, with <x> and <y> as for "links" and
+//     either left out when the destination does not say; null when it leads to no page of the document.
 var path = scriptArgs[0];
 
 // Longer than any stdio buffer (glibc and macOS use the pipe's block size: 4 KiB to 64 KiB).
@@ -495,6 +500,28 @@ function pageLinks(number) {
   );
 }
 
+function linkDestination(fragment) {
+  var count = openDocument().countPages();
+  var target = -1;
+  try {
+    target = doc.resolveLink(String(fragment));
+  } catch (e) {
+    target = -1;
+  }
+  if (!(target >= 0 && target < count)) {
+    return "null";
+  }
+  var at = destination(target, String(fragment));
+  var out = { page: target + 1 };
+  if (at.x !== undefined) {
+    out.x = at.x;
+  }
+  if (at.y !== undefined) {
+    out.y = at.y;
+  }
+  return JSON.stringify(out);
+}
+
 function answer(request) {
   if (request[3] === "crop") {
     // needs no document, so it works the same whatever the document's password and layout
@@ -535,6 +562,8 @@ function answer(request) {
       return JSON.stringify(plainText(request[2]));
     case "links":
       return pageLinks(request[2]);
+    case "dest":
+      return linkDestination(request[2]);
   }
   throw new Error("unknown command: " + request[1]);
 }
