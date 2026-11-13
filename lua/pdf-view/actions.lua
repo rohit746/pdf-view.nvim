@@ -18,6 +18,24 @@ local show = render.show
 local stamp_of, purge_cache, window_for, text_area, uses_viewport =
   session.stamp_of, session.purge_cache, session.window_for, session.text_area, session.uses_viewport
 
+--- The count that `require("pdf-view").action()` gave the action that is running, which `action_count()` and
+--- `action_count1()` return in place of `v:count`. Actions read their count only through these, so that both a key
+--- and `action()` give them one.
+---@type integer?
+local given_count
+
+--- The count of the action: the one `action()` gave, or `v:count`. 0 for none.
+---@return integer
+local function action_count()
+  return given_count or vim.v.count
+end
+
+--- The count of the action, 1 for none, as `v:count1`.
+---@return integer
+local function action_count1()
+  return math.max(action_count(), 1)
+end
+
 ---@param s PdfView.Session
 local function refresh_winbar(s)
   local win = not s.closed and window_for(s)
@@ -371,8 +389,8 @@ end
 ---@param dy -1|0|1
 ---@param fraction? number of the window per key press, `config.pan_step` by default
 local function move(s, dx, dy, fraction)
-  local count = vim.v.count1
-  if pan(s, dx, dy, count, fraction or config.options.pan_step) then
+  local steps = action_count1()
+  if pan(s, dx, dy, steps, fraction or config.options.pan_step) then
     return show(s)
   end
   local forward = dx + dy > 0
@@ -382,26 +400,29 @@ local function move(s, dx, dy, fraction)
   else
     anchor = dx ~= 0 and { cx = 1, cy = 1 } or { cy = 1 }
   end
-  go(s, session.spread_step(s, s.target or s.page, forward and count or -count), anchor)
+  go(s, session.spread_step(s, s.target or s.page, forward and steps or -steps), anchor)
 end
 
 --- The mouse wheel moves the viewer it is over, as `move` does. These keys are mapped in each viewer, and while a
 --- viewer is open also globally (`set_global_wheel`), so the wheel moves a viewer the cursor is not in. Over any other
 --- window the wheel does what it would do there without the mappings.
+--- Run by `action()` instead of a key, they move the viewer they are given, as `move` does.
 ---@param s? PdfView.Session the focused viewer; nil for the global mappings
 ---@param dx -1|0|1
 ---@param dy -1|0|1
----@param lhs string the key that was pressed
+---@param lhs? string the key that was pressed; nil from `action()`
 local function wheel(s, dx, dy, lhs)
   local win = vim.fn.getmousepos().winid
-  if win == 0 and s then -- no mouse position: the key came from a script or another mapping
+  if s and (win == 0 or not lhs) then -- no mouse position: the key came from a script or another mapping
     return move(s, dx, dy)
   end
   local over = win ~= 0 and session.sessions[vim.api.nvim_win_get_buf(win)]
   if over and not over.closed then
     return move(over, dx, dy)
   end
-  vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+  if lhs then
+    vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+  end
 end
 
 --- Half a window down or up, as `move` does. The text shown instead of a page (a terminal that cannot show pages)
@@ -410,7 +431,7 @@ end
 ---@param dy -1|1
 local function half(s, dy)
   if s.page_text then
-    local count = vim.v.count > 0 and vim.v.count or ""
+    local count = action_count() > 0 and action_count() or ""
     return vim.cmd("normal! " .. count .. vim.keycode(dy > 0 and "<C-d>" or "<C-u>"))
   end
   move(s, 0, dy, 0.5)
@@ -536,7 +557,7 @@ local function step_match(s, reverse)
   if index and not session.on_screen(s, found.matches[index].page) then
     index = nil -- the user has moved on: continue from where they are, not from the old match
   end
-  local wrapped, steps = false, vim.v.count1
+  local wrapped, steps = false, action_count1()
   if not index then
     index, wrapped = search.start(found, s.target or s.page, sign)
     steps = steps - 1 -- landing on the first match from here is the first step
@@ -859,12 +880,15 @@ end
 
 --- Inverse search (SyncTeX): open the TeX source at the line that the point under the mouse was typeset from.
 ---@param s PdfView.Session
----@param lhs string the key that was pressed
+---@param lhs? string the key that was pressed, which does what it would do without the mapping off a viewer
 local function inverse_search(s, lhs)
   local mouse = vim.fn.getmousepos()
   local over = mouse.winid ~= 0 and session.sessions[vim.api.nvim_win_get_buf(mouse.winid)]
   if not over then
-    return vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+    if lhs then
+      vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+    end
+    return
   end
   s = over
   local info = vim.fn.getwininfo(mouse.winid)[1] -- `winrow` counts the winbar, `wincol` the sign and number columns
@@ -1315,7 +1339,8 @@ local ACTION_ORDER = {
   "help",
 }
 
----@type table<string, { desc: string, run: fun(s: PdfView.Session, lhs: string) }>
+--- What each action of `keymaps` does. `lhs` is the key that was pressed, nil when `action()` runs it.
+---@type table<string, { desc: string, run: fun(s: PdfView.Session, lhs?: string) }>
 local ACTIONS = {}
 
 ACTIONS.down = {
@@ -1391,42 +1416,42 @@ ACTIONS.scroll_left = {
 ACTIONS.next = {
   desc = "next page ({count} pages ahead)",
   run = function(s)
-    go(s, session.spread_step(s, s.target or s.page, vim.v.count1), TOP)
+    go(s, session.spread_step(s, s.target or s.page, action_count1()), TOP)
   end,
 }
 
 ACTIONS.prev = {
   desc = "previous page ({count} pages back)",
   run = function(s)
-    go(s, session.spread_step(s, s.target or s.page, -vim.v.count1), TOP)
+    go(s, session.spread_step(s, s.target or s.page, -action_count1()), TOP)
   end,
 }
 
 ACTIONS.first = {
   desc = "first page, or page {count}",
   run = function(s)
-    go(s, vim.v.count > 0 and vim.v.count or 1, TOP, true)
+    go(s, action_count() > 0 and action_count() or 1, TOP, true)
   end,
 }
 
 ACTIONS.last = {
   desc = "last page, or page {count}",
   run = function(s)
-    go(s, vim.v.count > 0 and vim.v.count or math.huge, TOP, true)
+    go(s, action_count() > 0 and action_count() or math.huge, TOP, true)
   end,
 }
 
 ACTIONS.zoom_in = {
   desc = "zoom in ({count} steps)",
   run = function(s)
-    set_zoom(s, s.zoom * config.options.zoom_step ^ vim.v.count1)
+    set_zoom(s, s.zoom * config.options.zoom_step ^ action_count1())
   end,
 }
 
 ACTIONS.zoom_out = {
   desc = "zoom out",
   run = function(s)
-    set_zoom(s, s.zoom / config.options.zoom_step ^ vim.v.count1)
+    set_zoom(s, s.zoom / config.options.zoom_step ^ action_count1())
   end,
 }
 
@@ -1461,14 +1486,14 @@ ACTIONS.fit_content = {
 ACTIONS.rotate = {
   desc = "turn the pages clockwise ({count} quarter turns)",
   run = function(s)
-    rotate(s, 90 * vim.v.count1)
+    rotate(s, 90 * action_count1())
   end,
 }
 
 ACTIONS.rotate_back = {
   desc = "turn the pages counter-clockwise",
   run = function(s)
-    rotate(s, -90 * vim.v.count1)
+    rotate(s, -90 * action_count1())
   end,
 }
 
@@ -1533,14 +1558,14 @@ ACTIONS.show_text = {
 ACTIONS.jump_back = {
   desc = "back to where the previous jump started ({count} jumps)",
   run = function(s)
-    walk_jumps(s, -vim.v.count1)
+    walk_jumps(s, -action_count1())
   end,
 }
 
 ACTIONS.jump_forward = {
   desc = "forward in the jump list",
   run = function(s)
-    walk_jumps(s, vim.v.count1)
+    walk_jumps(s, action_count1())
   end,
 }
 
@@ -1664,6 +1689,77 @@ local function set_global_wheel()
   end
 end
 
+--- Run the action `name` of `ACTIONS` in the viewer `s`, as its key does. `n` stands in for the count typed before
+--- the key (nil: `v:count`), and `lhs` is the key that was pressed (nil when no key was).
+---@param s PdfView.Session
+---@param name string
+---@param n? integer
+---@param lhs? string
+local function run(s, name, n, lhs)
+  local outer = given_count
+  given_count = n
+  local ok, err = pcall(ACTIONS[name].run, s, lhs)
+  given_count = outer
+  if not ok then
+    error(err, 0)
+  end
+end
+
+--- Run the action `name` in the viewer `s` for `require("pdf-view").action()`: in a window that shows the viewer,
+--- the current one when it does, as if its key was pressed there.
+---@param s PdfView.Session
+---@param name string
+---@param n? integer the count, `v:count` when nil
+function M.run(s, name, n)
+  local win = window_for(s)
+  if win and win ~= vim.api.nvim_get_current_win() then
+    return vim.api.nvim_win_call(win, function()
+      run(s, name, n)
+    end)
+  end
+  run(s, name, n)
+end
+
+--- Whether `name` is an action.
+---@param name string
+---@return boolean
+function M.exists(name)
+  return ACTIONS[name] ~= nil
+end
+
+--- The names of the actions, sorted.
+---@return string[]
+function M.names()
+  local names = vim.tbl_keys(ACTIONS)
+  table.sort(names)
+  return names
+end
+
+--- Go to page `page` (clamped to the document), at its top. A jump: `<C-o>` comes back.
+---@param s PdfView.Session
+---@param page integer
+function M.goto_page(s, page)
+  go(s, page, TOP, true)
+end
+
+--- Zoom to `zoom` times the fitted size, between 1 and `max_zoom`.
+---@param s PdfView.Session
+---@param zoom number
+function M.set_zoom(s, zoom)
+  set_zoom(s, math.max(zoom, 1))
+end
+
+M.set_fit = set_mode
+
+--- Search for `needle`, as `/` (`dir` 1) or `?` (-1) does after the text was typed: an empty `/` searches for it again.
+---@param s PdfView.Session
+---@param needle string
+---@param dir 1|-1
+function M.search(s, needle, dir)
+  s.last_needle = needle
+  run_search(s, needle, dir)
+end
+
 --- Map the keys of `config.options.keymaps` in the viewer's buffer, replacing the ones mapped before (`setup()` may
 --- have changed them since), and the global wheel keys.
 ---@param s PdfView.Session
@@ -1679,7 +1775,7 @@ local function set_keymaps(s)
   for action, keys in pairs(keymaps) do
     for _, lhs in ipairs(keys) do
       vim.keymap.set("n", lhs, function()
-        ACTIONS[action].run(s, lhs)
+        run(s, action, nil, lhs)
       end, { buffer = s.buf, nowait = true, silent = true, desc = "PDF: " .. ACTIONS[action].desc })
       s.mapped[#s.mapped + 1] = lhs
     end
