@@ -37,8 +37,10 @@ case (`.PDF`, `.Cbz`). The `extensions` option sets the list. |:PdfView|
 E-books have no pages of their own: they are laid out on pages as large as
 the window, with text about the size of the terminal's (`text_scale`
 changes it). When the window changes size the book is laid out again and
-the viewer stays at the same point of the text. Page numbers change with
-the layout, so marks and the jump list may point elsewhere afterwards.
+the viewer stays at the same point of the text, and a book reopened in a
+window of another size opens at the point of the text it was left at. Page
+numbers change with the layout, so marks and the jump list may point
+elsewhere afterwards.
 
 The viewer is a buffer named after the file with 'buftype' `nofile` and
 'filetype' `pdf-view`. Its winbar shows "<file>  <page> / <pages>".

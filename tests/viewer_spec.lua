@@ -1857,6 +1857,21 @@ describe("viewer reflowable documents", function()
     return layout.reflow(info.width - info.textoff, info.height, 10, 20, 1)
   end
 
+  --- The text of a page of `book` as it is laid out now, without what a layout changes (spaces, line breaks).
+  ---@param book string
+  ---@param page integer
+  ---@return string
+  local function bare_text(book, page)
+    local done, text
+    mupdf.text(book, page, function(_, result)
+      done, text = true, result
+    end)
+    wait_for(function()
+      return done
+    end, "the text of the page")
+    return (assert(text):gsub("[%s%-]+", ""))
+  end
+
   it("lays an FB2 book out to fill the window", function()
     reset()
     local book = dir .. "/fill.FB2"
@@ -1879,20 +1894,9 @@ describe("viewer reflowable documents", function()
       press("/")
       searched(s)
     end)
-    --- The text of a page as the book is laid out now, without what a layout changes (spaces, line breaks).
-    local function bare_text(page)
-      local done, text
-      mupdf.text(book, page, function(_, result)
-        done, text = true, result
-      end)
-      wait_for(function()
-        return done
-      end, "the text of the page")
-      return (assert(text):gsub("[%s%-]+", ""))
-    end
     local before = { page = s.page, count = s.count, key = s.laid_out.key, match = s.search.matches[1].page }
     truthy(before.page > 1, "the match is past the first page")
-    local start = bare_text(s.page):sub(1, 40)
+    local start = bare_text(book, s.page):sub(1, 40)
 
     vim.cmd("vsplit")
     wait_for(function()
@@ -1901,8 +1905,8 @@ describe("viewer reflowable documents", function()
     local size = window_layout()
     eq({ size[1], size[2] }, { s.geom.w, s.geom.h })
     truthy(s.count > before.count, ("narrower pages, more of them: %d, %d"):format(before.count, s.count))
-    local own = bare_text(s.page)
-    local at = (own .. bare_text(s.page + 1)):find(start, 1, true)
+    local own = bare_text(book, s.page)
+    local at = (own .. bare_text(book, s.page + 1)):find(start, 1, true)
     truthy(
       at and at <= #own,
       ("page %d holds the text page %d started with (%s): %s"):format(s.page, before.page, start, own:sub(1, 80))
@@ -1911,6 +1915,34 @@ describe("viewer reflowable documents", function()
     press("n")
     searched(s)
     eq(s.search.matches[1].page, s.page, "n goes to where the match is now")
+  end)
+
+  it("reopens a book at the same point of the text in a window of another size", function()
+    reset()
+    local book = dir .. "/reopen.fb2"
+    fixture.write_fb2(book, { "One", "Two", "Three", "Four", "Five", "Six" }, 30, true)
+    local s = open(book)
+    local wide = { count = s.count, key = s.laid_out.key }
+    local page = math.floor(wide.count / 4)
+    press(page .. "G")
+    on_page(s, page)
+    local start = bare_text(book, page):sub(1, 40)
+    vim.cmd("silent! %bwipeout!") -- forgets the in-memory position: only the state file is left
+
+    vim.cmd("vnew")
+    local again = open(book)
+    wait_for(function()
+      return again.slot ~= 0 and again.job == nil and again.laid_out and again.laid_out.key ~= wide.key
+    end, "the reopened book in the narrower window")
+    truthy(again.count > wide.count, ("narrower pages, more of them: %d, %d"):format(wide.count, again.count))
+    local own = bare_text(book, again.page)
+    local at = (own .. bare_text(book, again.page + 1)):find(start, 1, true)
+    truthy(
+      at and at <= #own,
+      ("page %d holds the text page %d started with (%s): %s"):format(again.page, page, start, own:sub(1, 80))
+    )
+    local stored = require("pdf-view.positions").get(s.path)
+    eq(wide.key, stored and stored.layout and table.concat(stored.layout, "x"), "the state file has the layout")
   end)
 end)
 

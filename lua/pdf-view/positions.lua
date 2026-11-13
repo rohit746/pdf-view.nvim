@@ -2,6 +2,10 @@
 --- absolute path of the PDF; only the `LIMIT` most recently left files are kept.
 local M = {}
 
+--- Where a viewer was left. `layout` is how an e-book (EPUB, FB2, MOBI) was laid out then: its pages follow the window,
+--- so `page` only means a point of its text together with the layout it was a page of.
+---@alias PdfView.Remembered { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number, layout?: PdfView.Layout }
+
 local uv = vim.uv
 
 local LIMIT = 100
@@ -29,7 +33,7 @@ end
 
 --- A position read from the file, or nil when it is missing or malformed.
 ---@param entry any
----@return { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }?
+---@return PdfView.Remembered?
 local function sanitize(entry)
   if type(entry) ~= "table" then
     return nil
@@ -45,7 +49,18 @@ local function sanitize(entry)
   then
     return nil
   end
-  return { page = math.floor(page), mode = mode, zoom = zoom, cx = cx, cy = cy }
+  local position = { page = math.floor(page), mode = mode, zoom = zoom, cx = cx, cy = cy }
+  local size = entry.layout
+  if type(size) == "table" and #size == 3 then
+    local valid = true
+    for index = 1, 3 do
+      if type(size[index]) ~= "number" or not (size[index] > 0 and size[index] < math.huge) then
+        valid = false
+      end
+    end
+    position.layout = valid and { size[1], size[2], size[3] } or nil
+  end
+  return position
 end
 
 --- The position `path` was left at, if it is remembered.
@@ -56,7 +71,7 @@ end
 
 --- Remember `position` for `path`, dropping the oldest entries past `LIMIT`.
 ---@param path string absolute
----@param position { page: integer, mode: PdfView.FitMode, zoom: number, cx: number, cy: number }
+---@param position PdfView.Remembered
 function M.set(path, position)
   local entries = load()
   entries[path] = vim.tbl_extend("force", position, { time = os.time() })
