@@ -143,6 +143,38 @@ done
     eq(false, mupdf.has_worker(changing))
   end)
 
+  it("stops an idle worker and keeps the layout, but leaves a busy one running", function()
+    local book = dir .. "/idle.fb2"
+    fixture.write_fb2(book, { "One", "Two" }, 30, true)
+    mupdf.set_layout(book, { 300, 200, 12 })
+    local _, before = await(function(cb)
+      mupdf.info(book, 1, cb)
+    end)
+    truthy(mupdf.has_worker(book), "a worker is left running")
+
+    local answered
+    mupdf.info(book, 1, function(err)
+      answered = err or false
+    end)
+    eq(true, mupdf.stop_idle(book), "a worker with a request waiting is busy")
+    vim.wait(0) -- the request is handed to the worker
+    eq(true, mupdf.stop_idle(book), "a worker with a request in progress is busy")
+    wait_for(function()
+      return answered ~= nil
+    end, "the request answered")
+    eq(false, answered, "the busy worker was left to answer")
+
+    eq(false, mupdf.stop_idle(book))
+    eq(false, mupdf.has_worker(book), "the idle worker is stopped")
+    local _, after = await(function(cb)
+      mupdf.info(book, 1, cb)
+    end)
+    truthy(mupdf.has_worker(book), "the next request starts another")
+    eq({ before.count, 300, 200 }, { after.count, after.width, after.height }, "laid out as before")
+    mupdf.release(book)
+    eq(false, mupdf.stop_idle(book), "no worker")
+  end)
+
   --- The text of page `page` of `book` laid out as `size`, without what a layout changes: spaces, line breaks and
   --- the hyphens of words broken across lines.
   ---@return string
@@ -850,6 +882,58 @@ awk 'NR == 1 { sub(/^:/, ":x") } { print; fflush() }' | exec '%s' "$@"
       end)
       eq(nil, err)
       eq({}, links)
+    end)
+
+    it("lists a link to another PDF by its address, with the page it leads to", function()
+      local source = dir .. "/goto-other.pdf"
+      fixture.write(source, {
+        {
+          w = 612,
+          h = 792,
+          links = { { rect = { 70, 290, 250, 330 }, action = "<< /S /GoToR /F (other file.pdf) /D [2 /Fit] >>" } },
+        },
+      })
+      local err, links = await(function(cb)
+        mupdf.links(source, 1, cb)
+      end)
+      eq(nil, err)
+      eq(1, #links)
+      truthy(links[1].uri:find("^file:other%%20file%.pdf#page=3"), links[1].uri)
+    end)
+  end)
+
+  describe("destination", function()
+    local target = dir .. "/dests.pdf"
+    fixture.write(target, { { w = 612, h = 792 }, { w = 612, h = 792 }, { w = 612, h = 792 } }, {
+      dests = { intro = { title = "", page = 2, top = 500, left = 153 } },
+    })
+
+    it("finds the page of #page=N", function()
+      local err, dest = await(function(cb)
+        mupdf.destination(target, "#page=3&view=Fit", cb)
+      end)
+      eq(nil, err)
+      eq({ page = 3 }, dest)
+    end)
+
+    it("finds a named destination, and where on its page it leads", function()
+      local err, dest = await(function(cb)
+        mupdf.destination(target, "#nameddest=intro", cb)
+      end)
+      eq(nil, err)
+      eq(2, dest.page)
+      harness.near(0.25, dest.x, 1e-4, "153 points from the left of a page 612 points wide")
+      harness.near(292 / 792, dest.y, 1e-4, "500 points from the bottom of a page 792 points high")
+    end)
+
+    it("is nil for a page the document does not have, or a name it does not know", function()
+      for _, fragment in ipairs({ "#page=9", "#nameddest=nowhere" }) do
+        local err, dest = await(function(cb)
+          mupdf.destination(target, fragment, cb)
+        end)
+        eq(nil, err, fragment)
+        eq(nil, dest, fragment)
+      end
     end)
   end)
 
