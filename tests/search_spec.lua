@@ -51,6 +51,35 @@ describe("search.parse", function()
     eq({}, (search.parse("")))
     eq({}, (search.parse(nil)))
   end)
+
+  it("reads the line of text after a tab, which may hold anything", function()
+    local matches = search.parse(table.concat({
+      "1 0 612 792 10.00,20.00,50.00,30.00\tthe alpha line",
+      "2 0 612 792 10.00,20.00,50.00,30.00\t1.00,2.00,3.00,4.00 truncated 7 0 1 1",
+      "3 0 612 792 10.00,20.00,50.00,30.00\t",
+      "4 0 612 792 10.00,20.00,50.00,30.00",
+    }, "\n"))
+    eq(4, #matches)
+    eq("the alpha line", matches[1].text)
+    eq("1.00,2.00,3.00,4.00 truncated 7 0 1 1", matches[2].text, "numbers in the text are not rectangles")
+    eq({ { 10, 20, 50, 30 } }, matches[2].rects)
+    eq("", matches[3].text)
+    eq("", matches[4].text, "no text from an older script")
+  end)
+end)
+
+describe("search.describe", function()
+  it("shows the page, padded to the widest, and the line of text", function()
+    local matches = search.parse(table.concat({
+      "3 0 612 792 10.00,20.00,50.00,30.00\t…the viewport is a window-sized crop of…",
+      "12 0 612 792 10.00,20.00,50.00,30.00\tthe end",
+      "120 0 612 792 10.00,20.00,50.00,30.00",
+    }, "\n"))
+    local found = search.new("the", matches, false)
+    eq("p.   3  …the viewport is a window-sized crop of…", search.describe(found, 1))
+    eq("p.  12  the end", search.describe(found, 2))
+    eq("p. 120", search.describe(found, 3), "a match without text shows its page alone")
+  end)
 end)
 
 describe("search.new", function()
