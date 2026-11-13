@@ -12,6 +12,16 @@ describe("session", function()
     eq({ "abcde", "fghij", "k l" }, session.wrap_text("abcdefghijk l", 5))
   end)
 
+  it("cuts a word of double-width characters by its width on screen", function()
+    local lines = session.wrap_text(("日本語のテキスト"):rep(6), 20)
+    eq({ 20, 20, 20, 20, 16 }, vim.tbl_map(vim.fn.strdisplaywidth, lines))
+    eq(("日本語のテキスト"):rep(6), table.concat(lines))
+    -- an odd width leaves a cell free rather than splitting a character
+    eq({ "日本", "語の" }, session.wrap_text("日本語の", 5))
+    -- a window narrower than one character still gets one character per line
+    eq({ "日", "本" }, session.wrap_text("日本", 1))
+  end)
+
   it("keeps the line breaks a message already has", function()
     eq({ "a", "", "b c" }, session.wrap_text("a\n\nb c", 10))
   end)
