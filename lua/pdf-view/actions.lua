@@ -1,5 +1,6 @@
---- What the keys do: turning pages, scrolling, zooming, fitting, searching and jumping to bookmarks. Each action
---- changes the session and asks `render` to show it.
+--- What the keys do: turning pages, scrolling (also with the mouse wheel), zooming, fitting, rotating, searching,
+--- bookmarks, links, page text, jumps and marks, SyncTeX, facing pages and recolouring. Each action changes the session
+--- and asks `render` to show it.
 local config = require("pdf-view.config")
 local cursor = require("pdf-view.cursor")
 local layout = require("pdf-view.layout")

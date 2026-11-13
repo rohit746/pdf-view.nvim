@@ -651,16 +651,25 @@ sending all of its bytes). In zellij, which forgets an image once nothing shows 
 ## Development
 
 ```
+plugin/pdf-view.lua registers the commands, the <Plug> mappings and the handler at startup (Neovim 0.11+ check)
 lua/pdf-view/
-  init.lua        setup(), the :PdfView command, the *.pdf (and *.cbz, ...) handler
+  init.lua        setup(), the Lua API (action(), goto_page(), get(), ...), :PdfView and :PdfViewForward, the <Plug>
+                  mappings, the *.pdf (and *.cbz, ...) handler, bringing viewers back from a session
   config.lua      defaults and validation
-  viewer.lua      a PDF buffer's lifecycle: attach, open, file watching, cleanup
-  session.lua     per-buffer state and the helpers that touch windows, the winbar and the render cache
+  viewer.lua      a PDF buffer's lifecycle: attach, open, file watching, a window's own view (pdf-view://), applying a
+                  later setup(), saving a copy (:w {file}), cleanup
+  session.lua     per-buffer state and the helpers that touch windows, the winbar and the render cache; the
+                  User PdfViewPage autocommand
   render.lua      showing a page: mutool -> PNG -> terminal -> placeholder cells, latest request wins
-  actions.lua     what the keys do: page turns, scrolling, zoom, fit modes, search, outline, links, page text
+  actions.lua     what the keys do: page turns, scrolling (keys and the mouse wheel), zoom, fit modes, rotation, search
+                  and its match picker, outline, links (to pages, other PDFs, addresses), page text, jumps and marks,
+                  SyncTeX forward and inverse search, facing pages, recolouring; the buffer and wheel mappings
   cursor.lua      hiding the cursor while a viewer is focused
   layout.lua      fitting a page into whole terminal cells; zoomed viewports (pure)
+  rotation.lua    turning pages a quarter turn: sizes, points, rectangles and destinations on the turned page (pure)
   search.lua      search results: parsing, stepping, highlight strings (pure)
+  positions.lua   where each PDF was left, kept across restarts in stdpath("state")/pdf-view/positions.json
+  synctex.lua     running the `synctex` tool (view, edit) and reading what it prints
   mupdf.lua       async wrapper around mutool, and the worker that keeps a document open
   kitty.lua       graphics protocol encoding, tmux passthrough
   placeholder.lua Unicode placeholder text
@@ -668,10 +677,11 @@ lua/pdf-view/
                   step with floats and redraws
   iterm2.lua      iTerm2 inline images (OSC 1337)
   sixel.lua       sixel encoding of the pixels mutool writes
-  terminal.lua    terminal detection, cell size, tmux
+  terminal.lua    terminal detection (environment, XTVERSION, DA1, GUIs), cell size, tmux
   watch.lua       file watching
   health.lua      :checkhealth pdf-view
 scripts/          JavaScript run by `mutool run`: the worker (page geometry, rendering, page text, links), search, outline
+doc/pdf-view.txt  :help pdf-view
 tests/            headless suite (`make test`)
 ```
 
