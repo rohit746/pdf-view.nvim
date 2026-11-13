@@ -45,6 +45,9 @@ All notable changes to this project are documented here. The format follows
 - A session (`:mksession`) brought a viewer's window back as an empty buffer named after the PDF, and `:w!` there
   emptied the PDF. The window is a viewer again now. Sessions saved without `blank` in `'sessionoptions'` leave the
   window out, as the README now says.
+- A page that is slow to draw (a dense vector drawing, a scanned map at a high zoom) held up every later page when it
+  was left within a second of starting, or when it was being drawn ahead of time: the next page waited for the whole
+  render. Such a render is now stopped once it has run for a second, unless the page is turned back to.
 
 ### Security
 

@@ -4220,6 +4220,93 @@ describe("viewer page turns", function()
     end)
   end)
 
+  it("lets go of the page being drawn ahead of time when another page is shown instead", function()
+    reset()
+    local s = open(make("prefetch-leave", pages(5)))
+    idle(s)
+    local kills, finish = {}, {}
+    local render = mupdf.render
+    with_stub(mupdf, "render", function(file, page, width, height, out, cb)
+      if page ~= 3 then
+        return render(file, page, width, height, out, cb)
+      end
+      -- page 3 is slow to draw: held back until the test lets it finish
+      local job = render(file, page, width, height, out, function(...)
+        local args = { ... }
+        finish[#finish + 1] = function()
+          cb(unpack(args))
+        end
+      end)
+      return {
+        kill = function(_, signal, wanted)
+          kills[#kills + 1] = wanted or false
+          return job:kill(signal, wanted)
+        end,
+      }
+    end, function()
+      press("j")
+      on_page(s, 2)
+      wait_for(function()
+        return s.rendering ~= nil and next(s.rendering) ~= nil
+      end, "page 3 being rendered ahead of time")
+      press("5G")
+      on_page(s, 5)
+      wait_for(function()
+        return #kills == 1
+      end, "page 3 let go of")
+      eq(false, kills[1] and kills[1](), "nothing waits for it")
+      wait_for(function()
+        return #finish == 1
+      end, "the render of page 3")
+    end)
+  end)
+
+  it("keeps drawing the page being drawn ahead of time while it is turned to", function()
+    reset()
+    local s = open(make("prefetch-keep", pages(3)))
+    idle(s)
+    local kills, finish = {}, {}
+    local render = mupdf.render
+    with_stub(mupdf, "render", function(file, page, width, height, out, cb)
+      local job = render(file, page, width, height, out, function(...)
+        local args = { ... }
+        finish[#finish + 1] = function()
+          cb(unpack(args))
+        end
+      end)
+      return {
+        kill = function(_, signal, wanted)
+          kills[#kills + 1] = wanted or false
+          return job:kill(signal, wanted)
+        end,
+      }
+    end, function()
+      press("j")
+      on_page(s, 2)
+      wait_for(function()
+        return s.rendering ~= nil and next(s.rendering) ~= nil
+      end, "page 3 being rendered ahead of time")
+      press("j")
+      vim.wait(50)
+      eq({}, kills, "the page turn waits for it, so it is not stopped")
+      press("k") -- turned away before it is done: nothing waits for it any more
+      on_page(s, 2)
+      wait_for(function()
+        return #kills == 1
+      end, "page 3 let go of")
+      eq(false, kills[1] and kills[1](), "nothing waits for it")
+      press("j") -- turned back to within the time it is given to finish
+      vim.wait(50)
+      eq(true, kills[1](), "the page turn waits for it again, which keeps it going")
+      wait_for(function()
+        return #finish == 1
+      end, "the render of page 3")
+      eq(1, #kills)
+      finish[1]()
+      on_page(s, 3)
+    end)
+  end)
+
   it("shows a page it turns back to without sending it to the terminal again", function()
     reset()
     local s = open(make("terminal-cache", pages(3)))

@@ -17,8 +17,9 @@ local MAX_PAGE = 2 ^ 31 - 1
 local CONTENT_MARGIN = 8
 
 ---@class PdfView.Job
----@field kill fun(self: PdfView.Job, signal?: integer): boolean? true when the job stopped, so that its callback gets
---- an error; a request the worker is busy with may be left to finish instead (see `ask()`)
+---@field kill fun(self: PdfView.Job, signal?: integer, wanted?: fun(): boolean): boolean? true when the job stopped, so
+--- that its callback gets an error; a request the worker is busy with may be stopped later instead, unless `wanted()`
+--- then says that something waits for it again (see `ask()`)
 
 ---@class PdfView.PageInfo
 ---@field count integer pages in the document
@@ -86,6 +87,8 @@ end
 ---@field cb fun(err?: string, result?: string)
 ---@field done? boolean
 ---@field started? number when the worker was handed it, from `vim.uv.hrtime()`
+---@field deadline? boolean it was killed before it had run for `M.kill_after`: it is stopped once it has
+---@field wanted? fun(): boolean what the last `kill()` was given: true when something waits for it again
 
 ---@class PdfView.WorkerProcess
 ---@field system? vim.SystemObj
@@ -123,7 +126,8 @@ local LINE = 200
 local STDERR_LIMIT = 4096
 
 --- Milliseconds a request may have been worked on before killing it stops its worker. A request killed sooner is
---- left to finish: starting another worker opens and parses the document again, which costs more than most renders.
+--- given the rest of that time to finish: starting another worker opens and parses the document again, which costs
+--- more than most renders.
 M.kill_after = 1000
 
 ---@param path string
@@ -332,14 +336,18 @@ local function ask(path, request, cb)
     pump(w)
   end)
   return {
-    --- A waiting request is dropped. One that is being worked on is left to finish, and `cb` gets its result, unless
-    --- it has run for `M.kill_after` milliseconds: then its worker is stopped, so that a page that is slow to draw does
-    --- not hold up the next one, and the next request starts another worker.
+    --- A waiting request is dropped. One that is being worked on has its worker stopped once it has run for
+    --- `M.kill_after` milliseconds, at once when it has already, so that a page that is slow to draw does not hold up
+    --- the next one, and the next request starts another worker. Until then it may still finish, and `cb` gets its
+    --- result. It is not stopped while `wanted()` says that something waits for it again: kill it once more when
+    --- nothing does.
+    ---@param wanted? fun(): boolean
     ---@return boolean killed
-    kill = function()
+    kill = function(_, _, wanted)
       if entry.done then
         return false
       end
+      entry.wanted = wanted
       for index, queued in ipairs(w.queue) do
         if queued == entry then
           table.remove(w.queue, index)
@@ -350,7 +358,23 @@ local function ask(path, request, cb)
         end
       end
       if w.process and w.process.current == entry then
-        if (vim.uv.hrtime() - entry.started) / 1e6 < M.kill_after then
+        if wanted and wanted() then
+          return false
+        end
+        local left = M.kill_after - (vim.uv.hrtime() - entry.started) / 1e6
+        if left > 0 then
+          if not entry.deadline then
+            entry.deadline = true
+            vim.defer_fn(function()
+              entry.deadline = nil
+              local process = w.process
+              if entry.done or not process or process.current ~= entry or (entry.wanted and entry.wanted()) then
+                return
+              end
+              stop(w, "mutool was killed (signal 15)")
+              pump(w)
+            end, math.ceil(left))
+          end
           return false
         end
         stop(w, "mutool was killed (signal 15)")
