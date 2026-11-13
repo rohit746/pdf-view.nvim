@@ -16,6 +16,7 @@ local M = {}
 ---@field top? number where on that page, in points from its bottom edge (a /XYZ destination); the whole page without
 ---@field left? number the same in points from its left edge
 ---@field uri? string address it opens instead
+---@field action? string the link's action dictionary as written in the PDF (`<< /S /Launch /F (app) >>`), instead
 
 ---@class PdfView.FixtureOutline
 ---@field title string
@@ -82,6 +83,7 @@ function M.write(path, pages, opts)
     local annots = {}
     for _, link in ipairs(page.links or {}) do
       local action = link.page and "/Dest " .. dest(page_objects[link.page], link)
+        or link.action and "/A " .. link.action
         or ("/A << /S /URI /URI (%s) >>"):format(link.uri)
       local annot = add(
         ("<< /Type /Annot /Subtype /Link /Rect [%g %g %g %g] /Border [0 0 0] %s >>"):format(
