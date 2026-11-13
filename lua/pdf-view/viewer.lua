@@ -26,17 +26,19 @@ local RELOAD_RETRIES = 8
 
 --- Where the viewer of a buffer was when the buffer was unloaded, with its jump list and marks. `:edit` unloads a
 --- buffer and reads it again, and this is what brings it back to the same page instead of the first one.
----@type table<integer, PdfView.Position|{ jumps?: PdfView.Position[], jump_index?: integer, marks?: table<string, PdfView.Position> }>
+---@type table<integer, PdfView.Remembered|{ jumps?: PdfView.Position[], jump_index?: integer, marks?: table<string, PdfView.Position> }>
 local resume = {}
 
 --- Holds each viewer's own `BufReadCmd`, which outlives the session (`destroy` clears only `augroup`) so `:edit`
 --- re-attaches the buffer even when `auto_open` is off and no `*.pdf` handler exists.
 local reread = vim.api.nvim_create_augroup("PdfViewReread", { clear = true })
 
---- Where the viewer `s` is, for `resume`.
+--- Where the viewer `s` is, for `resume`: with the layout of an e-book, whose page numbers follow it.
 ---@param s PdfView.Session
+---@return PdfView.Remembered
 local function position(s)
-  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy }
+  local size = s.reflowable and s.laid_out and s.laid_out.size or nil
+  return { page = s.target or s.page, mode = s.mode, zoom = s.zoom, cx = s.cx, cy = s.cy, layout = size }
 end
 
 --- What `resume` keeps of the viewer `s`: where it is, its jump list and its marks.
@@ -242,6 +244,12 @@ function M.attach(buf)
     closed = false,
   }
   sessions[buf] = s
+  if type(last.layout) == "table" then
+    -- the page is one of an e-book laid out this way: the first `show` finds where its text is in the window's
+    -- layout, as it does when the window is resized
+    s.reflowable = true
+    s.laid_out = { key = table.concat(last.layout, "x"), size = last.layout }
+  end
 
   -- `nofile` stops Neovim from reading the PDF's bytes into the buffer and refuses `:w` over the original
   local bo = vim.bo[buf]
