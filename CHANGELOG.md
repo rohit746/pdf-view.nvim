@@ -63,6 +63,9 @@ All notable changes to this project are documented here. The format follows
 - A GUI (Neovide, nvim-qt) started from a shell in kitty or Ghostty was taken for that terminal: the buffer was
   filled with placeholder characters it cannot draw. A GUI now gets the page's text, and `:checkhealth pdf-view` says
   that it cannot show pages.
+- A page that is slow to draw (a dense vector drawing, a scanned map at a high zoom) held up every later page when it
+  was left within a second of starting, or when it was being drawn ahead of time: the next page waited for the whole
+  render. Such a render is now stopped once it has run for a second, unless the page is turned back to.
 
 ### Security
 

@@ -80,8 +80,9 @@ local NO_HIGHLIGHT = "PdfViewNone"
 ---@field slot integer which of `ids` is on screen (0 = none yet)
 ---@field images table<integer, string> the PNG the terminal holds under each id, to show it again without sending it
 ---@field image_used table<integer, integer> when each id was last put on screen, to reuse the oldest one
----@field rendering table<string, { waiters: fun(err?: string, png?: string)[] }> renders in progress, by cache key
----@field prefetch? { stopped: boolean } the pages next to the one on screen being rendered ahead of time
+---@field rendering table<string, PdfView.Rendering> renders in progress, by cache key
+---@field prefetch? { stopped: boolean, job?: PdfView.Job } the pages next to the one on screen being rendered ahead of
+--- time, and the render it is waiting for
 ---@field win? integer window the layout was computed for
 ---@field cache table<string, string> render cache: key -> PNG path
 ---@field cache_order string[]

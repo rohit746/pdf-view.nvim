@@ -344,6 +344,12 @@ local function sheet_of(s, stamp, first, last, content, track, cb)
   step(first)
 end
 
+---@class PdfView.Rendering
+---@field waiters fun(err?: string, png?: string)[] called when the render is done
+---@field job? PdfView.Job the request to mutool, set once it is made
+---@field leave fun(waiter: fun(err?: string, png?: string)) stop waiting with `waiter`: once nothing waits, the render
+--- is stopped (see `mupdf`: one the worker is busy with is given the rest of `mupdf.kill_after` to finish)
+
 --- Render into the render cache under `key`, calling `done` and whoever waits on `s.rendering[key]` when it is done.
 ---@param s PdfView.Session
 ---@param key string
@@ -353,9 +359,31 @@ end
 local function start_render(s, key, render, done)
   png_counter = png_counter + 1
   local out = ("%s/pdf-view-%d-%d.png"):format(temp_dir(), s.buf, png_counter)
-  local entry = { waiters = { done } }
+  ---@type PdfView.Rendering
+  local entry
+  entry = {
+    waiters = { done },
+    leave = function(waiter)
+      for index, other in ipairs(entry.waiters) do
+        if other == waiter then
+          table.remove(entry.waiters, index)
+          break
+        end
+      end
+      if #entry.waiters > 0 then
+        return
+      end
+      -- something that waits on it from now on, such as a page turned back to, keeps it going
+      local stopped = entry.job and entry.job:kill(15, function()
+        return #entry.waiters > 0
+      end)
+      if stopped and s.rendering[key] == entry then
+        s.rendering[key] = nil -- nobody else may wait on it now
+      end
+    end,
+  }
   s.rendering[key] = entry
-  local job = render(out, function(err)
+  entry.job = render(out, function(err)
     if s.rendering[key] == entry then
       s.rendering[key] = nil
     end
@@ -369,12 +397,10 @@ local function start_render(s, key, render, done)
     end
   end)
   return {
-    --- A render the worker is busy with may be left to finish (see `mupdf`): it is still kept in the render cache,
-    --- and `done` is still called. One that is stopped is no longer waited on.
+    --- `done` is not called. A render the worker is busy with may still finish (see `mupdf`), and is then kept in
+    --- the render cache. One that is stopped is no longer waited on.
     kill = function()
-      if job:kill(15) and s.rendering[key] == entry then
-        s.rendering[key] = nil -- nobody else may wait on it now
-      end
+      entry.leave(done)
     end,
   }
 end
@@ -522,8 +548,9 @@ end
 local NEIGHBOURS = { { 1, 0 }, { -1, 1 } }
 
 --- Render the pages next to the one on screen into the render cache, one after the other, so that turning to them
---- shows them at once. A newer `show()` stops this before it asks for anything (`s.prefetch.stopped`); what is being
---- rendered then is still finished and kept, and `show()` waits for it when it wants that page.
+--- shows them at once. A newer `show()` stops this before it asks for anything (`s.prefetch.stopped`) and lets go of
+--- what is being rendered then; that is still finished and kept when `show()` waits for it, wanting that page, and
+--- stopped like any render nobody waits for otherwise.
 ---@param s PdfView.Session
 ---@param stamp string
 ---@param cols integer
@@ -542,6 +569,7 @@ local function prefetch(s, stamp, cols, rows, cell)
   local content = s.mode == "content"
 
   local function step()
+    run.job = nil
     local next_page = table.remove(todo, 1)
     if run.stopped or s.closed or not next_page then
       if s.prefetch == run then
@@ -565,7 +593,7 @@ local function prefetch(s, stamp, cols, rows, cell)
         session.touch(s, key)
         return step()
       end
-      start_render(s, key, render, function()
+      run.job = start_render(s, key, render, function()
         step()
       end)
     end)
@@ -737,9 +765,18 @@ local function show(s, page, opts)
     s.job:kill(15)
     s.job = nil
   end
-  if s.prefetch then
-    s.prefetch.stopped = true -- what it is rendering now is kept; it asks for nothing more
+  local run = s.prefetch
+  if run then
+    run.stopped = true -- it asks for nothing more
     s.prefetch = nil
+    local job = run.job
+    if job then
+      -- what it is rendering now is let go of once this `show()` has had the chance to wait for it, which it does
+      -- at once when it wants that page and knows its geometry
+      vim.schedule(function()
+        job:kill(15)
+      end)
+    end
   end
 
   local cols, rows = text_area(win)
@@ -880,16 +917,10 @@ local function show(s, page, opts)
     local pending = s.rendering[cache_key]
     if pending then
       -- the page is being drawn ahead of time: wait for that
-      local waiters = pending.waiters
-      waiters[#waiters + 1] = rendered
+      pending.waiters[#pending.waiters + 1] = rendered
       s.job = {
         kill = function()
-          for index, waiter in ipairs(waiters) do
-            if waiter == rendered then
-              table.remove(waiters, index)
-              break
-            end
-          end
+          pending.leave(rendered)
         end,
       }
       return

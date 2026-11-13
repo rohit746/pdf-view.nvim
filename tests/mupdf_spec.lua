@@ -377,6 +377,103 @@ awk 'NR == 1 { sub(/^:/, ":x") } { print; fflush() }' | exec '%s' "$@"
     eq(false, errors.second, "the request after it is answered by a new worker")
   end)
 
+  describe("a request killed before it has run for kill_after", function()
+    -- a worker that takes two seconds over page 1 and answers the rest at once, as a page slow to draw does
+    local slow = dir .. "/slow-mutool"
+    local file = assert(io.open(slow, "w"))
+    file:write([[#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in :*) ;; *) continue ;; esac
+  id=${line#:[}
+  id=${id%%,*}
+  case "$line" in *'"info",1,'*) sleep 2 </dev/null >/dev/null 2>&1 ;; esac
+  echo "@$id ok 2 1 100 100 0"
+done
+]])
+    file:close()
+    vim.uv.fs_chmod(slow, 493) -- 0755
+    local doc = dir .. "/slow.pdf"
+    fixture.write(doc, { { w = 100, h = 100 } })
+
+    ---@param body fun(record: fun(name: string): fun(err?: string), answers: table<string, { err: string|false, ms: number }>, start: number)
+    local function with_slow_worker(body)
+      local kill_after = mupdf.kill_after
+      mupdf.kill_after = 200
+      config.setup({ mutool = slow })
+      local start = vim.uv.hrtime()
+      local answers = {}
+      local function record(name)
+        return function(err)
+          answers[name] = { err = err or false, ms = (vim.uv.hrtime() - start) / 1e6 }
+        end
+      end
+      local ok, err = pcall(body, record, answers, start)
+      mupdf.kill_after = kill_after
+      mupdf.release(doc)
+      config.setup()
+      assert(ok, err)
+    end
+
+    it("is stopped once it has, so that the next request does not wait for it", function()
+      with_slow_worker(function(record, answers)
+        local first = mupdf.info(doc, 1, record("first"))
+        vim.wait(0) -- the first request is handed to the worker
+        truthy(mupdf.has_worker(doc), "the first request is in progress")
+        eq(false, first:kill(15), "it is given the rest of kill_after")
+        mupdf.info(doc, 2, record("second"))
+        vim.wait(100)
+        eq(nil, answers.first, "it is not stopped before then")
+        wait_for(function()
+          return answers.first ~= nil and answers.second ~= nil
+        end, "every request answered")
+        truthy(tostring(answers.first.err):find("killed", 1, true), vim.inspect(answers.first))
+        eq(false, answers.second.err, "the request after it is answered by a new worker")
+        truthy(answers.second.ms < 1500, ("answered after %d ms, not after the slow one"):format(answers.second.ms))
+      end)
+    end)
+
+    it("is left to finish while something waits for it again", function()
+      with_slow_worker(function(record, answers)
+        local first = mupdf.info(doc, 1, record("first"))
+        vim.wait(0)
+        local wanted = true
+        eq(
+          false,
+          first:kill(15, function()
+            return wanted
+          end)
+        )
+        vim.wait(500)
+        eq(nil, answers.first, "it is still being worked on")
+        truthy(mupdf.has_worker(doc), "by the same worker")
+        wanted = false
+        eq(true, first:kill(15), "killed again once nothing waits for it, it is stopped at once")
+        wait_for(function()
+          return answers.first ~= nil
+        end, "the first request")
+        truthy(tostring(answers.first.err):find("killed", 1, true), vim.inspect(answers.first))
+      end)
+    end)
+
+    it("finishes when it is wanted again until it is done", function()
+      with_slow_worker(function(record, answers)
+        local first = mupdf.info(doc, 1, record("first"))
+        vim.wait(0)
+        eq(
+          false,
+          first:kill(15, function()
+            return true
+          end)
+        )
+        wait_for(function()
+          return answers.first ~= nil
+        end, "the first request")
+        eq(false, answers.first.err, "it is answered")
+        truthy(answers.first.ms > 1500, "after the whole render")
+      end)
+    end)
+  end)
+
   describe("render_clip", function()
     local red = dir .. "/red.pdf"
     fixture.write(
