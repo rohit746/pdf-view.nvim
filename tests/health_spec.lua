@@ -12,7 +12,11 @@ local function checkhealth()
   -- Neovim 0.13 runs the checks asynchronously and fills the buffer when they are done
   vim.wait(10000, function()
     report = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-    return (report:find("image transmission:", 1, true) or report:find("Failed to run healthcheck", 1, true)) ~= nil
+    return (
+      report:find("image transmission:", 1, true)
+      or report:find("is not a terminal", 1, true)
+      or report:find("Failed to run healthcheck", 1, true)
+    ) ~= nil
   end, 10)
   if #vim.api.nvim_list_tabpages() > 1 then
     vim.cmd("tabclose") -- the report has a tab of its own unless the editor was empty
@@ -76,5 +80,21 @@ describe("health", function()
       truthy(report:find('If pages stay blank, set `transmission = "direct"`', 1, true), state .. ":\n" .. report)
     end
     terminal.probe, vim.env.SSH_CONNECTION, vim.env.SSH_TTY = saved.probe, saved.conn, saved.tty
+  end)
+
+  it("says that a GUI cannot show pages, whatever terminal it was started from", function()
+    config.setup()
+    local saved = { uis = vim.api.nvim_list_uis, term = vim.env.TERM, kitty = vim.env.KITTY_WINDOW_ID }
+    vim.env.TERM, vim.env.KITTY_WINDOW_ID = "xterm-kitty", "1"
+    terminal.forget()
+    vim.api.nvim_list_uis = function()
+      return { { stdout_tty = false, stdin_tty = false, term_name = "" } } -- what Neovide or nvim-qt reports
+    end
+    local ok, report = pcall(checkhealth)
+    vim.api.nvim_list_uis, vim.env.TERM, vim.env.KITTY_WINDOW_ID = saved.uis, saved.term, saved.kitty
+    terminal.forget()
+    assert(ok, report)
+    truthy(report:find("ERROR this Neovim UI is not a terminal, so it cannot show pages", 1, true), report)
+    truthy(not report:find("terminal: kitty", 1, true), "the inherited environment is not reported:\n" .. report)
   end)
 end)

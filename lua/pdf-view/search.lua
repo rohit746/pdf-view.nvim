@@ -9,6 +9,7 @@ local M = {}
 ---@field rects number[][] one `{ x0, y0, x1, y1 }` per line the match covers, in points from the page's top-left
 ---@field cx number centre of the match as a fraction of the page width
 ---@field cy number centre as a fraction of the page height
+---@field text string the line of text the match starts on, cut down around the match when it is long; "" when unknown
 
 ---@class PdfView.Search
 ---@field id integer distinguishes one search from the next, for cache keys
@@ -30,8 +31,9 @@ function M.parse(stdout)
     if line == "truncated" then
       truncated = true
     else
-      local page, width, height, quads = line:match("^(%d+) %d+ ([%d%.]+) ([%d%.]+) (.+)$")
+      local page, width, height, quads = line:match("^(%d+) %d+ ([%d%.]+) ([%d%.]+) ([^\t]+)")
       if page then
+        local text = line:match("\t(.*)$") or ""
         local rects = {}
         for x0, y0, x1, y1 in quads:gmatch("(-?[%d%.]+),(-?[%d%.]+),(-?[%d%.]+),(-?[%d%.]+)") do
           rects[#rects + 1] = { tonumber(x0), tonumber(y0), tonumber(x1), tonumber(y1) }
@@ -46,6 +48,7 @@ function M.parse(stdout)
             rects = rects,
             cx = (first[1] + first[3]) / 2 / width,
             cy = (first[2] + first[4]) / 2 / height,
+            text = vim.trim(text),
           }
         end
       end
@@ -152,6 +155,19 @@ function M.highlights(search, page, colors)
     end
   end
   return table.concat(parts, ";"), ("%d:%d:%s:%s"):format(search.id, current_here, colors.match, colors.current)
+end
+
+--- How the picker of matches shows match `index`: its page, padded to the width of the last page with a match, and
+--- the line of text it is on, e.g. "p.  12  …the viewport is a window-sized crop of…".
+---@param search PdfView.Search
+---@param index integer
+---@return string
+function M.describe(search, index)
+  local matches = search.matches
+  local match = matches[index]
+  local width = #tostring(matches[#matches].page)
+  local page = ("p. %" .. width .. "d"):format(match.page)
+  return match.text ~= "" and ("%s  %s"):format(page, match.text) or page
 end
 
 --- "3/17" for the winbar: the position of the current match, with "+" when the hit limit cut the list short.

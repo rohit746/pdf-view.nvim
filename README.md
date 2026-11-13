@@ -151,8 +151,9 @@ take a count.
 | `?`                          | search backward                                                                 |
 | `n` `N`                      | next / previous match (`n` repeats the direction of the search; takes a count)  |
 | `<Esc>`                      | remove the search highlights                                                    |
+| `g/`                         | list the matches of the search with their page and line of text; go to one      |
 | `gO`                         | pick a bookmark from the document's outline and go to its page                  |
-| `f`                          | pick a link on the page: go to its page, or open its address                    |
+| `f`                          | pick a link on the page: go to its page or another PDF, or open its address     |
 | `y`                          | yank the page's text, linewise (`"+y`: to the clipboard)                        |
 | `t`                          | show the page's text in a scratch split                                         |
 | `<C-o>` `<C-i>` `<Tab>`      | back / forward through the jump list (takes a count)                            |
@@ -225,6 +226,11 @@ Highlights are drawn into the page image, multiplied onto it so text stays reada
 a translucent fill instead, which dulls the text under a match a little). The colours are configurable
 (`highlight`), and at most `search_limit` matches are collected (the winbar shows `17/5000+` when that cuts the list).
 
+`g/` lists the matches of the search through `vim.ui.select`, one per match with its page and the line of text it is
+on, cut down around the match when the line is long (`p. 12  …the viewport is a window-sized crop of…`). A picker
+that filters finds the one that matters among many; choosing it goes there as `n` would, a jump that `<C-o>` comes back
+from.
+
 ### Outline
 
 `gO` lists the document's bookmarks, indented by depth, through `vim.ui.select` (a picker such as snacks.nvim's if you
@@ -243,9 +249,11 @@ bookmarks say so.
 `f` lists the links on the page on screen, top to bottom, with the text under each and where it leads, through
 `vim.ui.select`. A link to a page of the document goes there (a jump, so `<C-o>` comes back), with the point it leads to,
 like a figure or a citation, at the top of the window when the page is zoomed or fitted to its width; a web address or
-an e-mail opens with `vim.ui.open()`. Any other address, such as a `file:` address or a PDF's Launch action, could start
-a program, so `f` shows it in full and asks before opening it; `link_schemes` lists the schemes that open without
-asking. A page without links says so.
+an e-mail opens with `vim.ui.open()`. A link to another PDF, or to any file with one of the `extensions`, opens it in a
+viewer in the same window, at the page or named destination it leads to; a relative name is found next to the PDF with
+the link, the picker shows it as `other.pdf, p. 3`, and `<C-o>` comes back. Any other address, such as another `file:`
+address or a PDF's Launch action, could start a program, so `f` shows it in full and asks before opening it;
+`link_schemes` lists the schemes that open without asking. A page without links says so.
 
 ### Page text
 
@@ -379,6 +387,7 @@ require("pdf-view").setup({
     search_next = { "n" },
     search_prev = { "N" },
     search_clear = { "<Esc>" },
+    search_list = { "g/" },
     outline = { "gO" },
     follow_link = { "f" },
     yank_text = { "y" },
@@ -500,6 +509,10 @@ In a terminal that can show none of these, over a plain SSH session for instance
 the window and shows the text of the page under it. The page keys turn the pages as usual, and `<C-d>`/`<C-u>` scroll a
 page's text that is taller than the window.
 
+A GUI (Neovide, nvim-qt, any front end that attaches over RPC) draws no images either, and it gets the text too, even
+when it was started from a shell in kitty or Ghostty and inherited that terminal's `$TERM`. Neovim with the TUI, or
+`nvim --remote-ui`, in such a terminal shows the pages.
+
 ## zellij
 
 zellij 0.45 implements the Kitty graphics protocol itself, but not its Unicode placeholders. Inside zellij (detected
@@ -528,7 +541,8 @@ Set `placement = "placeholders"` once your zellij supports Unicode placeholders
 
 1. A `mutool run` worker, one per open PDF, reports the page count and the exact size of the page (rotation, crop box
    and `UserUnit` applied). It keeps the document open between requests, so a page turn does not start mutool and
-   parse the document again; it is restarted when the file changes on disk.
+   parse the document again; it is restarted when the file changes on disk, and stopped once the viewer has been in
+   no window for 30 seconds (the pages it drew stay in the render cache).
 2. The page is fitted to the window in whole terminal cells and rendered by the worker to a PNG of exactly
    `cols × cell_width` by `rows × cell_height` pixels, so the terminal maps pixels to cells one to one.
 3. The PNG is uploaded to the terminal (`a=t`) and a virtual placement is created (`a=p,U=1`).

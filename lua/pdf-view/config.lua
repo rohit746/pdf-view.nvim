@@ -26,8 +26,10 @@ local M = {}
 ---@field search_next string[] next match, in the direction of the search
 ---@field search_prev string[] previous match
 ---@field search_clear string[] remove the highlights
+---@field search_list string[] pick one of the matches of the search, listed with their pages and lines of text
 ---@field outline string[] pick a bookmark to jump to
----@field follow_link string[] pick a link on the page: go to its page, or open its address with `vim.ui.open()`
+---@field follow_link string[] pick a link on the page: go to its page, open another PDF in the viewer, or open its
+--- address with `vim.ui.open()`
 ---@field yank_text string[] yank the text of the page into the register given (`"+y`), linewise
 ---@field show_text string[] show the text of the page in a scratch buffer in a split
 ---@field jump_back string[] back through the jump list (`gg`, `G`, bookmarks, searches and marks are jumps)
@@ -138,6 +140,7 @@ local defaults = {
     search_next = { "n" },
     search_prev = { "N" },
     search_clear = { "<Esc>" },
+    search_list = { "g/" },
     outline = { "gO" },
     follow_link = { "f" },
     yank_text = { "y" },
