@@ -153,6 +153,7 @@ local function present(s, win, png, info, fit, rows)
     s.cx, s.cy = fit.cx, fit.cy -- what was reachable, after clamping to the page
   end
   update_winbar(s, win)
+  session.announce_page(s)
   pcall(vim.api.nvim_win_set_cursor, win, { 1, 0 })
 end
 
@@ -693,6 +694,7 @@ local function show_text_instead(s, win, page, reason)
       s.page_text = reason
       s.page, s.count, s.target = info.page, info.count, nil
       update_winbar(s, win)
+      session.announce_page(s)
     end)
   end)
 end

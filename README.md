@@ -361,7 +361,7 @@ require("pdf-view").setup({
   continuous = false,      -- scrolling goes on from the end of a page into the next one
   spread = "off",          -- "on": facing pages side by side, 1-2, 3-4; "cover": 1 alone, then 2-3. `d` toggles it
   cell_size = nil,         -- { width, height } in px, only if your terminal does not report its pixel size
-  keymaps = {              -- a list per action; `false` for no mappings at all
+  keymaps = {              -- a list per action; `false` for none (map the Lua API yourself)
     down = { "j", "<Down>" },
     up = { "k", "<Up>" },
     half_down = { "<C-d>" },                  -- half a window; `3<C-d>`: three halves
@@ -421,6 +421,51 @@ about the size of the terminal's (`text_scale = 1.5` makes it half as large agai
 book is laid out again and the viewer stays at the same point of the text, and a book reopened in a window of another
 size opens at the point of the text it was left at. Page numbers change with the layout, so marks and the jump list,
 which remember page numbers, may point elsewhere afterwards.
+
+## Lua API
+
+Every action of `keymaps` can be run from Lua, so `keymaps = false` and your own mappings, a `:PdfViewPage` command
+or a notes plugin can drive a viewer:
+
+```lua
+local pdf = require("pdf-view")
+pdf.action("next", { count = 2 })    -- any name of `keymaps`; `buf` (default: current), `count` (default: v:count)
+pdf.goto_page(12)                    -- a jump, as 12G; clamped to the document
+pdf.set_zoom(1.5)                    -- times the fitted size, up to max_zoom
+pdf.set_fit("width")                 -- "page" | "width" | "height" | "content", at zoom 1
+pdf.search("theorem", { backward = true }) -- as / or ?; n and N step on
+pdf.get()                            -- { buf, path, page, last, count, fit, zoom }, nil off a viewer
+```
+
+Each takes `{ buf = n }` for a viewer in another buffer (it runs in that viewer's window, and the cursor stays where
+it is) and returns `false`, with a warning, when the buffer is not a viewer. Unknown actions and bad arguments raise
+an error. From Vim script, every action also has a `<Plug>(pdf-view-{name})` mapping that passes its count on:
+
+```lua
+require("pdf-view").setup({ keymaps = false })
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "pdf-view", -- the viewer's buffers
+  callback = function(args)
+    vim.keymap.set("n", "J", "<Plug>(pdf-view-next)", { buffer = args.buf }) -- 3J: three pages
+    vim.keymap.set("n", "K", "<Plug>(pdf-view-prev)", { buffer = args.buf })
+  end,
+})
+vim.api.nvim_create_user_command("PdfViewPage", function(args)
+  require("pdf-view").goto_page(tonumber(args.args))
+end, { nargs = 1 })
+```
+
+When another page is on screen, a `User PdfViewPage` autocommand runs with `data = { buf, page, last, count }`
+(`last` is the right page of facing pages, else `page`):
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+  pattern = "PdfViewPage",
+  callback = function(args)
+    vim.notify(("page %d of %d"):format(args.data.page, args.data.count))
+  end,
+})
+```
 
 ## Live reload
 

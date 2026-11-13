@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A Lua API to drive a viewer without its keys, so `keymaps = false` no longer leaves it unusable:
+  `require("pdf-view").action(name, { buf, count })` runs any action of `keymaps` (the keys call the same code), and
+  every action also has a `<Plug>(pdf-view-{name})` mapping that passes its count on. `goto_page()`, `set_zoom()`,
+  `set_fit()` and `search()` take an argument, `get()` returns `{ buf, path, page, last, count, fit, zoom }`, and a
+  `User PdfViewPage` autocommand tells other code when another page is on screen.
 - `g/` lists the matches of the search through `vim.ui.select`, each with its page and the line of text it is on, and
   goes to the chosen one as `n` would (a jump, so `<C-o>` comes back). The key is the `search_list` action.
 - `<C-d>` and `<C-u>` scroll a zoomed or fitted page by half a window, turning the page at its edge as `j` and `k` do

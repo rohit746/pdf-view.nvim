@@ -325,6 +325,15 @@ end
 ---@type PdfView.Config
 M.options = vim.deepcopy(defaults)
 
+--- The names of the actions, sorted: the keys of `keymaps`, which has an entry for every action. Read here rather than
+--- from the actions themselves, which would load most of the plugin at startup.
+---@return string[]
+function M.actions()
+  local names = vim.tbl_keys(defaults.keymaps)
+  table.sort(names)
+  return names
+end
+
 --- Replace the configuration with the defaults merged with `opts`. Invalid input raises immediately.
 ---@param opts? table
 ---@return PdfView.Config
