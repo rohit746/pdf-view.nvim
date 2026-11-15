@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-15
+
 ### Added
 
 - A Lua API to drive a viewer without its keys, so `keymaps = false` no longer leaves it unusable:
@@ -398,7 +400,8 @@ First release.
   colour setup.
 - Configuration with validation: unknown or mistyped options raise immediately.
 
-[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/rohit746/pdf-view.nvim/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rohit746/pdf-view.nvim/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rohit746/pdf-view.nvim/compare/v0.5.0...v0.5.1
